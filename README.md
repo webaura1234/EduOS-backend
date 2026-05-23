@@ -30,12 +30,12 @@ make dev
 ## Architecture
 
 ```
-URL → View → Serializer (validate) → Service or Selector → Model → Serializer (response) → View
+URL → View → Serializer (validate) → Interactor or Query → Model → Serializer (response) → View
 ```
 
-- **Views**: Thin controllers — auth, permissions, call service/selector, return response
-- **Services**: Write / business logic — create, update, delete, workflows, external APIs
-- **Selectors**: Read logic — optimized queries, filters, lists, detail fetches
+- **Views**: Thin controllers — auth, permissions, call interactor/query, return response
+- **Interactors**: Business logic — validation, workflow orchestration, external APIs
+- **Queries**: ALL Database operations — reads, creates, updates, deletes (ORM encapsulation)
 - **Serializers**: Input validation and output shape for the API
 
 ## Project Structure
@@ -80,8 +80,8 @@ apps/<app>/
 ├── models/           # Database schema
 ├── serializers/      # Input validation & output shape
 ├── views/            # Thin controllers
-├── services/         # Write / business logic
-├── selectors/        # Read / query logic
+├── interactors/      # Business logic
+├── queries/          # ALL Database operations (ORM)
 ├── tests/            # Tests + factories
 ├── migrations/
 ├── management/commands/
