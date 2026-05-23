@@ -2,7 +2,6 @@
 URL configuration for the attendance app.
 """
 
-from django.urls import path
 
 app_name = "attendance"
 

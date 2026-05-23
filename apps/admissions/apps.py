@@ -8,4 +8,4 @@ class AdmissionsConfig(AppConfig):
     verbose_name = "Admissions"
 
     def ready(self):
-        import apps.admissions.signals  # noqa: F401
+        pass  # TODO: import apps.admissions.signals when created

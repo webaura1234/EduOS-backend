@@ -8,4 +8,4 @@ class AttendanceConfig(AppConfig):
     verbose_name = "Attendance"
 
     def ready(self):
-        import apps.attendance.signals  # noqa: F401
+        pass  # TODO: import apps.attendance.signals when created

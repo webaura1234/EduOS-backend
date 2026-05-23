@@ -8,4 +8,4 @@ class AnalyticsConfig(AppConfig):
     verbose_name = "Analytics & Audit"
 
     def ready(self):
-        import apps.analytics.signals  # noqa: F401
+        pass  # TODO: import apps.analytics.signals when created

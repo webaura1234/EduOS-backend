@@ -8,4 +8,4 @@ class HrConfig(AppConfig):
     verbose_name = "HR & Payroll"
 
     def ready(self):
-        import apps.hr.signals  # noqa: F401
+        pass  # TODO: import apps.hr.signals when created

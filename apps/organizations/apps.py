@@ -8,4 +8,4 @@ class OrganizationsConfig(AppConfig):
     verbose_name = "Organizations & Tenancy"
 
     def ready(self):
-        import apps.organizations.signals  # noqa: F401
+        pass  # TODO: import apps.organizations.signals when created

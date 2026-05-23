@@ -8,4 +8,4 @@ class CommunicationsConfig(AppConfig):
     verbose_name = "Communications"
 
     def ready(self):
-        import apps.communications.signals  # noqa: F401
+        pass  # TODO: import apps.communications.signals when created

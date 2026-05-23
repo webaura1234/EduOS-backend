@@ -6,8 +6,8 @@ Environment-specific overrides live in dev.py, staging.py, and prod.py.
 """
 
 import os
-from pathlib import Path
 from datetime import timedelta
+from pathlib import Path
 
 # ──────────────────────────────────────────────
 # Paths
@@ -22,6 +22,9 @@ DEBUG = False
 ALLOWED_HOSTS = []
 
 # ──────────────────────────────────────────────
+# Custom User Model
+AUTH_USER_MODEL = "accounts.User"
+
 # Application definition
 # ──────────────────────────────────────────────
 DJANGO_APPS = [

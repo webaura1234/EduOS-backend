@@ -8,4 +8,4 @@ class IntegrationsConfig(AppConfig):
     verbose_name = "Integrations"
 
     def ready(self):
-        import apps.integrations.signals  # noqa: F401
+        pass  # TODO: import apps.integrations.signals when created

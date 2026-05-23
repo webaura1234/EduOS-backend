@@ -8,4 +8,4 @@ class ExaminationsConfig(AppConfig):
     verbose_name = "Examinations & Assignments"
 
     def ready(self):
-        import apps.examinations.signals  # noqa: F401
+        pass  # TODO: import apps.examinations.signals when created
