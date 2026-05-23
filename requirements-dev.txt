@@ -1,0 +1,26 @@
+# ──────────────────────────────────────────────
+# EduOS Backend — Development Dependencies
+# ──────────────────────────────────────────────
+
+-r requirements.txt
+
+# Testing
+pytest>=8.3,<9.0
+pytest-django>=4.9,<5.0
+pytest-cov>=5.0,<6.0
+factory-boy>=3.3,<4.0
+faker>=28.0,<29.0
+
+# Linting & Formatting
+ruff>=0.6,<1.0
+black>=24.8,<25.0
+isort>=5.13,<6.0
+mypy>=1.11,<2.0
+
+# Debug
+django-debug-toolbar>=4.4,<5.0
+ipython>=8.27,<9.0
+ipdb>=0.13,<1.0
+
+# Migration safety
+django-migration-linter>=5.1,<6.0
