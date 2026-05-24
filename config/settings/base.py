@@ -116,11 +116,6 @@ DATABASES = {
 }
 
 # ──────────────────────────────────────────────
-# Custom User Model
-# ──────────────────────────────────────────────
-AUTH_USER_MODEL = "accounts.User"
-
-# ──────────────────────────────────────────────
 # Password validation
 # ──────────────────────────────────────────────
 AUTH_PASSWORD_VALIDATORS = [
@@ -149,7 +144,7 @@ MEDIA_ROOT = BASE_DIR / "media"
 # ──────────────────────────────────────────────
 # Default primary key
 # ──────────────────────────────────────────────
-DEFAULT_AUTO_FIELD = "django.db.models.UUIDField"
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # ──────────────────────────────────────────────
 # Django REST Framework
