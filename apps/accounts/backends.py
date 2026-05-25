@@ -1,0 +1,102 @@
+"""
+EduOS authentication backend.
+
+EduOSAuthBackend handles role-based login identifier resolution:
+  - super_admin, admin, parent  → login via phone number
+  - faculty                     → login via custom_login_id (Employee ID)
+  - student                     → login via custom_login_id (Roll Number)
+"""
+
+import logging
+
+from django.contrib.auth.backends import ModelBackend
+
+from apps.accounts.models.user import Role, User
+
+logger = logging.getLogger("apps.accounts.backends")
+
+# Roles that use phone number as login identifier
+PHONE_LOGIN_ROLES = {Role.SUPER_ADMIN, Role.ADMIN, Role.PARENT}
+
+# Roles that use custom_login_id as login identifier
+CUSTOM_ID_LOGIN_ROLES = {Role.FACULTY, Role.STUDENT}
+
+
+class EduOSAuthBackend(ModelBackend):
+    """
+    Custom authentication backend for EduOS.
+
+    authenticate() resolves the correct User based on role + identifier + tenant.
+    Inherits has_perm / has_module_perms from ModelBackend.
+    """
+
+    def authenticate(self, request, identifier: str, password: str, role: str, tenant_id: str):
+        """
+        Look up a User matching the identifier for the given role and tenant,
+        then verify the password.
+
+        Parameters
+        ----------
+        identifier : str
+            Phone number (for admin/parent) or custom_login_id (for faculty/student).
+        password : str
+            Plain-text password to verify.
+        role : str
+            One of Role.choices values.
+        tenant_id : str
+            UUID of the Tenant this user belongs to.
+
+        Returns
+        -------
+        User | None
+            Authenticated User or None if credentials are wrong.
+        """
+        if not all([identifier, password, role, tenant_id]):
+            return None
+
+        user = self._fetch_user(identifier, role, tenant_id)
+
+        if user is None:
+            logger.debug(
+                "Auth failed: no user found for identifier=%s role=%s tenant=%s",
+                identifier, role, tenant_id,
+            )
+            return None
+
+        if not user.check_password(password):
+            logger.debug(
+                "Auth failed: wrong password for user=%s", user.id
+            )
+            return None
+
+        return user
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _fetch_user(identifier: str, role: str, tenant_id: str) -> User | None:
+        """Return the User matching identifier+role+tenant, or None."""
+        base_qs = User.objects.filter(
+            tenant_id=tenant_id,
+            role=role,
+            is_active=True,
+        )
+
+        try:
+            if role in PHONE_LOGIN_ROLES:
+                return base_qs.get(phone=identifier)
+            elif role in CUSTOM_ID_LOGIN_ROLES:
+                return base_qs.get(custom_login_id=identifier)
+            else:
+                logger.warning("Unknown role '%s' passed to EduOSAuthBackend", role)
+                return None
+        except User.DoesNotExist:
+            return None
+        except User.MultipleObjectsReturned:
+            logger.error(
+                "Multiple users found for identifier=%s role=%s tenant=%s",
+                identifier, role, tenant_id,
+            )
+            return None

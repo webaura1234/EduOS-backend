@@ -1,38 +1,39 @@
 """
 Custom authentication backends for the EduOS platform.
 
-Provides a stub ``JWTAuthentication`` class referenced by
-``REST_FRAMEWORK["DEFAULT_AUTHENTICATION_CLASSES"]``.  The full JWT
-verification logic (signature validation, token refresh, blacklisting)
-will be added in a later sprint; this stub lets Django boot and returns
-an ``AuthenticationFailed`` response for any request that carries a
-Bearer token.
+JWTAuthentication — full implementation using PyJWT.
+
+Reads the Authorization: Bearer <token> header, verifies the
+access token signature and expiry, fetches the User from DB,
+and returns (user, payload) for DRF to attach to request.user.
 """
 
 import logging
 
+from django.contrib.auth import get_user_model
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
 
+from apps.accounts.tokens import decode_access_token
+
 logger = logging.getLogger("apps.core.authentication")
+
+User = get_user_model()
 
 
 class JWTAuthentication(BaseAuthentication):
     """
-    JSON Web Token authentication backend (stub).
+    JSON Web Token authentication backend.
 
-    Behaviour
-    ~~~~~~~~~
-    * Reads the ``Authorization: Bearer <token>`` header.
-    * If no ``Authorization`` header is present the request is treated as
-      unauthenticated (returns ``None`` so DRF can try other backends or
-      fall through to permission checks).
-    * If a Bearer token **is** present, raises ``AuthenticationFailed``
-      because the full verification pipeline is not yet implemented.
+    Flow:
+      1. Extract Bearer token from Authorization header.
+      2. Decode and verify the access token (signature + expiry).
+      3. Look up the User by sub claim (UUID).
+      4. Verify user.is_active = True.
+      5. Return (user, payload) — DRF attaches user to request.user.
 
-    Once the JWT verification layer is complete this class will decode
-    the token, validate the signature against ``settings.JWT``, and
-    return ``(user, validated_token)``.
+    Returns None (anonymous) if no Authorization header is present,
+    allowing public endpoints to pass through.
     """
 
     AUTH_HEADER_TYPE = "Bearer"
@@ -40,19 +41,10 @@ class JWTAuthentication(BaseAuthentication):
 
     def authenticate(self, request):
         """
-        Authenticate the request and return a ``(user, auth)`` tuple or
-        ``None``.
+        Authenticate the request.
 
-        Returns
-        -------
-        tuple or None
-            ``None`` when no credentials are supplied (anonymous request).
-
-        Raises
-        ------
-        AuthenticationFailed
-            When a Bearer token is present but cannot be validated (stub
-            behaviour — always fails until the full JWT flow is built).
+        Returns (user, payload) on success, None if no token present.
+        Raises AuthenticationFailed for invalid/expired tokens.
         """
         auth_header = request.META.get(self.AUTH_HEADER_NAME, "")
 
@@ -66,23 +58,33 @@ class JWTAuthentication(BaseAuthentication):
 
         if len(parts) != 2:
             raise AuthenticationFailed(
-                "Invalid Authorization header. Expected 'Bearer <token>'."
+                "Invalid Authorization header format. Expected: 'Bearer <token>'."
             )
 
         token = parts[1]
 
-        # ── Stub: full verification not yet implemented ──
+        # Decode and verify the access token
+        payload = decode_access_token(token)
+
+        # Fetch user from DB
+        user_id = payload.get("sub")
+        try:
+            user = User.objects.select_related("tenant", "branch").get(pk=user_id)
+        except User.DoesNotExist:
+            raise AuthenticationFailed("User not found.")
+
+        if not user.is_active:
+            raise AuthenticationFailed("User account is inactive.")
+
         logger.debug(
-            "JWT token received but verification is not yet implemented."
-        )
-        raise AuthenticationFailed(
-            "JWT authentication is not yet configured. "
-            "Please complete the JWT verification setup."
+            "JWT auth: user=%s role=%s tenant=%s",
+            user_id,
+            user.role,
+            user.tenant_id,
         )
 
+        return (user, payload)
+
     def authenticate_header(self, request):
-        """
-        Return a string to be used as the ``WWW-Authenticate`` header in
-        a ``401`` response.
-        """
+        """Return WWW-Authenticate header value for 401 responses."""
         return self.AUTH_HEADER_TYPE

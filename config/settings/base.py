@@ -25,6 +25,11 @@ ALLOWED_HOSTS = []
 # Custom User Model
 AUTH_USER_MODEL = "accounts.User"
 
+# Authentication backends
+AUTHENTICATION_BACKENDS = [
+    "apps.accounts.backends.EduOSAuthBackend",
+]
+
 # Application definition
 # ──────────────────────────────────────────────
 DJANGO_APPS = [
@@ -155,6 +160,7 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
+        "apps.accounts.permissions.MustChangePasswordPermission",
     ],
     "DEFAULT_PAGINATION_CLASS": "apps.core.pagination.StandardPagination",
     "PAGE_SIZE": 20,
