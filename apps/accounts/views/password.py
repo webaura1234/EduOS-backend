@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Password views — ForceChangePassword, OTPRequest, OTPVerify.
 """
@@ -7,6 +9,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.accounts.dtos import MessageDTO
 from apps.accounts.interactors.password import (
     force_change_password,
     request_otp_reset,
@@ -28,7 +31,7 @@ class ForceChangePasswordView(APIView):
     """
     permission_classes = [IsAuthenticated]
 
-    def post(self, request):
+    def post(self, request) -> Response[MessageDTO]:
         serializer = ForceChangePasswordSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -40,7 +43,7 @@ class ForceChangePasswordView(APIView):
         )
 
         return Response(
-            {"detail": "Password changed successfully. Please log in again."},
+            MessageDTO(detail="Password changed successfully. Please log in again."),
             status=status.HTTP_200_OK,
         )
 
@@ -56,7 +59,7 @@ class OTPRequestView(APIView):
     permission_classes = [AllowAny]
     throttle_scope = "auth"
 
-    def post(self, request):
+    def post(self, request) -> Response[MessageDTO]:
         serializer = OTPRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -67,7 +70,7 @@ class OTPRequestView(APIView):
         )
 
         return Response(
-            {"detail": "If a matching account was found, an OTP has been sent."},
+            MessageDTO(detail="If a matching account was found, an OTP has been sent."),
             status=status.HTTP_200_OK,
         )
 
@@ -82,7 +85,7 @@ class OTPVerifyView(APIView):
     permission_classes = [AllowAny]
     throttle_scope = "auth"
 
-    def post(self, request):
+    def post(self, request) -> Response[MessageDTO]:
         serializer = OTPVerifySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -95,6 +98,6 @@ class OTPVerifyView(APIView):
         )
 
         return Response(
-            {"detail": "Password reset successful. Please log in with your new password."},
+            MessageDTO(detail="Password reset successful. Please log in with your new password."),
             status=status.HTTP_200_OK,
         )

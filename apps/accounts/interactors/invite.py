@@ -16,6 +16,8 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
 
+from apps.accounts.dtos import InviteAcceptedDTO, InviteCreatedDTO
+
 from apps.accounts.models.token import InviteToken
 from apps.accounts.models.user import Role, User
 from apps.accounts.queries.user import get_valid_invite
@@ -45,7 +47,7 @@ def create_and_send_invite(
     email: str = None,
     tenant_id,
     branch_id=None,
-) -> dict:
+) -> InviteCreatedDTO:
     """
     Create a new User and issue an InviteToken sent via SMS.
 
@@ -101,10 +103,10 @@ def create_and_send_invite(
         "Invite created: user=%s role=%s by=%s", user.id, role, created_by.id
     )
 
-    return {
-        "user_id": str(user.id),
-        "invite_token": str(invite.token),
-    }
+    return InviteCreatedDTO(
+        user_id=user.id,
+        invite_token=invite.token,
+    )
 
 
 def _send_invite_sms(phone: str, token: str, user: User) -> None:
@@ -153,7 +155,7 @@ def accept_invite(
     new_password: str,
     device_info: str = "",
     ip_address: str = None,
-) -> dict:
+) -> InviteAcceptedDTO:
     """
     Accept an invite: validate token, set password, return token pair.
 
@@ -179,7 +181,7 @@ def accept_invite(
     # Set password
     user.set_password(new_password)
     user.must_change_password = False
-    user.save(update_fields=["password", "must_change_password", "updated_at"])
+    user.save(update_fields=["password", "must_change_password"])
 
     # Mark invite as used
     invite.is_used = True
@@ -195,10 +197,9 @@ def accept_invite(
 
     logger.info("Invite accepted: user=%s role=%s", user.id, user.role)
 
-    return {
-        "access": access_token,
-        "refresh": refresh_token_str,
-        "user_id": str(user.id),
-        "role": user.role,
-        "must_change_password": False,
-    }
+    return InviteAcceptedDTO(
+        access=access_token,
+        refresh=refresh_token_str,
+        user_id=user.id,
+        role=user.role,
+    )

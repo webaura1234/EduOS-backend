@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Auth views — Login, Refresh, Logout, Me.
 
@@ -9,13 +11,17 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.accounts.dtos import (
+    LoginResponseDTO,
+    MessageDTO,
+    TokenPairDTO,
+    UserProfileDTO,
+)
 from apps.accounts.interactors.auth import login, logout, refresh_tokens
 from apps.accounts.serializers.auth import (
     LoginSerializer,
     LogoutSerializer,
-    MeSerializer,
     RefreshSerializer,
-    TokenPairSerializer,
 )
 
 
@@ -38,12 +44,12 @@ class LoginView(APIView):
     permission_classes = [AllowAny]
     throttle_scope = "auth"
 
-    def post(self, request):
+    def post(self, request) -> Response[LoginResponseDTO]:
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
-        result = login(
+        result: LoginResponseDTO = login(
             identifier=data["identifier"],
             password=data["password"],
             role=data["role"],
@@ -66,11 +72,11 @@ class RefreshView(APIView):
     permission_classes = [AllowAny]
     throttle_scope = "auth"
 
-    def post(self, request):
+    def post(self, request) -> Response[TokenPairDTO]:
         serializer = RefreshSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        result = refresh_tokens(
+        result: TokenPairDTO = refresh_tokens(
             refresh_token_str=serializer.validated_data["refresh"],
             device_info=request.META.get("HTTP_USER_AGENT", ""),
             ip_address=_get_client_ip(request),
@@ -88,13 +94,15 @@ class LogoutView(APIView):
     """
     permission_classes = [IsAuthenticated]
 
-    def post(self, request):
+    def post(self, request) -> Response[MessageDTO]:
         serializer = LogoutSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         logout(refresh_token_str=serializer.validated_data["refresh"])
 
-        return Response({"detail": "Logged out successfully."}, status=status.HTTP_200_OK)
+        return Response(
+            MessageDTO(detail="Logged out successfully."), status=status.HTTP_200_OK
+        )
 
 
 class MeView(APIView):
@@ -106,6 +114,17 @@ class MeView(APIView):
     """
     permission_classes = [IsAuthenticated]
 
-    def get(self, request):
-        serializer = MeSerializer(request.user)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+    def get(self, request) -> Response[UserProfileDTO]:
+        user = request.user
+        dto = UserProfileDTO(
+            id=user.id,
+            role=user.role,
+            full_name=user.full_name,
+            email=user.email,
+            phone=user.phone,
+            tenant_id=user.tenant_id,
+            branch_id=user.branch_id,
+            must_change_password=user.must_change_password,
+            date_joined=user.date_joined,
+        )
+        return Response(dto, status=status.HTTP_200_OK)

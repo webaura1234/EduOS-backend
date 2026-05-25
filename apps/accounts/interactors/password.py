@@ -70,7 +70,7 @@ def force_change_password(user, current_password: str, new_password: str) -> Non
     # Set new password and clear the flag
     user.set_password(new_password)
     user.must_change_password = False
-    user.save(update_fields=["password", "must_change_password", "updated_at"])
+    user.save(update_fields=["password", "must_change_password"])
 
     # Revoke all existing refresh tokens → forces re-login everywhere
     revoked_count = revoke_all_user_tokens(user)
@@ -194,7 +194,7 @@ def verify_otp_and_reset(phone: str, otp: str, new_password: str, tenant_id: str
 
     user.set_password(new_password)
     user.must_change_password = False
-    user.save(update_fields=["password", "must_change_password", "updated_at"])
+    user.save(update_fields=["password", "must_change_password"])
 
     # Revoke all refresh tokens → force re-login
     revoke_all_user_tokens(user)

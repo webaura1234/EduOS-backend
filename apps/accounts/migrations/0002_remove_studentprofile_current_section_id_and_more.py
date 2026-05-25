@@ -13,6 +13,11 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        # Remove constraint first before removing the field it references
+        migrations.RemoveConstraint(
+            model_name="user",
+            name="unique_custom_login_id_per_tenant",
+        ),
         migrations.RemoveField(
             model_name="studentprofile",
             name="current_section_id",
@@ -58,10 +63,6 @@ class Migration(migrations.Migration):
                 related_name="users",
                 to="organizations.tenant",
             ),
-        ),
-        migrations.RemoveConstraint(
-            model_name="user",
-            name="unique_custom_login_id_per_tenant",
         ),
         migrations.AddConstraint(
             model_name="user",

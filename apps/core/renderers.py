@@ -47,10 +47,23 @@ class StandardJSONRenderer(JSONRenderer):
 
         is_success = 200 <= status_code < 400
 
+        # Helper to recursively convert dataclasses/DTOs to serializable structures
+        from dataclasses import is_dataclass, asdict
+        def serialize_data(obj):
+            if hasattr(obj, "to_dict") and callable(obj.to_dict):
+                return obj.to_dict()
+            if is_dataclass(obj):
+                return asdict(obj)
+            if isinstance(obj, dict):
+                return {k: serialize_data(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [serialize_data(item) for item in obj]
+            return obj
+
         if is_success:
             envelope = {
                 "success": True,
-                "data": data,
+                "data": serialize_data(data),
                 "message": "OK",
             }
         else:

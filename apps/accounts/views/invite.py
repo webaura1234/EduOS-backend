@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Invite views — CreateInvite (admin) and AcceptInvite (new user).
 """
@@ -7,6 +9,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.accounts.dtos import InviteAcceptedDTO, InviteCreatedDTO
 from apps.accounts.interactors.invite import accept_invite, create_and_send_invite
 from apps.accounts.permissions import IsAdminOrSuperAdmin
 from apps.accounts.serializers.invite import (
@@ -31,7 +34,7 @@ class CreateInviteView(APIView):
     """
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
 
-    def post(self, request):
+    def post(self, request) -> Response[InviteCreatedDTO]:
         serializer = CreateInviteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -61,7 +64,7 @@ class AcceptInviteView(APIView):
     """
     permission_classes = [AllowAny]
 
-    def post(self, request):
+    def post(self, request) -> Response[InviteAcceptedDTO]:
         serializer = AcceptInviteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data

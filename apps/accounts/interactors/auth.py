@@ -3,12 +3,15 @@ Auth interactor — login, token refresh, logout.
 
 All business logic for the core auth flow lives here.
 Views call these functions; DB access goes through queries/.
+Interactors return DTOs — never raw dicts.
 """
 
 import logging
 
 from django.contrib.auth import authenticate
 from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
+
+from apps.accounts.dtos import LoginResponseDTO, TokenPairDTO
 
 from apps.accounts.constants import (
     LOGIN_ATTEMPT_WINDOW_MINUTES,
@@ -37,7 +40,7 @@ def login(
     tenant_id: str,
     device_info: str = "",
     ip_address: str = None,
-) -> dict:
+) -> LoginResponseDTO:
     """
     Authenticate a user and return a token pair.
 
@@ -114,16 +117,16 @@ def login(
 
     logger.info("Login success: user=%s role=%s", user.id, user.role)
 
-    return {
-        "access": access_token,
-        "refresh": refresh_token_str,
-        "must_change_password": user.must_change_password,
-        "user_id": str(user.id),
-        "role": user.role,
-    }
+    return LoginResponseDTO(
+        access=access_token,
+        refresh=refresh_token_str,
+        must_change_password=user.must_change_password,
+        user_id=user.id,
+        role=user.role,
+    )
 
 
-def refresh_tokens(refresh_token_str: str, device_info: str = "", ip_address: str = None) -> dict:
+def refresh_tokens(refresh_token_str: str, device_info: str = "", ip_address: str = None) -> TokenPairDTO:
     """
     Rotate a refresh token and return a new token pair.
 
@@ -157,10 +160,10 @@ def refresh_tokens(refresh_token_str: str, device_info: str = "", ip_address: st
 
     logger.info("Token rotated: user=%s", user.id)
 
-    return {
-        "access": new_access,
-        "refresh": new_refresh_str,
-    }
+    return TokenPairDTO(
+        access=new_access,
+        refresh=new_refresh_str,
+    )
 
 
 def logout(refresh_token_str: str) -> None:
