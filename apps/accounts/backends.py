@@ -30,10 +30,22 @@ class EduOSAuthBackend(ModelBackend):
     Inherits has_perm / has_module_perms from ModelBackend.
     """
 
-    def authenticate(self, request, identifier: str, password: str, role: str, tenant_id: str):
+    def authenticate(
+        self,
+        request,
+        username=None,
+        password=None,
+        identifier=None,
+        role=None,
+        tenant_id=None,
+        **kwargs,
+    ):
         """
         Look up a User matching the identifier for the given role and tenant,
         then verify the password.
+
+        Used by the REST API (identifier + role + tenant_id). Django admin uses
+        ModelBackend with USERNAME_FIELD=email instead.
 
         Parameters
         ----------

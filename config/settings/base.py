@@ -26,7 +26,10 @@ ALLOWED_HOSTS = []
 AUTH_USER_MODEL = "accounts.User"
 
 # Authentication backends
+# ModelBackend: Django admin + createsuperuser (email + password)
+# EduOSAuthBackend: API login (identifier + role + tenant_id)
 AUTHENTICATION_BACKENDS = [
+    "django.contrib.auth.backends.ModelBackend",
     "apps.accounts.backends.EduOSAuthBackend",
 ]
 
