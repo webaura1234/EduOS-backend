@@ -2,7 +2,7 @@ import os
 import django
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings.dev')
-os.environ['USE_SQLITE'] = 'true'
+# Let it respect the .env database configurations
 django.setup()
 
 from apps.organizations.models.tenant import Tenant, TenantSettings, Branch

@@ -23,6 +23,11 @@ if _use_postgres:
     DATABASES["default"]["PASSWORD"] = os.environ.get("DB_PASSWORD", "")  # noqa: F405
     DATABASES["default"]["HOST"] = os.environ.get("DB_HOST", "localhost")  # noqa: F405
     DATABASES["default"]["PORT"] = os.environ.get("DB_PORT", "5432")  # noqa: F405
+    # SSL options for cloud-hosted Postgres (e.g. Neon DB)
+    _sslmode = os.environ.get("DB_SSLMODE", "require")
+    if _sslmode and _sslmode != "disable":
+        DATABASES["default"].setdefault("OPTIONS", {})  # noqa: F405
+        DATABASES["default"]["OPTIONS"]["sslmode"] = _sslmode
 else:
     DATABASES = {
         "default": {
