@@ -25,6 +25,11 @@ ALLOWED_HOSTS = []
 # Custom User Model
 AUTH_USER_MODEL = "accounts.User"
 
+# email is USERNAME_FIELD but intentionally NOT globally unique — it is unique
+# per tenant (see accounts.User.Meta). Real API auth uses the custom backend
+# (phone / custom_login_id), so the non-unique-username warning is expected.
+SILENCED_SYSTEM_CHECKS = ["auth.W004"]
+
 # Authentication backends
 # ModelBackend: Django admin + createsuperuser (email + password)
 # EduOSAuthBackend: API login (identifier + role + tenant_id)

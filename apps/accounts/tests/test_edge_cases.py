@@ -197,6 +197,50 @@ def test_ec_auth_25_lockout_scoped_to_user(tenant, branch):
     assert result.access
 
 
+# ── Cross-tenant identity: same email allowed in different tenants ─────────────
+def test_same_email_allowed_across_tenants():
+    """A person can be a parent in School A and faculty in School B (different tenants)."""
+    school_a = TenantFactory()
+    school_b = TenantFactory()
+    branch_a = BranchFactory(tenant=school_a)
+    branch_b = BranchFactory(tenant=school_b)
+
+    UserFactory(role=Role.PARENT, tenant=school_a, branch=branch_a,
+                email="kavitha@example.com", phone="+919820000001", custom_login_id=None)
+    # Same email, different tenant → must be allowed.
+    second = UserFactory(role=Role.FACULTY, tenant=school_b, branch=branch_b,
+                         email="kavitha@example.com", phone="+919820000002",
+                         custom_login_id="FAC-XT")
+    assert second.pk is not None
+    assert User.objects.filter(email="kavitha@example.com").count() == 2
+
+
+def test_same_email_allowed_for_linked_roles_in_tenant():
+    """One person with two roles in the same school (faculty + parent) may share an email."""
+    tenant = TenantFactory()
+    branch = BranchFactory(tenant=tenant)
+    group = uuid.uuid4()
+    UserFactory(role=Role.FACULTY, tenant=tenant, branch=branch, email="kavitha@school.com",
+                phone="+919821000001", custom_login_id="FAC-K", linked_user_group_id=group)
+    # Same email, different role, same tenant → allowed (linked person).
+    parent = UserFactory(role=Role.PARENT, tenant=tenant, branch=branch, email="kavitha@school.com",
+                         phone="+919821000001", custom_login_id=None, linked_user_group_id=group)
+    assert parent.pk is not None
+
+
+def test_duplicate_email_blocked_for_same_role_in_tenant():
+    """Two DISTINCT users of the same role in one tenant cannot share an email."""
+    from django.db import IntegrityError
+
+    tenant = TenantFactory()
+    branch = BranchFactory(tenant=tenant)
+    UserFactory(role=Role.FACULTY, tenant=tenant, branch=branch,
+                email="dup@example.com", phone="+919822000001", custom_login_id="FAC-D1")
+    with pytest.raises(IntegrityError):
+        UserFactory(role=Role.FACULTY, tenant=tenant, branch=branch,
+                    email="dup@example.com", phone="+919822000002", custom_login_id="FAC-D2")
+
+
 # ── EC-AUTH-26: parent portal disabled → 403 ──────────────────────────────────
 def test_ec_auth_26_parent_portal_disabled():
     tenant = TenantFactory(parent_access_enabled=False)

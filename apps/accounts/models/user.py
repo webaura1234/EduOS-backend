@@ -73,7 +73,9 @@ class User(AbstractBaseUser, PermissionsMixin):
     # ── Personal identity ────────────────────────────────────────────
     first_name = models.CharField(max_length=100)
     last_name = models.CharField(max_length=100, blank=True, default="")
-    email = models.EmailField(blank=True, null=True, unique=True)
+    # Email is unique PER TENANT, not globally — the same person may exist in
+    # multiple institutions (e.g. parent at School A, faculty at School B).
+    email = models.EmailField(blank=True, null=True)
     avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)
 
     # ── Login identifiers ────────────────────────────────────────────
@@ -127,12 +129,22 @@ class User(AbstractBaseUser, PermissionsMixin):
         db_table = "accounts_user"
         verbose_name = "User"
         verbose_name_plural = "Users"
-        # A custom_login_id must be unique within a tenant
+        # Identifiers are unique within a tenant, NOT across the whole platform,
+        # so the same real person can hold accounts in multiple institutions.
         constraints = [
             models.UniqueConstraint(
                 fields=["tenant", "custom_login_id"],
                 condition=models.Q(custom_login_id__isnull=False),
                 name="unique_custom_login_id_per_tenant",
+            ),
+            # Email is unique per (tenant, role), NOT per tenant: the same person
+            # may hold two roles in one school (faculty + parent, linked via
+            # linked_user_group_id) and legitimately share an email across those
+            # rows — while two distinct same-role users still cannot collide.
+            models.UniqueConstraint(
+                fields=["tenant", "role", "email"],
+                condition=models.Q(email__isnull=False),
+                name="unique_email_per_tenant_role",
             ),
         ]
 
