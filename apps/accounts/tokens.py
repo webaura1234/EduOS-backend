@@ -17,6 +17,7 @@ from django.utils import timezone
 from rest_framework.exceptions import AuthenticationFailed
 
 from apps.accounts.models.token import RefreshToken
+from apps.accounts.queries.session import create_refresh_token_record
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -121,8 +122,8 @@ def generate_refresh_token(user, device_info: str = "", ip_address: str = None) 
 
     token_str = jwt.encode(payload, _signing_key(), algorithm=_algorithm())
 
-    # Persist to DB for revocation support
-    db_record = RefreshToken.objects.create(
+    # Persist to DB for revocation support (DB access lives in queries/)
+    db_record = create_refresh_token_record(
         user=user,
         token=token_str,
         expires_at=exp,

@@ -3,7 +3,10 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 
-from apps.organizations.models.tenant import Tenant, TenantSettings
+from apps.organizations.queries.tenant import (
+    get_active_tenant_by_subdomain,
+    get_tenant_id_labels,
+)
 
 
 class TenantConfigView(APIView):
@@ -24,26 +27,16 @@ class TenantConfigView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        try:
-            tenant = Tenant.objects.get(subdomain__iexact=subdomain.strip(), status="active")
-        except Tenant.DoesNotExist:
+        tenant = get_active_tenant_by_subdomain(subdomain)
+        if tenant is None:
             return Response(
                 {"error": f"Tenant with subdomain '{subdomain}' not found or inactive"},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # Retrieve configurable labels or fall back to defaults
-        try:
-            settings = tenant.tenant_settings
-            student_id_label = settings.student_id_label
-            faculty_id_label = settings.faculty_id_label
-        except TenantSettings.DoesNotExist:
-            student_id_label = "Roll Number"
-            faculty_id_label = "Employee ID"
+        student_id_label, faculty_id_label = get_tenant_id_labels(tenant)
 
-        logo_url = None
-        if tenant.logo_s3_key:
-            logo_url = tenant.logo_s3_key
+        logo_url = tenant.logo_s3_key or None
 
         return Response(
             {

@@ -14,6 +14,24 @@ from apps.accounts.models.user import User
 logger = logging.getLogger("apps.accounts.queries.session")
 
 
+def create_refresh_token_record(
+    *,
+    user: User,
+    token: str,
+    expires_at,
+    device_info: str = "",
+    ip_address: str = None,
+) -> RefreshToken:
+    """Persist a refresh token record (enables revocation + replay prevention)."""
+    return RefreshToken.objects.create(
+        user=user,
+        token=token,
+        expires_at=expires_at,
+        device_info=device_info,
+        ip_address=ip_address,
+    )
+
+
 def revoke_refresh_token(token_str: str) -> bool:
     """
     Mark a refresh token as revoked.

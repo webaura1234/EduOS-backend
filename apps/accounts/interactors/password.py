@@ -23,12 +23,15 @@ from apps.accounts.constants import (
     OTP_MAX_PER_WINDOW,
     OTP_WINDOW_MINUTES,
 )
-from apps.accounts.models.token import OTPRecord
 from apps.accounts.queries.session import revoke_all_user_tokens
 from apps.accounts.queries.user import (
     count_otps_in_window,
+    create_otp_record,
     get_user_by_phone,
     get_valid_otp,
+    increment_otp_attempt,
+    mark_otp_used,
+    set_user_password,
 )
 from apps.accounts.validators import validate_password_strength
 from datetime import timedelta
@@ -68,9 +71,7 @@ def force_change_password(user, current_password: str, new_password: str) -> Non
         raise ValidationError("New password must be different from the current password.")
 
     # Set new password and clear the flag
-    user.set_password(new_password)
-    user.must_change_password = False
-    user.save(update_fields=["password", "must_change_password"])
+    set_user_password(user, new_password)
 
     # Revoke all existing refresh tokens → forces re-login everywhere
     revoked_count = revoke_all_user_tokens(user)
@@ -148,12 +149,7 @@ def request_otp_reset(phone: str, tenant_id: str) -> None:
     otp_hash = _hash_otp(otp)
     expiry = timezone.now() + timedelta(minutes=OTP_EXPIRY_MINUTES)
 
-    OTPRecord.objects.create(
-        user=user,
-        otp_hash=otp_hash,
-        phone=phone,
-        expires_at=expiry,
-    )
+    create_otp_record(user=user, otp_hash=otp_hash, phone=phone, expires_at=expiry)
 
     # Send OTP
     _send_otp(phone, otp)
@@ -174,14 +170,11 @@ def verify_otp_and_reset(phone: str, otp: str, new_password: str, tenant_id: str
 
     # Verify OTP hash
     if otp_record.otp_hash != _hash_otp(otp):
-        # Increment attempt count
-        otp_record.attempt_count += 1
-        otp_record.save(update_fields=["attempt_count", "updated_at"])
+        increment_otp_attempt(otp_record)
         raise AuthenticationFailed("Incorrect OTP.")
 
     # Mark as used
-    otp_record.is_used = True
-    otp_record.save(update_fields=["is_used", "updated_at"])
+    mark_otp_used(otp_record)
 
     # Get the user
     user = otp_record.user
@@ -192,9 +185,7 @@ def verify_otp_and_reset(phone: str, otp: str, new_password: str, tenant_id: str
     except ValidationError as exc:
         raise ValidationError(exc.messages)
 
-    user.set_password(new_password)
-    user.must_change_password = False
-    user.save(update_fields=["password", "must_change_password"])
+    set_user_password(user, new_password)
 
     # Revoke all refresh tokens → force re-login
     revoke_all_user_tokens(user)

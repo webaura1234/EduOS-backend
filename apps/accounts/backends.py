@@ -13,6 +13,7 @@ import re
 from django.contrib.auth.backends import ModelBackend
 
 from apps.accounts.models.user import Role, User
+from apps.accounts.queries.user import get_active_user_for_login
 
 logger = logging.getLogger("apps.accounts.backends")
 
@@ -103,27 +104,19 @@ class EduOSAuthBackend(ModelBackend):
 
     @staticmethod
     def _fetch_user(identifier: str, role: str, tenant_id: str) -> User | None:
-        """Return the User matching identifier+role+tenant, or None."""
-        base_qs = User.objects.filter(
-            tenant_id=tenant_id,
-            role=role,
-            is_active=True,
-        )
+        """Return the User matching identifier+role+tenant, or None.
 
-        try:
-            if role in PHONE_LOGIN_ROLES:
-                phone = _normalize_phone(identifier)
-                return base_qs.get(phone=phone)
-            elif role in CUSTOM_ID_LOGIN_ROLES:
-                return base_qs.get(custom_login_id=identifier)
-            else:
-                logger.warning("Unknown role '%s' passed to EduOSAuthBackend", role)
-                return None
-        except User.DoesNotExist:
-            return None
-        except User.MultipleObjectsReturned:
-            logger.error(
-                "Multiple users found for identifier=%s role=%s tenant=%s",
-                identifier, role, tenant_id,
+        Resolves which identifier field to use based on role; all DB access is
+        delegated to the queries layer.
+        """
+        if role in PHONE_LOGIN_ROLES:
+            return get_active_user_for_login(
+                tenant_id=tenant_id, role=role, phone=_normalize_phone(identifier)
             )
+        elif role in CUSTOM_ID_LOGIN_ROLES:
+            return get_active_user_for_login(
+                tenant_id=tenant_id, role=role, custom_login_id=identifier
+            )
+        else:
+            logger.warning("Unknown role '%s' passed to EduOSAuthBackend", role)
             return None

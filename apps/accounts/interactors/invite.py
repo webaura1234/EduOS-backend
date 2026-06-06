@@ -18,10 +18,14 @@ from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
 
 from apps.accounts.dtos import InviteAcceptedDTO, InviteCreatedDTO
 
-from apps.accounts.models.token import InviteToken
 from apps.accounts.models.user import Role, User
-from apps.accounts.queries.user import get_valid_invite
-from apps.accounts.queries.session import revoke_all_user_tokens
+from apps.accounts.queries.user import (
+    create_invite_token,
+    create_invited_user,
+    get_valid_invite,
+    mark_invite_used,
+    set_user_password,
+)
 from apps.accounts.tokens import generate_access_token, generate_refresh_token
 from apps.accounts.validators import validate_password_strength
 
@@ -76,7 +80,7 @@ def create_and_send_invite(
         raise ValidationError("Custom login ID (Employee ID / Roll Number) is required for this role.")
 
     # Create user with unusable password (must_change_password=True by default)
-    user = User(
+    user = create_invited_user(
         first_name=first_name,
         last_name=last_name,
         role=role,
@@ -85,16 +89,10 @@ def create_and_send_invite(
         phone=phone,
         custom_login_id=custom_login_id,
         email=email,
-        must_change_password=True,
     )
-    user.set_unusable_password()
-    user.save()
 
     # Create invite token
-    invite = InviteToken.objects.create(
-        user=user,
-        sent_to_phone=phone or "",
-    )
+    invite = create_invite_token(user=user, sent_to_phone=phone or "")
 
     # Send invite SMS (or log in dev)
     _send_invite_sms(phone=phone, token=str(invite.token), user=user)
@@ -179,13 +177,10 @@ def accept_invite(
         raise ValidationError(exc.messages)
 
     # Set password
-    user.set_password(new_password)
-    user.must_change_password = False
-    user.save(update_fields=["password", "must_change_password"])
+    set_user_password(user, new_password)
 
     # Mark invite as used
-    invite.is_used = True
-    invite.save(update_fields=["is_used", "updated_at"])
+    mark_invite_used(invite)
 
     # Issue token pair — user is now logged in
     access_token = generate_access_token(user)
