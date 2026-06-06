@@ -27,6 +27,22 @@ class ForceChangePasswordSerializer(serializers.Serializer):
 class OTPRequestSerializer(serializers.Serializer):
     phone = serializers.CharField()
     tenant_id = serializers.UUIDField()
+    # Required only when the phone matches multiple accounts (EC-AUTH-12 / 20).
+    account_id = serializers.UUIDField(required=False, allow_null=True)
+
+
+class ResetAccountsSerializer(serializers.Serializer):
+    """List the accounts on a phone for the reset account-picker (EC-AUTH-12 / 20)."""
+    phone = serializers.CharField()
+    tenant_id = serializers.UUIDField()
+
+
+class AdminResetPasswordSerializer(serializers.Serializer):
+    """Admin sets a temporary password for a user (EC-AUTH-21)."""
+    # If omitted, the server generates and returns a temp password.
+    temp_password = serializers.CharField(
+        required=False, allow_blank=True, write_only=True, style={"input_type": "password"}
+    )
 
 
 class OTPVerifySerializer(serializers.Serializer):

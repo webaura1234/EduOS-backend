@@ -44,6 +44,31 @@ class LoginResponseDTO:
 
 
 @dataclass
+class LoginResolutionDTO:
+    """
+    Returned by interactors.auth.disambiguate_login().
+
+    Either:
+      - requires_selection=True with `accounts` (role picker, EC-AUTH-11), or
+      - `login` populated with a LoginResponseDTO (single match → logged in).
+    """
+    login: "LoginResponseDTO | None" = None
+    requires_selection: bool = False
+    accounts: list | None = None
+
+    def to_dict(self) -> dict:
+        if self.requires_selection:
+            return {
+                "requires_selection": True,
+                "accounts": self.accounts or [],
+            }
+        return {
+            "requires_selection": False,
+            **(self.login.to_dict() if self.login else {}),
+        }
+
+
+@dataclass
 class TokenPairDTO:
     """
     Returned by interactors.auth.refresh_tokens().
@@ -72,11 +97,13 @@ class InviteCreatedDTO:
     """
     user_id: uuid.UUID
     invite_token: uuid.UUID
+    linked_account_created: bool = False
 
     def to_dict(self) -> dict:
         return {
             "user_id": str(self.user_id),
             "invite_token": str(self.invite_token),
+            "linked_account_created": self.linked_account_created,
         }
 
 

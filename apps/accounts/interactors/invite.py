@@ -11,21 +11,27 @@ Step 2 (New User): accept_invite
 """
 
 import logging
+import uuid
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils import timezone
 from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
 
 from apps.accounts.dtos import InviteAcceptedDTO, InviteCreatedDTO
+from apps.core.exceptions import GoneError
 
 from apps.accounts.models.user import Role, User
 from apps.accounts.queries.user import (
+    assign_linked_group,
     create_invite_token,
     create_invited_user,
-    get_valid_invite,
+    get_invite_by_token,
+    get_users_by_phone_in_tenant,
     mark_invite_used,
     set_user_password,
 )
+from apps.accounts.sms import send_sms
 from apps.accounts.tokens import generate_access_token, generate_refresh_token
 from apps.accounts.validators import validate_password_strength
 
@@ -79,6 +85,9 @@ def create_and_send_invite(
     if role in {Role.FACULTY, Role.STUDENT} and not custom_login_id:
         raise ValidationError("Custom login ID (Employee ID / Roll Number) is required for this role.")
 
+    # EC-AUTH-13: detect an existing account on this phone in the same tenant.
+    existing_on_phone = get_users_by_phone_in_tenant(phone, tenant_id) if phone else []
+
     # Create user with unusable password (must_change_password=True by default)
     user = create_invited_user(
         first_name=first_name,
@@ -91,10 +100,21 @@ def create_and_send_invite(
         email=email,
     )
 
+    # EC-AUTH-13: link the new account to the existing one(s) sharing this phone.
+    linked_account_created = False
+    if existing_on_phone:
+        group_id = next(
+            (u.linked_user_group_id for u in existing_on_phone if u.linked_user_group_id),
+            uuid.uuid4(),
+        )
+        assign_linked_group([*existing_on_phone, user], group_id)
+        linked_account_created = True
+        logger.info("Linked account created: new=%s group=%s", user.id, group_id)
+
     # Create invite token
     invite = create_invite_token(user=user, sent_to_phone=phone or "")
 
-    # Send invite SMS (or log in dev)
+    # Send invite SMS (failures are tolerated — admin can resend)
     _send_invite_sms(phone=phone, token=str(invite.token), user=user)
 
     logger.info(
@@ -104,43 +124,26 @@ def create_and_send_invite(
     return InviteCreatedDTO(
         user_id=user.id,
         invite_token=invite.token,
+        linked_account_created=linked_account_created,
     )
 
 
 def _send_invite_sms(phone: str, token: str, user: User) -> None:
-    """Send the invite link via SMS in prod, or log in dev."""
-    import django.conf as conf
+    """Send the invite link via the circuit-breaker-protected dispatcher.
 
-    invite_url = f"https://app.eduos.in/invite/{token}"  # configurable later
-
-    if conf.settings.DEBUG:
-        logger.info(
-            "📩 [DEV] Invite for %s (%s): %s",
-            user.first_name, phone or "no phone", invite_url,
-        )
+    Failures are swallowed: the user is still created and the admin can resend.
+    """
+    if not phone:
         return
 
-    # Production: MSG91 SMS
+    invite_url = f"https://app.eduos.in/invite/{token}"  # configurable later
     try:
-        import requests
-        requests.post(
-            "https://api.msg91.com/api/sendhttp.php",
-            params={
-                "authkey": conf.settings.MSG91_AUTH_KEY,
-                "mobiles": phone,
-                "message": (
-                    f"Welcome to EduOS! Set your password here: {invite_url} "
-                    f"(expires in 48 hours)"
-                ),
-                "sender": conf.settings.MSG91_SENDER_ID,
-                "route": "4",
-            },
-            timeout=10,
-        ).raise_for_status()
-        logger.info("Invite SMS sent to %s", phone)
-    except Exception as exc:
+        send_sms(
+            phone,
+            f"Welcome to EduOS! Set your password here: {invite_url} (expires in 48 hours)",
+        )
+    except Exception as exc:  # noqa: BLE001 — invite send is best-effort
         logger.error("Failed to send invite SMS to %s: %s", phone, exc)
-        # Don't raise — user is still created, admin can resend manually
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -163,10 +166,14 @@ def accept_invite(
       AuthenticationFailed — token invalid or expired.
       ValidationError      — password doesn't meet strength requirements.
     """
-    # Look up valid invite
-    invite = get_valid_invite(token_uuid)
+    # Look up the invite, distinguishing invalid vs used vs expired (EC-AUTH-08/09)
+    invite = get_invite_by_token(token_uuid)
     if invite is None:
-        raise AuthenticationFailed("Invite link is invalid or has expired.")
+        raise AuthenticationFailed("Invite link is invalid.")
+    if invite.is_used:
+        raise GoneError("This invite link has already been used.")
+    if invite.expires_at < timezone.now():
+        raise GoneError("This invite link has expired.")
 
     user = invite.user
 

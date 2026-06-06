@@ -16,6 +16,13 @@ class LoginSerializer(serializers.Serializer):
     tenant_id = serializers.UUIDField()
 
 
+class DisambiguateLoginSerializer(serializers.Serializer):
+    """Universal login input without a role — backend resolves it (EC-AUTH-11)."""
+    identifier = serializers.CharField()
+    password = serializers.CharField(write_only=True, style={"input_type": "password"})
+    tenant_id = serializers.UUIDField()
+
+
 class TokenPairSerializer(serializers.Serializer):
     """Shared response shape for any endpoint that returns an access + refresh pair."""
     access = serializers.CharField(read_only=True)

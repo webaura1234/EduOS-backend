@@ -28,6 +28,16 @@ class LoginAttempt(BaseModel):
         db_index=True,
         help_text="Phone number or custom_login_id used in the attempt.",
     )
+    user = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.CASCADE,
+        related_name="login_attempts",
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Resolved user for the attempt, if the identifier matched one. "
+                  "Lockout is scoped to this user (EC-AUTH-25).",
+    )
     tenant = models.ForeignKey(
         "organizations.Tenant",
         on_delete=models.CASCADE,
@@ -58,6 +68,7 @@ class LoginAttempt(BaseModel):
         verbose_name_plural = "Login Attempts"
         indexes = [
             models.Index(fields=["identifier", "tenant", "was_successful", "created_at"]),
+            models.Index(fields=["user", "was_successful", "created_at"]),
         ]
         # BaseModel.created_at gives us the timestamp
 

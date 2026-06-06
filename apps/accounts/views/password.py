@@ -12,6 +12,7 @@ from rest_framework.views import APIView
 from apps.accounts.dtos import MessageDTO
 from apps.accounts.interactors.password import (
     force_change_password,
+    list_reset_accounts,
     request_otp_reset,
     verify_otp_and_reset,
 )
@@ -19,6 +20,7 @@ from apps.accounts.serializers.password import (
     ForceChangePasswordSerializer,
     OTPRequestSerializer,
     OTPVerifySerializer,
+    ResetAccountsSerializer,
 )
 
 
@@ -64,15 +66,38 @@ class OTPRequestView(APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
+        account_id = data.get("account_id")
         request_otp_reset(
             phone=data["phone"],
             tenant_id=str(data["tenant_id"]),
+            account_id=str(account_id) if account_id else None,
         )
 
         return Response(
             MessageDTO(detail="If a matching account was found, an OTP has been sent."),
             status=status.HTTP_200_OK,
         )
+
+
+class ResetAccountsView(APIView):
+    """
+    POST /api/v1/auth/password/reset/accounts/
+
+    Return the accounts registered to a phone so the user can pick which to reset
+    when the phone is shared (EC-AUTH-12 / EC-AUTH-20). Public endpoint.
+    """
+    permission_classes = [AllowAny]
+    throttle_scope = "auth"
+
+    def post(self, request) -> Response:
+        serializer = ResetAccountsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        accounts = list_reset_accounts(
+            phone=data["phone"], tenant_id=str(data["tenant_id"])
+        )
+        return Response({"accounts": accounts}, status=status.HTTP_200_OK)
 
 
 class OTPVerifyView(APIView):

@@ -19,6 +19,22 @@ from rest_framework.views import exception_handler as drf_exception_handler
 logger = logging.getLogger("apps.core.exceptions")
 
 
+class GoneError(APIException):
+    """HTTP 410 — the requested resource is no longer available (e.g. a used/expired token)."""
+
+    status_code = status.HTTP_410_GONE
+    default_detail = "This resource is no longer available."
+    default_code = "gone"
+
+
+class ServiceUnavailableError(APIException):
+    """HTTP 503 — a downstream dependency (e.g. the SMS gateway) is temporarily unavailable."""
+
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    default_detail = "Service temporarily unavailable. Please try again in a few minutes."
+    default_code = "service_unavailable"
+
+
 def custom_exception_handler(exc, context):
     """
     Handle exceptions raised during DRF view processing.

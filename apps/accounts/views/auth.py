@@ -17,8 +17,14 @@ from apps.accounts.dtos import (
     TokenPairDTO,
     UserProfileDTO,
 )
-from apps.accounts.interactors.auth import login, logout, refresh_tokens
+from apps.accounts.interactors.auth import (
+    disambiguate_login,
+    login,
+    logout,
+    refresh_tokens,
+)
 from apps.accounts.serializers.auth import (
+    DisambiguateLoginSerializer,
     LoginSerializer,
     LogoutSerializer,
     RefreshSerializer,
@@ -58,6 +64,32 @@ class LoginView(APIView):
             ip_address=_get_client_ip(request),
         )
 
+        return Response(result, status=status.HTTP_200_OK)
+
+
+class LoginDisambiguateView(APIView):
+    """
+    POST /api/v1/auth/login/disambiguate/
+
+    Universal login: identifier + password (no role). Returns either a token pair
+    (single match) or a role picker (phone shared by admin + parent — EC-AUTH-11).
+    Public endpoint. Throttled at the auth scope.
+    """
+    permission_classes = [AllowAny]
+    throttle_scope = "auth"
+
+    def post(self, request) -> Response:
+        serializer = DisambiguateLoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        result = disambiguate_login(
+            identifier=data["identifier"],
+            password=data["password"],
+            tenant_id=str(data["tenant_id"]),
+            device_info=request.META.get("HTTP_USER_AGENT", ""),
+            ip_address=_get_client_ip(request),
+        )
         return Response(result, status=status.HTTP_200_OK)
 
 

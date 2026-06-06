@@ -10,9 +10,11 @@ from datetime import timedelta
 
 from django.utils import timezone
 
+import uuid
+
 from apps.accounts.models.security import LoginAttempt
 from apps.accounts.models.token import InviteToken, OTPRecord, RefreshToken
-from apps.accounts.models.user import User
+from apps.accounts.models.user import PHONE_LOGIN_ROLES, User
 
 logger = logging.getLogger("apps.accounts.queries.user")
 
@@ -49,6 +51,69 @@ def get_user_by_custom_login_id(custom_login_id: str, tenant_id: str) -> User | 
         )
     except User.DoesNotExist:
         return None
+
+
+def get_user_for_token(user_id) -> User | None:
+    """Fetch a user by id for JWT authentication, regardless of is_active state.
+
+    The caller (JWTAuthentication) decides how to treat inactive users so it can
+    return the right error (EC-AUTH-10).
+    """
+    try:
+        return User.objects.select_related("tenant", "branch").get(pk=user_id)
+    except (User.DoesNotExist, ValueError, TypeError):
+        return None
+
+
+def get_user_in_tenant(user_id, tenant_id) -> User | None:
+    """Fetch a user by id constrained to a tenant (admin actions on their own tenant)."""
+    try:
+        return User.objects.select_related("tenant", "branch").get(
+            pk=user_id, tenant_id=tenant_id
+        )
+    except (User.DoesNotExist, ValueError, TypeError):
+        return None
+
+
+def get_phone_login_candidates(phone: str, tenant_id: str) -> list[User]:
+    """Active users in a tenant who log in with this phone (admin/super_admin/parent).
+
+    Used for login disambiguation (EC-AUTH-11).
+    """
+    return list(
+        User.objects.select_related("tenant").filter(
+            phone=phone,
+            tenant_id=tenant_id,
+            role__in=PHONE_LOGIN_ROLES,
+            is_active=True,
+        )
+    )
+
+
+def get_reset_candidates(phone: str, tenant_id: str) -> list[User]:
+    """All active users in a tenant whose registered phone matches.
+
+    Includes faculty/student (whose `phone` may be a guardian's) for password-reset
+    disambiguation (EC-AUTH-12 / EC-AUTH-20).
+    """
+    return list(
+        User.objects.select_related("tenant").filter(
+            phone=phone, tenant_id=tenant_id, is_active=True
+        )
+    )
+
+
+def get_users_by_phone_in_tenant(phone: str, tenant_id: str) -> list[User]:
+    """All users (any state/role) in a tenant with this phone — for invite linking (EC-AUTH-13)."""
+    return list(User.objects.filter(phone=phone, tenant_id=tenant_id))
+
+
+def assign_linked_group(users: list[User], group_id: uuid.UUID) -> None:
+    """Set linked_user_group_id on each user (EC-AUTH-13)."""
+    for user in users:
+        if user.linked_user_group_id != group_id:
+            user.linked_user_group_id = group_id
+            user.save(update_fields=["linked_user_group_id"])
 
 
 def get_active_user_for_login(
@@ -120,6 +185,13 @@ def set_user_password(user: User, raw_password: str) -> None:
     user.save(update_fields=["password", "must_change_password"])
 
 
+def set_temp_password(user: User, raw_password: str) -> None:
+    """Set a temporary password and FORCE a change on next login (EC-AUTH-21)."""
+    user.set_password(raw_password)
+    user.must_change_password = True
+    user.save(update_fields=["password", "must_change_password"])
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Refresh token lookups
 # ─────────────────────────────────────────────────────────────────────────────
@@ -181,15 +253,28 @@ def get_valid_invite(token_uuid) -> InviteToken | None:
     return invite
 
 
+def get_invite_by_token(token_uuid) -> InviteToken | None:
+    """Return an InviteToken by token regardless of used/expired state, or None.
+
+    Used by the accept flow so it can distinguish 'used' from 'expired' and return
+    the correct 410 (EC-AUTH-08 / EC-AUTH-09).
+    """
+    try:
+        return InviteToken.objects.select_related("user").get(token=token_uuid)
+    except InviteToken.DoesNotExist:
+        return None
+
+
 def create_invite_token(user: User, sent_to_phone: str = "") -> InviteToken:
     """Create and return an InviteToken for a user."""
     return InviteToken.objects.create(user=user, sent_to_phone=sent_to_phone)
 
 
 def mark_invite_used(invite: InviteToken) -> None:
-    """Mark an InviteToken as used."""
+    """Mark an InviteToken as used and stamp used_at (EC-AUTH-08)."""
     invite.is_used = True
-    invite.save(update_fields=["is_used", "updated_at"])
+    invite.used_at = timezone.now()
+    invite.save(update_fields=["is_used", "used_at", "updated_at"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -223,11 +308,25 @@ def mark_otp_used(otp_record: OTPRecord) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def count_failed_attempts(identifier: str, tenant_id: str, window_minutes: int) -> int:
-    """Count failed login attempts for identifier+tenant in the last window_minutes."""
+    """Count failed login attempts for identifier+tenant in the last window_minutes.
+
+    Fallback counter for identifiers that don't resolve to a user (enumeration spam).
+    """
     since = timezone.now() - timedelta(minutes=window_minutes)
     return LoginAttempt.objects.filter(
         identifier=identifier,
         tenant_id=tenant_id,
+        user__isnull=True,
+        was_successful=False,
+        created_at__gte=since,
+    ).count()
+
+
+def count_failed_attempts_for_user(user_id, window_minutes: int) -> int:
+    """Count failed login attempts scoped to a specific user (EC-AUTH-25)."""
+    since = timezone.now() - timedelta(minutes=window_minutes)
+    return LoginAttempt.objects.filter(
+        user_id=user_id,
         was_successful=False,
         created_at__gte=since,
     ).count()
@@ -239,12 +338,14 @@ def record_login_attempt(
     ip_address: str,
     was_successful: bool,
     failure_reason: str = "",
+    user: User | None = None,
 ) -> LoginAttempt:
-    """Create and return a LoginAttempt record."""
+    """Create and return a LoginAttempt record (optionally tied to a resolved user)."""
     return LoginAttempt.objects.create(
         identifier=identifier,
         tenant_id=tenant_id,
         ip_address=ip_address,
         was_successful=was_successful,
         failure_reason=failure_reason,
+        user=user,
     )

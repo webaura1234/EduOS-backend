@@ -10,15 +10,13 @@ and returns (user, payload) for DRF to attach to request.user.
 
 import logging
 
-from django.contrib.auth import get_user_model
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
 
+from apps.accounts.queries.user import get_user_for_token
 from apps.accounts.tokens import decode_access_token
 
 logger = logging.getLogger("apps.core.authentication")
-
-User = get_user_model()
 
 
 class JWTAuthentication(BaseAuthentication):
@@ -66,15 +64,21 @@ class JWTAuthentication(BaseAuthentication):
         # Decode and verify the access token
         payload = decode_access_token(token)
 
-        # Fetch user from DB
+        # Fetch user from DB (DB access lives in the queries layer)
         user_id = payload.get("sub")
-        try:
-            user = User.objects.select_related("tenant", "branch").get(pk=user_id)
-        except User.DoesNotExist:
+        user = get_user_for_token(user_id)
+        if user is None:
             raise AuthenticationFailed("User not found.")
 
+        # EC-AUTH-10: deactivated user → reject on the next call.
         if not user.is_active:
             raise AuthenticationFailed("User account is inactive.")
+
+        # EC-AUTH-04: if the user's role changed since the token was issued,
+        # the stale token must not keep working — force re-login.
+        token_role = payload.get("role")
+        if token_role is not None and token_role != user.role:
+            raise AuthenticationFailed("Session is no longer valid. Please log in again.")
 
         logger.debug(
             "JWT auth: user=%s role=%s tenant=%s",

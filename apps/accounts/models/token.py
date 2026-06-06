@@ -130,6 +130,7 @@ class InviteToken(BaseModel):
     token = models.UUIDField(default=uuid.uuid4, unique=True, db_index=True)
     expires_at = models.DateTimeField(default=default_invite_expiry)
     is_used = models.BooleanField(default=False, db_index=True)
+    used_at = models.DateTimeField(null=True, blank=True)
     sent_to_phone = models.CharField(max_length=20, blank=True, default="")
 
     class Meta:
