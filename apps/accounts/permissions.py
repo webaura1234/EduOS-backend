@@ -16,6 +16,15 @@ from apps.accounts.models.user import Role
 # Role-based permissions
 # ─────────────────────────────────────────────────────────────────────────────
 
+class IsPlatformOwner(BasePermission):
+    """Allow access only to users with role=platform_owner (SaaS operator)."""
+    message = "Platform owner access required."
+
+    def has_permission(self, request, view):
+        return bool(request.user and request.user.is_authenticated
+                    and request.user.role == Role.PLATFORM_OWNER)
+
+
 class IsSuperAdmin(BasePermission):
     """Allow access only to users with role=super_admin."""
     message = "Super admin access required."

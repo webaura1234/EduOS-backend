@@ -108,6 +108,20 @@ def get_users_by_phone_in_tenant(phone: str, tenant_id: str) -> list[User]:
     return list(User.objects.filter(phone=phone, tenant_id=tenant_id))
 
 
+def count_active_by_role_in_tenant(tenant_id, role: str) -> int:
+    """Count active users of a given role within a tenant (e.g. students)."""
+    return User.objects.filter(tenant_id=tenant_id, role=role, is_active=True).count()
+
+
+def get_first_user_by_role_in_tenant(tenant_id, role: str) -> User | None:
+    """Return the earliest-created user of a role in a tenant (e.g. the super-admin)."""
+    return (
+        User.objects.filter(tenant_id=tenant_id, role=role)
+        .order_by("date_joined")
+        .first()
+    )
+
+
 def assign_linked_group(users: list[User], group_id: uuid.UUID) -> None:
     """Set linked_user_group_id on each user (EC-AUTH-13)."""
     for user in users:

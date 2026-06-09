@@ -4,7 +4,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from apps.organizations.tests.factories import TenantFactory
-from apps.organizations.models.tenant import TenantSettings
+from apps.organizations.models import TenantSettings
 
 
 @pytest.fixture

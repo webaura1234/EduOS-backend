@@ -4,7 +4,7 @@ Queries — tenant lookups.
 Pure database access for the organizations app. No business logic here.
 """
 
-from apps.organizations.models.tenant import Tenant, TenantSettings
+from apps.organizations.models import Tenant, TenantSettings
 
 DEFAULT_STUDENT_ID_LABEL = "Roll Number"
 DEFAULT_FACULTY_ID_LABEL = "Employee ID"

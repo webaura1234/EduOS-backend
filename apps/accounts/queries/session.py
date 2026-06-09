@@ -55,6 +55,26 @@ def revoke_all_user_tokens(user: User) -> int:
     ).update(is_revoked=True)
 
 
+def count_active_sessions_for_tenant(tenant_id) -> int:
+    """Count non-revoked, non-expired refresh tokens across all users of a tenant."""
+    return RefreshToken.objects.filter(
+        user__tenant_id=tenant_id,
+        is_revoked=False,
+        expires_at__gt=timezone.now(),
+    ).count()
+
+
+def revoke_tokens_for_tenant(tenant_id) -> int:
+    """
+    Revoke every active refresh token for a tenant's users (session-kill on tenant
+    deactivation, EC-TEN-04). Returns the number of sessions terminated.
+    """
+    return RefreshToken.objects.filter(
+        user__tenant_id=tenant_id,
+        is_revoked=False,
+    ).update(is_revoked=True)
+
+
 def delete_expired_tokens() -> int:
     """
     Hard-delete refresh tokens that have expired.

@@ -20,6 +20,7 @@ from django.utils import timezone
 
 
 class Role(models.TextChoices):
+    PLATFORM_OWNER = "platform_owner", "Platform Owner"
     SUPER_ADMIN = "super_admin", "Super Admin"
     ADMIN = "admin", "Admin"
     FACULTY = "faculty", "Faculty"
@@ -27,8 +28,8 @@ class Role(models.TextChoices):
     PARENT = "parent", "Parent"
 
 
-# Roles that log in with phone
-PHONE_LOGIN_ROLES = {Role.SUPER_ADMIN, Role.ADMIN, Role.PARENT}
+# Roles that log in with phone (platform_owner uses a separate app but also phone)
+PHONE_LOGIN_ROLES = {Role.PLATFORM_OWNER, Role.SUPER_ADMIN, Role.ADMIN, Role.PARENT}
 
 # Roles that log in with custom_login_id
 CUSTOM_ID_LOGIN_ROLES = {Role.FACULTY, Role.STUDENT}
@@ -145,6 +146,14 @@ class User(AbstractBaseUser, PermissionsMixin):
                 fields=["tenant", "role", "email"],
                 condition=models.Q(email__isnull=False),
                 name="unique_email_per_tenant_role",
+            ),
+            # Tenant-less accounts (platform_owner + Django superusers) log into
+            # Django admin by email, which does get(email=...). Their email must be
+            # globally unique or admin login raises MultipleObjectsReturned.
+            models.UniqueConstraint(
+                fields=["email"],
+                condition=models.Q(tenant__isnull=True) & models.Q(email__isnull=False),
+                name="unique_tenantless_email",
             ),
         ]
 
