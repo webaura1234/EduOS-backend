@@ -46,3 +46,9 @@ class QuotaPeriod(models.TextChoices):
     """Accounting window for a quota counter."""
     MONTH = "month", "Per month"
     TOTAL = "total", "Lifetime total"
+
+
+class AttendanceMode(models.TextChoices):
+    """How a tenant takes attendance."""
+    DAY = "day", "Day-wise (one mark per student per day)"
+    SESSION = "session", "Session-wise (one mark per class period)"

@@ -8,6 +8,7 @@ typed, queryable settings returned by GET /tenant-config/ and used across the UI
 from django.db import models
 
 from apps.core.models import BaseModel
+from apps.organizations.enums import AttendanceMode
 
 
 class TenantSettings(BaseModel):
@@ -37,6 +38,10 @@ class TenantSettings(BaseModel):
         help_text="Minimum attendance % required. Default: 75%.",
     )
     exam_day_counts_toward_attendance = models.BooleanField(default=True)
+    # Day-wise (one mark/student/day) vs session-wise (one mark/class period).
+    attendance_mode = models.CharField(
+        max_length=10, choices=AttendanceMode.choices, default=AttendanceMode.SESSION,
+    )
 
     # Examination
     grace_marks_enabled = models.BooleanField(default=False)

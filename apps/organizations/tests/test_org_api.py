@@ -69,6 +69,50 @@ def test_branch_set_active(client, tenant):
     assert branch.is_active is False
 
 
+def test_branch_settings_update_geofence(client, tenant):
+    branch = BranchFactory(tenant=tenant, name="Main", code="MC", is_primary=True)
+
+    resp = client.patch(
+        reverse("organizations:branch-settings", kwargs={"branch_id": branch.id}),
+        {"latitude": "12.971600", "longitude": "77.594600", "geofenceRadiusM": 200},
+        format="json",
+    )
+    assert resp.status_code == 200
+    body = resp.json().get("data", resp.json())
+    assert body["branch"]["geofenceRadiusM"] == 200
+    branch.refresh_from_db()
+    assert branch.latitude == 12.971600
+    assert branch.longitude == 77.594600
+    assert branch.geofence_radius_m == 200
+
+
+def test_branch_settings_disable_geofence(client, tenant):
+    branch = BranchFactory(
+        tenant=tenant, name="Main", code="MC",
+        latitude="12.971600", longitude="77.594600", geofence_radius_m=200,
+    )
+    resp = client.patch(
+        reverse("organizations:branch-settings", kwargs={"branch_id": branch.id}),
+        {"geofenceRadiusM": None},
+        format="json",
+    )
+    assert resp.status_code == 200
+    branch.refresh_from_db()
+    assert branch.geofence_radius_m is None
+    assert branch.latitude is None
+    assert branch.longitude is None
+
+
+def test_branch_settings_radius_requires_coordinates(client, tenant):
+    branch = BranchFactory(tenant=tenant, name="Main", code="MC")
+    resp = client.patch(
+        reverse("organizations:branch-settings", kwargs={"branch_id": branch.id}),
+        {"geofenceRadiusM": 200},
+        format="json",
+    )
+    assert resp.status_code == 400
+
+
 def test_branches_forbidden_for_non_super_admin(tenant):
     admin = UserFactory(role=Role.ADMIN, tenant=tenant, phone="+919900000099",
                         custom_login_id=None, must_change_password=False)

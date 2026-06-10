@@ -53,6 +53,14 @@ class Branch(BaseModel):
         help_text="Month (1-12) when the academic year starts. Default: April.",
     )
 
+    # Geo-fence for attendance (F-103). When lat/lng + radius are set, the backend
+    # validates a marking faculty's location against this point.
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    geofence_radius_m = models.PositiveIntegerField(
+        null=True, blank=True, help_text="Allowed radius in metres; null = geo-fence disabled.",
+    )
+
     class Meta:
         db_table = "organizations_branch"
         verbose_name = "Branch"

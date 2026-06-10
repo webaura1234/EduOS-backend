@@ -37,3 +37,20 @@ def set_branch_active(branch: Branch, is_active: bool) -> Branch:
     branch.is_active = is_active
     branch.save(update_fields=["is_active"])
     return branch
+
+
+def update_branch_settings(branch: Branch, fields: dict) -> Branch:
+    """Update branch settings (geo-fence coordinates and radius)."""
+    update_fields: list[str] = []
+    mapping = {
+        "latitude": "latitude",
+        "longitude": "longitude",
+        "geofenceRadiusM": "geofence_radius_m",
+    }
+    for key, attr in mapping.items():
+        if key in fields:
+            setattr(branch, attr, fields[key])
+            update_fields.append(attr)
+    if update_fields:
+        branch.save(update_fields=update_fields)
+    return branch

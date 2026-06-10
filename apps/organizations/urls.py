@@ -6,7 +6,7 @@ All routes are under /api/v1/organizations/ (see config/urls.py).
 
 from django.urls import path
 
-from apps.organizations.views.branch import BranchActionsView, BranchListCreateView
+from apps.organizations.views.branch import BranchActionsView, BranchListCreateView, BranchSettingsView
 from apps.organizations.views.institution import (
     InstitutionSettingsView,
     SubdomainCheckView,
@@ -28,6 +28,7 @@ urlpatterns = [
     # Super-admin — branches
     path("branches/", BranchListCreateView.as_view(), name="branches"),
     path("branches/actions/", BranchActionsView.as_view(), name="branch-actions"),
+    path("branches/<uuid:branch_id>/settings/", BranchSettingsView.as_view(), name="branch-settings"),
 
     # Super-admin — institution settings
     path("institution-settings/", InstitutionSettingsView.as_view(), name="institution-settings"),

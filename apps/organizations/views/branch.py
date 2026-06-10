@@ -16,6 +16,7 @@ from apps.organizations.serializers.branch import (
     BranchSerializer,
     CreateBranchSerializer,
     SetBranchActiveSerializer,
+    UpdateBranchSettingsSerializer,
 )
 
 
@@ -73,4 +74,37 @@ class BranchActionsView(APIView):
             return Response({"error": "Branch not found."}, status=status.HTTP_404_NOT_FOUND)
 
         branch = branch_q.set_branch_active(branch, data["isActive"])
+        return Response({"branch": BranchSerializer(branch).data})
+
+
+class BranchSettingsView(APIView):
+    """
+    PATCH /api/v1/organizations/branches/<branch_id>/settings/
+        { "latitude": 12.97, "longitude": 77.59, "geofenceRadiusM": 200 }
+    Super-admin only; scoped to the caller's tenant.
+    """
+    permission_classes = [IsAuthenticated, IsSuperAdmin]
+
+    def patch(self, request, branch_id) -> Response:
+        branch = branch_q.get_branch(request.user.tenant_id, branch_id)
+        if branch is None:
+            return Response({"error": "Branch not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = UpdateBranchSettingsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        fields: dict = {}
+        if "latitude" in data:
+            fields["latitude"] = data["latitude"]
+        if "longitude" in data:
+            fields["longitude"] = data["longitude"]
+        if "geofenceRadiusM" in data:
+            fields["geofenceRadiusM"] = data["geofenceRadiusM"]
+            # Clearing radius disables geo-fence; clear coordinates too when explicitly null.
+            if data["geofenceRadiusM"] is None:
+                fields.setdefault("latitude", None)
+                fields.setdefault("longitude", None)
+
+        branch = branch_q.update_branch_settings(branch, fields)
         return Response({"branch": BranchSerializer(branch).data})
