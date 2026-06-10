@@ -113,6 +113,14 @@ def count_active_by_role_in_tenant(tenant_id, role: str) -> int:
     return User.objects.filter(tenant_id=tenant_id, role=role, is_active=True).count()
 
 
+def get_active_user_in_tenant_with_role(tenant_id, user_id, role: str) -> User | None:
+    """Fetch a single active user of a given role within a tenant, or None."""
+    try:
+        return User.objects.get(pk=user_id, tenant_id=tenant_id, role=role, is_active=True)
+    except (User.DoesNotExist, ValueError, TypeError):
+        return None
+
+
 def get_first_user_by_role_in_tenant(tenant_id, role: str) -> User | None:
     """Return the earliest-created user of a role in a tenant (e.g. the super-admin)."""
     return (

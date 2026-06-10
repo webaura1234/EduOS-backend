@@ -11,7 +11,16 @@ class DepartmentSerializer(serializers.Serializer):
     code = serializers.CharField(read_only=True)
     departmentType = serializers.CharField(source="department_type", read_only=True)
     headFacultyId = serializers.UUIDField(source="head_faculty_id", read_only=True, allow_null=True)
+    version = serializers.IntegerField(read_only=True)
     createdAt = serializers.DateTimeField(source="created_at", read_only=True)
+
+
+class UpdateDepartmentSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=150, required=False)
+    code = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    departmentType = serializers.ChoiceField(choices=DepartmentType.values, required=False)
+    headFacultyId = serializers.UUIDField(required=False, allow_null=True)
+    version = serializers.IntegerField(required=False)
 
 
 class CreateDepartmentSerializer(serializers.Serializer):
@@ -32,6 +41,15 @@ class CourseSerializer(serializers.Serializer):
     totalCredits = serializers.IntegerField(source="total_credits", read_only=True, allow_null=True)
 
 
+class UpdateCourseSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=150, required=False)
+    code = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    durationYears = serializers.IntegerField(required=False, min_value=1)
+    regulation = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    totalCredits = serializers.IntegerField(required=False, allow_null=True)
+    version = serializers.IntegerField(required=False)
+
+
 class CreateCourseSerializer(serializers.Serializer):
     departmentId = serializers.UUIDField()
     name = serializers.CharField(max_length=150)
@@ -44,10 +62,22 @@ class CreateCourseSerializer(serializers.Serializer):
 class BatchSerializer(serializers.Serializer):
     id = serializers.UUIDField(read_only=True)
     courseId = serializers.UUIDField(source="course_id", read_only=True)
+    departmentId = serializers.SerializerMethodField()
     academicYearId = serializers.UUIDField(source="academic_year_id", read_only=True)
     name = serializers.CharField(read_only=True)
     capacity = serializers.IntegerField(read_only=True)
     classTeacherId = serializers.UUIDField(source="class_teacher_id", read_only=True, allow_null=True)
+    version = serializers.IntegerField(read_only=True)
+
+    def get_departmentId(self, obj):
+        return str(obj.course.department_id)
+
+
+class UpdateBatchSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=50, required=False)
+    capacity = serializers.IntegerField(required=False, min_value=1)
+    classTeacherId = serializers.UUIDField(required=False, allow_null=True)
+    version = serializers.IntegerField(required=False)
 
 
 class CreateBatchSerializer(serializers.Serializer):

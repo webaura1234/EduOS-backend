@@ -15,6 +15,19 @@ class AcademicYearSerializer(serializers.Serializer):
     createdAt = serializers.DateTimeField(source="created_at", read_only=True)
 
 
+class UpdateAcademicYearSerializer(serializers.Serializer):
+    name = serializers.CharField(max_length=20, required=False)
+    startDate = serializers.DateField(required=False)
+    endDate = serializers.DateField(required=False)
+    version = serializers.IntegerField(required=False)
+
+
+class AcademicYearActionSerializer(serializers.Serializer):
+    action = serializers.ChoiceField(choices=["set_current", "freeze"])
+    yearId = serializers.UUIDField()
+    version = serializers.IntegerField(required=False)
+
+
 class CreateAcademicYearSerializer(serializers.Serializer):
     name = serializers.CharField(max_length=20)
     startDate = serializers.DateField()
@@ -35,6 +48,15 @@ class AcademicPeriodSerializer(serializers.Serializer):
     name = serializers.CharField(read_only=True)
     startDate = serializers.DateField(source="start_date", read_only=True)
     endDate = serializers.DateField(source="end_date", read_only=True)
+
+
+class UpdateAcademicPeriodSerializer(serializers.Serializer):
+    periodType = serializers.ChoiceField(choices=PeriodType.values, required=False)
+    sequence = serializers.IntegerField(min_value=1, required=False)
+    name = serializers.CharField(max_length=50, required=False)
+    startDate = serializers.DateField(required=False)
+    endDate = serializers.DateField(required=False)
+    version = serializers.IntegerField(required=False)
 
 
 class CreateAcademicPeriodSerializer(serializers.Serializer):

@@ -1,4 +1,5 @@
 from .calendar import AcademicPeriod, AcademicYear, Holiday, HolidayType, PeriodType
+from .rollover import AcademicRolloverRun, RolloverRunStatus
 from .curriculum import BatchFaculty, BatchFacultyRole, BatchSubject, Subject, SubjectType
 from .structure import Batch, Course, Department, DepartmentType
 from .timetable import (
@@ -36,4 +37,6 @@ __all__ = [
     "TimetableEntry",
     "DayOfWeek",
     "TimetableEntryStatus",
+    "AcademicRolloverRun",
+    "RolloverRunStatus",
 ]

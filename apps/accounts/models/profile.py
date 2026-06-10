@@ -31,6 +31,13 @@ class EmploymentType(models.TextChoices):
     VISITING = "visiting", "Visiting"
 
 
+class AcademicStatus(models.TextChoices):
+    ACTIVE = "active", "Active"
+    GRADUATED = "graduated", "Graduated"
+    TRANSFERRED = "transferred", "Transferred"
+    WITHDRAWN = "withdrawn", "Withdrawn"
+
+
 class RelationshipType(models.TextChoices):
     FATHER = "father", "Father"
     MOTHER = "mother", "Mother"
@@ -116,6 +123,12 @@ class StudentProfile(BaseModel):
         help_text="Current section (school) or batch (college) for this student.",
     )
     admission_date = models.DateField(null=True, blank=True)
+    academic_status = models.CharField(
+        max_length=15,
+        choices=AcademicStatus.choices,
+        default=AcademicStatus.ACTIVE,
+        db_index=True,
+    )
 
     # Used for password reset when student has no phone
     # Populated from the primary guardian's phone
