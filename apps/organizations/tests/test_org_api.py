@@ -35,6 +35,29 @@ def client(super_admin):
     return c
 
 
+# ── Attendance settings (mode + threshold + exam-day) ─────────────────────────
+def test_attendance_settings_get_and_update(client):
+    url = reverse("organizations:attendance-settings")
+    # Defaults (auto-created TenantSettings).
+    body = client.get(url).json()
+    body = body.get("data", body)
+    assert body["attendanceMode"] == "session"
+
+    patch = client.patch(url, {"attendanceMode": "day", "attendanceThresholdPercent": 80}, format="json")
+    assert patch.status_code == 200
+    out = patch.json().get("data", patch.json())
+    assert out["attendanceMode"] == "day"
+    assert out["attendanceThresholdPercent"] == 80
+
+
+def test_attendance_settings_forbidden_for_non_super_admin(tenant):
+    admin = UserFactory(role=Role.ADMIN, tenant=tenant, phone="+919900000077",
+                        custom_login_id=None, must_change_password=False)
+    c = APIClient()
+    c.credentials(HTTP_AUTHORIZATION=f"Bearer {generate_access_token(admin)}")
+    assert c.get(reverse("organizations:attendance-settings")).status_code == 403
+
+
 # ── Branches ──────────────────────────────────────────────────────────────────
 def test_branches_list_and_create(client, tenant):
     BranchFactory(tenant=tenant, name="Main Campus", code="MC", is_primary=True)
@@ -81,8 +104,8 @@ def test_branch_settings_update_geofence(client, tenant):
     body = resp.json().get("data", resp.json())
     assert body["branch"]["geofenceRadiusM"] == 200
     branch.refresh_from_db()
-    assert branch.latitude == 12.971600
-    assert branch.longitude == 77.594600
+    assert str(branch.latitude) == "12.971600"
+    assert str(branch.longitude) == "77.594600"
     assert branch.geofence_radius_m == 200
 
 

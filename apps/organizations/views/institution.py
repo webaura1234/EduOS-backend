@@ -18,7 +18,9 @@ from apps.accounts.permissions import IsSuperAdmin
 from apps.organizations.queries import institution as inst_q
 from apps.organizations.serializers.institution import (
     GoLiveSerializer,
+    UpdateAttendanceSettingsSerializer,
     UpdateInstitutionSettingsSerializer,
+    attendance_settings_dict,
     institution_settings_dict,
 )
 
@@ -96,6 +98,42 @@ class InstitutionSettingsView(APIView):
         serializer.is_valid(raise_exception=True)
         tenant = inst_q.set_go_live(tenant, live=serializer.validated_data["action"] == "go_live")
         return Response(institution_settings_dict(tenant))
+
+
+class AttendanceSettingsView(APIView):
+    """
+    GET   /api/v1/organizations/attendance-settings/  → tenant attendance config
+    PATCH /api/v1/organizations/attendance-settings/  → update mode/threshold/exam-day
+    Super-admin only.
+    """
+    permission_classes = [IsAuthenticated, IsSuperAdmin]
+
+    def get(self, request) -> Response:
+        tenant = inst_q.get_tenant(request.user.tenant_id)
+        if tenant is None:
+            return Response({"error": "Institution not found."}, status=status.HTTP_404_NOT_FOUND)
+        settings = inst_q.get_or_create_tenant_settings(tenant)
+        return Response(attendance_settings_dict(settings))
+
+    def patch(self, request) -> Response:
+        tenant = inst_q.get_tenant(request.user.tenant_id)
+        if tenant is None:
+            return Response({"error": "Institution not found."}, status=status.HTTP_404_NOT_FOUND)
+        serializer = UpdateAttendanceSettingsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        fields = {}
+        if "attendanceMode" in data:
+            fields["attendance_mode"] = data["attendanceMode"]
+        if "attendanceThresholdPercent" in data:
+            fields["attendance_threshold_percent"] = data["attendanceThresholdPercent"]
+        if "examDayCountsTowardAttendance" in data:
+            fields["exam_day_counts_toward_attendance"] = data["examDayCountsTowardAttendance"]
+
+        settings = inst_q.get_or_create_tenant_settings(tenant)
+        settings = inst_q.update_tenant_settings(settings, fields)
+        return Response(attendance_settings_dict(settings))
 
 
 class SubdomainCheckView(APIView):

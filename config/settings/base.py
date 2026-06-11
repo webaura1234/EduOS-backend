@@ -245,6 +245,9 @@ AWS_S3_PRESIGNED_URL_EXPIRY = 86400  # 24 hours
 # ──────────────────────────────────────────────
 RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
+RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "sandbox_webhook_secret")
+# "sandbox" = deterministic fake gateway (no network); "live" = real Razorpay.
+PAYMENTS_GATEWAY_MODE = os.environ.get("PAYMENTS_GATEWAY_MODE", "sandbox")
 
 # ──────────────────────────────────────────────
 # MSG91 (SMS)

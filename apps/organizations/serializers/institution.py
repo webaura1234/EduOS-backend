@@ -27,6 +27,22 @@ class GoLiveSerializer(serializers.Serializer):
     action = serializers.ChoiceField(choices=["go_live", "undo_go_live"])
 
 
+class UpdateAttendanceSettingsSerializer(serializers.Serializer):
+    """Tenant-level attendance configuration."""
+    attendanceMode = serializers.ChoiceField(choices=["day", "session"], required=False)
+    attendanceThresholdPercent = serializers.IntegerField(required=False, min_value=0, max_value=100)
+    examDayCountsTowardAttendance = serializers.BooleanField(required=False)
+
+
+def attendance_settings_dict(s) -> dict:
+    """Present a TenantSettings as the camelCase attendance config payload."""
+    return {
+        "attendanceMode": s.attendance_mode,
+        "attendanceThresholdPercent": s.attendance_threshold_percent,
+        "examDayCountsTowardAttendance": s.exam_day_counts_toward_attendance,
+    }
+
+
 def institution_settings_dict(tenant) -> dict:
     """Present a Tenant as the camelCase settings payload the frontend expects."""
     return {

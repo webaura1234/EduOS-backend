@@ -5,7 +5,7 @@ subdomain availability. All DB access for these flows lives here.
 
 from django.utils import timezone
 
-from apps.organizations.models import Tenant
+from apps.organizations.models import Tenant, TenantSettings
 
 
 def get_tenant(tenant_id) -> Tenant | None:
@@ -35,6 +35,19 @@ def set_go_live(tenant: Tenant, live: bool) -> Tenant:
         tenant.activated_at = None
         tenant.save(update_fields=["status", "activated_at"])
     return tenant
+
+
+def get_or_create_tenant_settings(tenant) -> TenantSettings:
+    settings, _ = TenantSettings.objects.get_or_create(tenant=tenant)
+    return settings
+
+
+def update_tenant_settings(settings: TenantSettings, fields: dict) -> TenantSettings:
+    for k, v in fields.items():
+        setattr(settings, k, v)
+    if fields:
+        settings.save(update_fields=list(fields.keys()))
+    return settings
 
 
 def subdomain_taken(subdomain: str, exclude_tenant_id=None) -> bool:

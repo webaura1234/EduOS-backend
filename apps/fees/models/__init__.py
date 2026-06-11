@@ -1,13 +1,45 @@
-# TODO: Uncomment imports as models are implemented in each module.
-# from .structure import FeeStructure, Concession, StudentFeeAssignment
-# from .transactions import FeeInvoice, Payment, Receipt, Refund
+"""
+Fees models (school → parent tuition collection).
+
+Structure → Assignment → Invoice → Payment → Receipt, plus Refund, Concession,
+CreditNote, and the webhook idempotency log.
+"""
+
+from apps.fees.enums import (
+    ConcessionStatus,
+    CreditNoteStatus,
+    FeeComponentKind,
+    InvoiceStatus,
+    PaymentMethod,
+    PaymentStatus,
+    RefundStatus,
+)
+
+from .concession import ConcessionRequest, ConcessionRule, CreditNote, WebhookEventLog
+from .invoice import FeeInvoice, FeeInvoiceLine, Installment
+from .payment import Payment, Receipt, ReceiptCounter, Refund
+from .structure import FeeStructure, StudentFeeAssignment
 
 __all__ = [
-    # "FeeStructure",
-    # "Concession",
-    # "StudentFeeAssignment",
-    # "FeeInvoice",
-    # "Payment",
-    # "Receipt",
-    # "Refund",
+    "FeeStructure",
+    "StudentFeeAssignment",
+    "FeeInvoice",
+    "FeeInvoiceLine",
+    "Installment",
+    "Payment",
+    "Receipt",
+    "ReceiptCounter",
+    "Refund",
+    "ConcessionRule",
+    "ConcessionRequest",
+    "CreditNote",
+    "WebhookEventLog",
+    # enums
+    "FeeComponentKind",
+    "InvoiceStatus",
+    "PaymentStatus",
+    "PaymentMethod",
+    "RefundStatus",
+    "ConcessionStatus",
+    "CreditNoteStatus",
 ]
