@@ -130,6 +130,14 @@ class StudentProfile(BaseModel):
         db_index=True,
     )
 
+    current_enrollment = models.ForeignKey(
+        "admissions.StudentEnrollment",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="current_profiles",
+    )
+
     # Used for password reset when student has no phone
     # Populated from the primary guardian's phone
     guardian_phone = models.CharField(max_length=20, blank=True, null=True)

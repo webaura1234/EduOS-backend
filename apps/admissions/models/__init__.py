@@ -1,12 +1,10 @@
-# TODO: Uncomment imports as models are implemented in each module.
-# from .application import Enquiry, Application, ApplicationDocument
-# from .enrollment import MeritList, Waitlist, Enrollment
+from .application import Application, ApplicationDocument, Enquiry, Waitlist
+from .enrollment import StudentEnrollment
 
 __all__ = [
-    # "Enquiry",
-    # "Application",
-    # "ApplicationDocument",
-    # "MeritList",
-    # "Waitlist",
-    # "Enrollment",
+    "Enquiry",
+    "Application",
+    "ApplicationDocument",
+    "Waitlist",
+    "StudentEnrollment",
 ]

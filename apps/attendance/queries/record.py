@@ -21,7 +21,7 @@ def list_flagged(branch_id):
         AttendanceRecord.objects.filter(
             session__branch_id=branch_id, status=AttendanceStatus.FLAGGED, is_active=True
         )
-        .select_related("session", "student", "student__user")
+        .select_related("session", "student", "student__student_profile__user")
         .order_by("-marked_at")
     )
 
@@ -29,8 +29,8 @@ def list_flagged(branch_id):
 def list_records_for_session(session_id):
     return (
         AttendanceRecord.objects.filter(session_id=session_id, is_active=True)
-        .select_related("student", "student__user")
-        .order_by("student__user__first_name")
+        .select_related("student", "student__student_profile__user")
+        .order_by("student__student_profile__user__first_name")
     )
 
 

@@ -43,11 +43,12 @@ class StudentFeeAssignment(BaseModel):
     Links a student to a fee structure, freezing a snapshot of the components so
     later structure edits never change what this student owes (EC-FEE-06).
 
-    Student identity (ENROLLMENT SEAM): keyed off accounts.StudentProfile because
-    admissions/StudentEnrollment (Stage 5) is not built yet.
+    Student identity: keyed off admissions.StudentEnrollment (Stage 5, OD-1 A). The
+    `student` field name is retained; it points at the enrollment, which mirrors the
+    StudentProfile API via convenience properties.
     """
 
-    student = models.ForeignKey("accounts.StudentProfile", on_delete=models.CASCADE,
+    student = models.ForeignKey("admissions.StudentEnrollment", on_delete=models.CASCADE,
                                 related_name="fee_assignments")
     fee_structure = models.ForeignKey(FeeStructure, on_delete=models.PROTECT, related_name="assignments")
     structure_snapshot = models.JSONField(default=dict, blank=True)

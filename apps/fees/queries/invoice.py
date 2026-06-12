@@ -24,12 +24,12 @@ def list_dues_for_student(student_id):
 
 
 def list_dues_for_student_user(student_user_id):
-    return FeeInvoice.objects.filter(student__user_id=student_user_id, is_active=True).order_by("due_date")
+    return FeeInvoice.objects.filter(student__student_profile__user_id=student_user_id, is_active=True).order_by("due_date")
 
 
 def get_invoice_for_student_user(invoice_id, student_user_id) -> FeeInvoice | None:
     try:
-        return FeeInvoice.objects.get(pk=invoice_id, student__user_id=student_user_id, is_active=True)
+        return FeeInvoice.objects.get(pk=invoice_id, student__student_profile__user_id=student_user_id, is_active=True)
     except (FeeInvoice.DoesNotExist, ValueError, TypeError):
         return None
 
@@ -113,7 +113,7 @@ def adjust_invoice_total(invoice: FeeInvoice, delta_paise: int, user=None) -> Fe
 
 def list_invoices(branch_id, student_id=None, status=None):
     qs = FeeInvoice.objects.filter(branch_id=branch_id, is_active=True).select_related(
-        "student", "student__user", "assignment", "billing_guardian"
+        "student", "student__student_profile__user", "assignment", "billing_guardian"
     )
     if student_id:
         qs = qs.filter(student_id=student_id)

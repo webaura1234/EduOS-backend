@@ -1,29 +1,36 @@
 """Queries — FeeStructure, StudentFeeAssignment, and student lookup."""
 
-from apps.accounts.models.profile import AcademicStatus, StudentProfile
+from apps.accounts.models.profile import StudentProfile
+from apps.admissions.queries import enrollment as enrollment_q
 from apps.fees.models import FeeStructure, StudentFeeAssignment
 
+# NOTE (enrollment seam, Stage 5 / OD-1 A): fees rows key off StudentEnrollment. The API's
+# `studentId` stays a StudentProfile id; these helpers resolve it to the enrollment.
 
-def get_student_in_branch(branch_id, student_id) -> StudentProfile | None:
+
+def get_student_in_branch(branch_id, student_id):
+    """Resolve the API's `studentId` (a StudentProfile id) to the student's active
+    enrollment in the branch, creating it if missing."""
     try:
-        return StudentProfile.objects.select_related("user", "current_batch").get(
+        profile = StudentProfile.objects.select_related("user", "current_batch").get(
             pk=student_id, current_batch__course__department__branch_id=branch_id, is_active=True
         )
     except (StudentProfile.DoesNotExist, ValueError, TypeError):
         return None
+    return enrollment_q.resolve_enrollment_for_profile(profile)
 
 
 def students_in_batch(batch_id):
-    return StudentProfile.objects.filter(
-        current_batch_id=batch_id, academic_status=AcademicStatus.ACTIVE, is_active=True
-    ).select_related("user")
+    return enrollment_q.enrollments_in_batch(batch_id)
 
 
-def get_student_profile(student_id) -> StudentProfile | None:
+def get_student_profile(student_id):
+    """Resolve a StudentProfile id to the student's active enrollment (seam shim)."""
     try:
-        return StudentProfile.objects.select_related("user").get(pk=student_id, is_active=True)
+        profile = StudentProfile.objects.select_related("user").get(pk=student_id, is_active=True)
     except (StudentProfile.DoesNotExist, ValueError, TypeError):
         return None
+    return enrollment_q.resolve_enrollment_for_profile(profile)
 
 
 def get_assignment_by_id(assignment_id):

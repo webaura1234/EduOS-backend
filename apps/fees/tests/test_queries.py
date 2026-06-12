@@ -52,7 +52,7 @@ def test_structure_queries(branch, academic_year):
 def test_invoice_queries(branch, student_profile):
     invoice = create_invoice(
         branch=branch,
-        student=student_profile,
+        student=student_profile.enrollment,
         total_paise=10000,
     )
     assert get_invoice(branch.id, invoice.id) == invoice
@@ -68,7 +68,7 @@ def test_invoice_queries(branch, student_profile):
 def test_payment_queries(branch, student_profile):
     invoice = create_invoice(
         branch=branch,
-        student=student_profile,
+        student=student_profile.enrollment,
         total_paise=10000,
     )
     
@@ -91,7 +91,7 @@ def test_payment_queries(branch, student_profile):
 def test_receipt_queries(branch, student_profile):
     invoice = create_invoice(
         branch=branch,
-        student=student_profile,
+        student=student_profile.enrollment,
         total_paise=10000,
     )
     payment = create_payment(
@@ -118,7 +118,7 @@ def test_receipt_queries(branch, student_profile):
 def test_refund_queries(branch, student_profile):
     invoice = create_invoice(
         branch=branch,
-        student=student_profile,
+        student=student_profile.enrollment,
         total_paise=10000,
     )
     payment = create_payment(

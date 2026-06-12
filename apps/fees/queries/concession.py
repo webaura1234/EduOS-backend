@@ -45,7 +45,7 @@ def create_concession_rule(*, branch, name, amount_paise=None, percent=None, cri
 # ── Concession Requests ──────────────────────────────────────────────────────
 def list_concession_requests(branch_id, status=None):
     qs = ConcessionRequest.objects.filter(branch_id=branch_id, is_active=True).select_related(
-        "student", "student__user", "rule", "requested_by", "approver"
+        "student", "student__student_profile__user", "rule", "requested_by", "approver"
     )
     if status:
         qs = qs.filter(status=status)
@@ -92,7 +92,7 @@ def update_concession_request(request: ConcessionRequest, fields: dict, user=Non
 # ── Credit Notes ─────────────────────────────────────────────────────────────
 def list_credit_notes(branch_id, student_id=None):
     qs = CreditNote.objects.filter(branch_id=branch_id, is_active=True).select_related(
-        "student", "student__user", "invoice", "approved_by"
+        "student", "student__student_profile__user", "invoice", "approved_by"
     )
     if student_id:
         qs = qs.filter(student_id=student_id)

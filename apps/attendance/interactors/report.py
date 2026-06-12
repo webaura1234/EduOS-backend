@@ -49,7 +49,7 @@ def student_summary(branch, student, *, date_from=_WIDE_FROM, date_to=_WIDE_TO) 
             })
 
     return {
-        "studentId": str(student.pk),
+        "studentId": str(student.student_profile_id),
         "overallPercent": overall_pct,
         "totalSessions": overall_total,
         "threshold": threshold,
@@ -74,7 +74,7 @@ def shortage_report(branch, *, threshold=None, batch_id=None) -> dict:
         pct, total = _percent(sp.pk, date_from=_WIDE_FROM, date_to=_WIDE_TO, exclude_exam=exclude_exam)
         if total > 0 and is_below_threshold(pct, threshold):
             rows.append({
-                "studentId": str(sp.pk),
+                "studentId": str(sp.student_profile_id),
                 "name": sp.user.full_name,
                 "batchId": str(sp.current_batch_id) if sp.current_batch_id else None,
                 "percent": pct,
@@ -104,7 +104,7 @@ def monthly_report(branch, *, year, month, batch_id=None) -> dict:
     for sp in students:
         pct, total = _percent(sp.pk, date_from=date_from, date_to=date_to, exclude_exam=exclude_exam)
         rows.append({
-            "studentId": str(sp.pk),
+            "studentId": str(sp.student_profile_id),
             "name": sp.user.full_name,
             "percent": pct,
             "sessions": total,

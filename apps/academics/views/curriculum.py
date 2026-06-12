@@ -31,7 +31,12 @@ class SubjectListCreateView(APIView):
 
     def get(self, request) -> Response:
         branch = resolve_branch(request)
-        subjects = curr_q.list_subjects(branch.pk, course_id=request.query_params.get("courseId"))
+        archived_only = request.query_params.get("archived", "").lower() in {"1", "true", "yes"}
+        subjects = curr_q.list_subjects(
+            branch.pk,
+            course_id=request.query_params.get("courseId"),
+            archived_only=archived_only,
+        )
         return Response({"subjects": SubjectSerializer(subjects, many=True).data})
 
     def post(self, request) -> Response:
@@ -80,8 +85,27 @@ class SubjectDetailView(APIView):
         try:
             result = curr_i.delete_subject(subject, user=request.user)
         except SubjectHasMarksError:
-            return Response({"hasMarks": True}, status=status.HTTP_409_CONFLICT)
+            return Response(
+                {
+                    "hasMarks": True,
+                    "message": "Subject has examination marks on record. Archive instead of delete.",
+                    "code": "subject_has_marks",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
         return Response(result)
+
+
+class SubjectArchiveView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
+
+    def post(self, request, subject_id) -> Response:
+        branch = resolve_branch(request)
+        subject = curr_q.get_subject(branch.pk, subject_id)
+        if not subject:
+            return Response({"error": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        result = curr_i.archive_subject(subject, user=request.user)
+        return Response(result, status=status.HTTP_200_OK)
 
 
 class BatchSubjectListCreateView(APIView):

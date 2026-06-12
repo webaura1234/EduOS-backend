@@ -26,7 +26,8 @@ class InstallmentSerializer(serializers.ModelSerializer):
 
 
 class StudentProfileBriefSerializer(serializers.Serializer):
-    id = serializers.UUIDField()
+    # `student` is a StudentEnrollment; expose the underlying StudentProfile id.
+    id = serializers.UUIDField(source="student_profile_id")
     fullName = serializers.CharField(source="user.full_name")
     phone = serializers.CharField(source="user.phone")
     email = serializers.CharField(source="user.email")

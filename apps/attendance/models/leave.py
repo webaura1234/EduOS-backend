@@ -15,7 +15,7 @@ class LeaveRequest(BaseModel):
     applicant_role = models.CharField(max_length=10, choices=LeaveApplicantRole.choices)
 
     student = models.ForeignKey(
-        "accounts.StudentProfile", on_delete=models.CASCADE, null=True, blank=True,
+        "admissions.StudentEnrollment", on_delete=models.CASCADE, null=True, blank=True,
         related_name="leave_requests",
     )
     employee = models.ForeignKey(

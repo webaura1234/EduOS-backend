@@ -19,7 +19,9 @@ class AttendanceSessionSerializer(serializers.Serializer):
 class AttendanceRecordSerializer(serializers.Serializer):
     id = serializers.UUIDField(read_only=True)
     sessionId = serializers.UUIDField(source="session_id", read_only=True)
-    studentId = serializers.UUIDField(source="student_id", read_only=True)
+    # `student` is a StudentEnrollment; expose the underlying StudentProfile id (stable API).
+    studentId = serializers.UUIDField(source="student.student_profile_id", read_only=True)
+    enrollmentId = serializers.UUIDField(source="student_id", read_only=True)
     status = serializers.CharField(read_only=True)
     lateMark = serializers.BooleanField(source="late_mark", read_only=True)
     markedAt = serializers.DateTimeField(source="marked_at", read_only=True)

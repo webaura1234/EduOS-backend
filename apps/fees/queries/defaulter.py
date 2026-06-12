@@ -14,4 +14,4 @@ def list_defaulters(branch_id):
         status__in=[InvoiceStatus.DUE, InvoiceStatus.PARTIAL],
         due_date__lt=today,
         is_active=True,
-    ).select_related("student", "student__user").order_by("due_date")
+    ).select_related("student", "student__student_profile__user").order_by("due_date")

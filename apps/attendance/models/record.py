@@ -10,16 +10,17 @@ class AttendanceRecord(BaseModel):
     """
     A student's attendance mark for a session.
 
-    Student identity (ENROLLMENT SEAM): attendance keys off accounts.StudentProfile
-    because admissions/StudentEnrollment (Stage 5) is not built yet. When it lands,
-    add an `enrollment` FK here and backfill.
+    Student identity: attendance keys off admissions.StudentEnrollment (Stage 5,
+    OD-1 Option A). The `student` field name is retained for continuity; it now points
+    at the enrollment record, which mirrors the StudentProfile API via convenience
+    properties (`.user`, `.current_batch`, `.academic_status`).
     """
 
     session = models.ForeignKey(
         "attendance.AttendanceSession", on_delete=models.CASCADE, related_name="records"
     )
     student = models.ForeignKey(
-        "accounts.StudentProfile", on_delete=models.CASCADE, related_name="attendance_records"
+        "admissions.StudentEnrollment", on_delete=models.CASCADE, related_name="attendance_records"
     )
     status = models.CharField(max_length=15, choices=AttendanceStatus.choices, default=AttendanceStatus.PRESENT)
 

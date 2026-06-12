@@ -28,7 +28,7 @@ class ConcessionRequest(BaseModel):
     """A concession applied to a student, pending admin approval (F-137)."""
 
     branch = models.ForeignKey("organizations.Branch", on_delete=models.CASCADE, related_name="concession_requests")
-    student = models.ForeignKey("accounts.StudentProfile", on_delete=models.CASCADE,
+    student = models.ForeignKey("admissions.StudentEnrollment", on_delete=models.CASCADE,
                                 related_name="concession_requests")
     rule = models.ForeignKey(ConcessionRule, on_delete=models.SET_NULL, null=True, blank=True,
                              related_name="requests")
@@ -53,7 +53,7 @@ class CreditNote(BaseModel):
     """Retroactive scholarship credit, pending admin approval (F-151/EC-FEE-07)."""
 
     branch = models.ForeignKey("organizations.Branch", on_delete=models.CASCADE, related_name="credit_notes")
-    student = models.ForeignKey("accounts.StudentProfile", on_delete=models.CASCADE, related_name="credit_notes")
+    student = models.ForeignKey("admissions.StudentEnrollment", on_delete=models.CASCADE, related_name="credit_notes")
     invoice = models.ForeignKey("fees.FeeInvoice", on_delete=models.SET_NULL, null=True, blank=True,
                                 related_name="credit_notes")
     amount_paise = models.BigIntegerField()

@@ -5,8 +5,12 @@ Queries — Subject, BatchSubject, BatchFaculty. Branch-scoped via course hierar
 from apps.academics.models import BatchFaculty, BatchSubject, Subject, TimetableEntry, TimetableEntryStatus  # noqa: F401
 
 
-def list_subjects(branch_id, course_id=None):
-    qs = Subject.objects.filter(course__department__branch_id=branch_id, is_active=True).select_related("course")
+def list_subjects(branch_id, course_id=None, *, archived_only=False):
+    qs = Subject.objects.filter(course__department__branch_id=branch_id).select_related("course")
+    if archived_only:
+        qs = qs.filter(is_active=False)
+    else:
+        qs = qs.filter(is_active=True)
     if course_id:
         qs = qs.filter(course_id=course_id)
     return qs.order_by("name")
@@ -31,8 +35,9 @@ def subject_code_exists(course_id, code, exclude_id=None) -> bool:
 
 
 def subject_has_marks(subject_id) -> bool:
-    """Stub until examinations module — no marks model yet."""
-    return False
+    from apps.examinations.queries.marks import count_for_subject
+
+    return count_for_subject(subject_id) > 0
 
 
 def subject_has_active_timetable_entries(subject_id) -> bool:

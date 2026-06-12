@@ -45,6 +45,14 @@ def delete_subject(subject, user=None):
 
 
 @transaction.atomic
+def archive_subject(subject, user=None):
+    """EC-DATA-02 / F-096 — archive (soft-delete) even when marks exist."""
+    affected = curr_q.mark_subject_timetable_entries_tbd(subject.pk, user=user)
+    curr_q.soft_delete_subject(subject, user=user)
+    return {"subjectId": str(subject.pk), "affectedEntryIds": affected, "archived": True}
+
+
+@transaction.atomic
 def create_batch_subject(batch, subject, academic_period, *, is_required=True, user=None):
     if batch.academic_year_id != academic_period.academic_year_id:
         raise ValidationError("Academic period must belong to the batch's academic year.")

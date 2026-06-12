@@ -10,7 +10,7 @@ class FeeInvoice(BaseModel):
     """A demand notice for a student. total_paise may be 0 (full scholarship, F-148)."""
 
     branch = models.ForeignKey("organizations.Branch", on_delete=models.CASCADE, related_name="fee_invoices")
-    student = models.ForeignKey("accounts.StudentProfile", on_delete=models.CASCADE, related_name="fee_invoices")
+    student = models.ForeignKey("admissions.StudentEnrollment", on_delete=models.CASCADE, related_name="fee_invoices")
     assignment = models.ForeignKey("fees.StudentFeeAssignment", on_delete=models.SET_NULL, null=True, blank=True,
                                    related_name="invoices")
     billing_guardian = models.ForeignKey("accounts.GuardianProfile", on_delete=models.SET_NULL, null=True, blank=True,

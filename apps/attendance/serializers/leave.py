@@ -6,7 +6,9 @@ from rest_framework import serializers
 class LeaveRequestSerializer(serializers.Serializer):
     id = serializers.UUIDField(read_only=True)
     applicantRole = serializers.CharField(source="applicant_role", read_only=True)
-    studentId = serializers.UUIDField(source="student_id", read_only=True, allow_null=True)
+    # `student` is a StudentEnrollment; expose the underlying StudentProfile id (stable API).
+    studentId = serializers.SerializerMethodField()
+    enrollmentId = serializers.UUIDField(source="student_id", read_only=True, allow_null=True)
     employeeId = serializers.UUIDField(source="employee_id", read_only=True, allow_null=True)
     fromDate = serializers.DateField(source="from_date", read_only=True)
     toDate = serializers.DateField(source="to_date", read_only=True)
@@ -16,6 +18,9 @@ class LeaveRequestSerializer(serializers.Serializer):
     approverId = serializers.UUIDField(source="approver_id", read_only=True, allow_null=True)
     approvedAt = serializers.DateTimeField(source="approved_at", read_only=True, allow_null=True)
     version = serializers.IntegerField(read_only=True)
+
+    def get_studentId(self, obj):
+        return str(obj.student.student_profile_id) if obj.student_id else None
 
 
 class CreateLeaveSerializer(serializers.Serializer):

@@ -4,20 +4,28 @@ Kept here so all DB access stays in the queries layer.
 """
 
 from apps.academics.models import Holiday
-from apps.accounts.models.profile import AcademicStatus, StudentProfile
+from apps.accounts.models.profile import StudentProfile
+from apps.admissions.enums import EnrollmentStatus
+from apps.admissions.models import StudentEnrollment
+from apps.admissions.queries import enrollment as enrollment_q
 from apps.organizations.models import TenantSettings
+
+# NOTE (enrollment seam, Stage 5 / OD-1 A): the "student" the rest of attendance works
+# with is now a StudentEnrollment (it mirrors the StudentProfile API via convenience
+# properties `.user`/`.current_batch`/`.academic_status`). The API's `studentId` stays the
+# StudentProfile id; these helpers resolve that to the enrollment record.
 
 
 def all_active_students_in_branch(branch_id):
-    """Active students across all batches of a branch."""
+    """Active enrollments across all batches of a branch."""
     return (
-        StudentProfile.objects.filter(
-            current_batch__course__department__branch_id=branch_id,
-            academic_status=AcademicStatus.ACTIVE,
+        StudentEnrollment.objects.filter(
+            branch_id=branch_id,
+            status=EnrollmentStatus.ACTIVE,
             is_active=True,
         )
-        .select_related("user", "current_batch")
-        .order_by("user__first_name")
+        .select_related("student_profile__user", "batch")
+        .order_by("student_profile__user__first_name")
     )
 
 
@@ -40,40 +48,39 @@ def attendance_mode(branch) -> str:
 
 
 def students_in_batch(batch_id):
-    """Active students currently placed in a batch (the class roster)."""
-    return (
-        StudentProfile.objects.filter(
-            current_batch_id=batch_id, academic_status=AcademicStatus.ACTIVE, is_active=True
-        )
-        .select_related("user")
-        .order_by("user__first_name")
-    )
+    """Active enrollments currently placed in a batch (the class roster)."""
+    return enrollment_q.enrollments_in_batch(batch_id)
 
 
 def student_ids_in_batch(batch_id) -> list:
     return list(students_in_batch(batch_id).values_list("id", flat=True))
 
 
-def get_student_profile_in_branch(branch_id, student_id) -> StudentProfile | None:
+def get_student_profile_in_branch(branch_id, student_id):
+    """Resolve the API's `studentId` (a StudentProfile id) to that student's active
+    enrollment within the branch, creating it if missing (enrollment-seam shim)."""
     try:
-        return StudentProfile.objects.select_related("user", "current_batch").get(
+        profile = StudentProfile.objects.select_related("user", "current_batch").get(
             pk=student_id,
             current_batch__course__department__branch_id=branch_id,
             is_active=True,
         )
     except (StudentProfile.DoesNotExist, ValueError, TypeError):
         return None
+    return enrollment_q.resolve_enrollment_for_profile(profile)
 
 
-def student_for_guardian(guardian_user_id, student_profile_id) -> StudentProfile | None:
-    """Return the student profile only if this parent is linked to that student (F-112)."""
+def student_for_guardian(guardian_user_id, student_profile_id):
+    """Return the student's active enrollment only if this parent is linked (F-112)."""
     from apps.accounts.models.guardian import StudentGuardianLink
 
     link = StudentGuardianLink.objects.filter(
         guardian_id=guardian_user_id, student__student_profile__pk=student_profile_id,
         is_active=True,
     ).select_related("student__student_profile", "student__student_profile__current_batch").first()
-    return link.student.student_profile if link else None
+    if not link:
+        return None
+    return enrollment_q.resolve_enrollment_for_profile(link.student.student_profile)
 
 
 def is_student_holiday(branch_id, date) -> bool:

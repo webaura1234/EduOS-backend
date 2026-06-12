@@ -52,7 +52,7 @@ def test_student_fee_assignment_unique_constraint(branch, academic_year, student
     )
     
     StudentFeeAssignment.objects.create(
-        student=student_profile,
+        student=student_profile.enrollment,
         fee_structure=fs,
         structure_snapshot=fs.components,
     )
@@ -60,7 +60,7 @@ def test_student_fee_assignment_unique_constraint(branch, academic_year, student
     # Attempting to create duplicate assignment should fail
     with pytest.raises(Exception):  # UniqueConstraint IntegrityError
         StudentFeeAssignment.objects.create(
-            student=student_profile,
+            student=student_profile.enrollment,
             fee_structure=fs,
             structure_snapshot=fs.components,
         )

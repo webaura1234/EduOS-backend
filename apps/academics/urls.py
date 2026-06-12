@@ -18,6 +18,7 @@ from apps.academics.views.curriculum import (
     BatchFacultyListCreateView,
     BatchSubjectDetailView,
     BatchSubjectListCreateView,
+    SubjectArchiveView,
     SubjectDetailView,
     SubjectListCreateView,
 )
@@ -76,6 +77,7 @@ urlpatterns = [
     # Curriculum
     path("subjects/", SubjectListCreateView.as_view(), name="subjects"),
     path("subjects/<uuid:subject_id>/", SubjectDetailView.as_view(), name="subject-detail"),
+    path("subjects/<uuid:subject_id>/archive/", SubjectArchiveView.as_view(), name="subject-archive"),
     path("batch-subjects/", BatchSubjectListCreateView.as_view(), name="batch-subjects"),
     path("batch-subjects/<uuid:batch_subject_id>/", BatchSubjectDetailView.as_view(), name="batch-subject-detail"),
     path("batch-faculty/", BatchFacultyListCreateView.as_view(), name="batch-faculty"),

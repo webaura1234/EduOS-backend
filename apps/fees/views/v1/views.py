@@ -482,7 +482,7 @@ class StudentPortalDuesView(APIView):
         except StudentProfile.DoesNotExist:
             raise ValidationError("Student profile not found.")
 
-        invoices = list_dues_for_student(student.id)
+        invoices = list_dues_for_student_user(student.user_id)
         return Response(FeeInvoiceSerializer(invoices, many=True).data)
 
 
@@ -496,7 +496,7 @@ class StudentPortalReceiptsView(APIView):
         except StudentProfile.DoesNotExist:
             raise ValidationError("Student profile not found.")
 
-        receipts = list_receipts_for_student(student.id)
+        receipts = list_receipts_for_student(student.user_id)
         return Response(ReceiptSerializer(receipts, many=True).data)
 
 

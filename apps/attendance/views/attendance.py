@@ -65,9 +65,13 @@ class SessionRosterView(APIView):
         session = session_q.get_session(branch.pk, session_id)
         if not session:
             return Response({"error": "Not found."}, status=http.HTTP_404_NOT_FOUND)
-        existing = {str(r.student_id): r.status for r in record_q.list_records_for_session(session.pk)}
+        existing = {
+            str(r.student.student_profile_id): r.status
+            for r in record_q.list_records_for_session(session.pk)
+        }
         roster = [
-            {"studentId": str(sp.pk), "name": sp.user.full_name, "status": existing.get(str(sp.pk))}
+            {"studentId": str(sp.student_profile_id), "name": sp.user.full_name,
+             "status": existing.get(str(sp.student_profile_id))}
             for sp in roster_q.students_in_batch(session.batch_id)
         ]
         return Response({"session": AttendanceSessionSerializer(session).data, "roster": roster})
@@ -170,7 +174,8 @@ class FlaggedQueueView(APIView):
     def get(self, request) -> Response:
         branch = resolve_branch(request)
         rows = [
-            {"recordId": str(r.pk), "studentId": str(r.student_id), "name": r.student.user.full_name,
+            {"recordId": str(r.pk), "studentId": str(r.student.student_profile_id),
+             "name": r.student.user.full_name,
              "sessionId": str(r.session_id), "markedAt": r.marked_at.isoformat()}
             for r in record_q.list_flagged(branch.pk)
         ]
@@ -186,7 +191,10 @@ class StudentSummaryView(APIView):
         profile = getattr(request.user, "student_profile", None)
         if not profile:
             return Response({"error": "Student profile not found."}, status=http.HTTP_404_NOT_FOUND)
-        return Response(report_i.student_summary(branch, profile))
+        enrollment = roster_q.get_student_profile_in_branch(branch.pk, profile.pk)
+        if not enrollment:
+            return Response({"error": "No active enrollment."}, status=http.HTTP_404_NOT_FOUND)
+        return Response(report_i.student_summary(branch, enrollment))
 
 
 class ChildSummaryView(APIView):

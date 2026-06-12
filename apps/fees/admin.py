@@ -29,7 +29,7 @@ class FeeStructureAdmin(admin.ModelAdmin):
 class FeeInvoiceAdmin(admin.ModelAdmin):
     list_display = ["id", "student", "branch", "due_date", "total_paise", "paid_paise", "status", "created_at"]
     list_filter = ["branch", "status"]
-    search_fields = ["student__user__first_name", "student__user__last_name", "id"]
+    search_fields = ["student__student_profile__user__first_name", "student__student_profile__user__last_name", "id"]
 
 
 @admin.register(FeeInvoiceLine)

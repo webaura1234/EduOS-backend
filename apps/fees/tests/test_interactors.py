@@ -140,7 +140,7 @@ def test_concessions_and_credit_notes(branch, student_profile, academic_year, ba
     # Request concession
     req_creator = CreateConcessionRequestInteractor(
         branch=branch,
-        student=student_profile,
+        student=student_profile.enrollment,
         rule_id=rule.id,
         amount_paise=500, # 10% of 5000
         requested_by=admin,
@@ -169,7 +169,7 @@ def test_concessions_and_credit_notes(branch, student_profile, academic_year, ba
     # Credit Note (retroactive scholarship)
     cn = CreateCreditNoteInteractor(
         branch=branch,
-        student=student_profile,
+        student=student_profile.enrollment,
         invoice_id=invoice.id,
         amount_paise=1000,
         reason="Good grades credit",

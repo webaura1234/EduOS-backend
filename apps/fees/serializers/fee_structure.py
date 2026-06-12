@@ -46,3 +46,10 @@ class StudentFeeAssignmentSerializer(serializers.ModelSerializer):
             "createdAt",
         ]
         read_only_fields = ["id", "structureSnapshot", "discountLines", "createdAt"]
+
+    def to_representation(self, instance):
+        # `student` FK is a StudentEnrollment; expose the StudentProfile id (stable API).
+        data = super().to_representation(instance)
+        if instance.student_id:
+            data["student"] = str(instance.student.student_profile_id)
+        return data

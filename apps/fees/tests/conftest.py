@@ -49,11 +49,17 @@ def student_user(tenant, branch):
 @pytest.fixture
 def student_profile(student_user, batch):
     from apps.accounts.models.profile import AcademicStatus
-    return StudentProfile.objects.create(
+    from apps.admissions.queries.enrollment import resolve_enrollment_for_profile
+    profile = StudentProfile.objects.create(
         user=student_user,
         current_batch=batch,
         academic_status=AcademicStatus.ACTIVE,
     )
+    # Enrollment seam (Stage 5): fees rows key off StudentEnrollment. Attach the
+    # student's enrollment so direct-ORM test setups can target it via
+    # `student=student_profile.enrollment`.
+    profile.enrollment = resolve_enrollment_for_profile(profile)
+    return profile
 
 
 @pytest.fixture

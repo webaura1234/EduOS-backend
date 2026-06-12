@@ -32,7 +32,7 @@ def test_fee_structure_serializer(branch, academic_year):
 def test_invoice_serializer(branch, student_profile):
     invoice = FeeInvoice.objects.create(
         branch=branch,
-        student=student_profile,
+        student=student_profile.enrollment,
         total_paise=10000,
         paid_paise=0,
     )

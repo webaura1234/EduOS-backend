@@ -68,7 +68,7 @@ def test_generate_invoices_api(admin_client, branch, batch, academic_year, stude
     
     resp = admin_client.post(url, payload, format="json")
     assert resp.status_code == status.HTTP_201_CREATED, resp.content
-    assert FeeInvoice.objects.filter(student=student_profile).count() == 1
+    assert FeeInvoice.objects.filter(student=student_profile.enrollment).count() == 1
 
 
 def test_student_and_parent_portal_dues(student_client, parent_client, student_profile, parent_user, guardian_link, branch, academic_year, batch):

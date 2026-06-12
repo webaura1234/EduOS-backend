@@ -36,7 +36,7 @@ def create_receipt(*, branch, payment, sequence_number, financial_year, issued_a
 
 def list_receipts(branch_id, student_id=None):
     qs = Receipt.objects.filter(branch_id=branch_id, is_active=True).select_related(
-        "payment", "payment__invoice", "payment__invoice__student", "payment__invoice__student__user"
+        "payment", "payment__invoice", "payment__invoice__student", "payment__invoice__student__student_profile__user"
     )
     if student_id:
         qs = qs.filter(payment__invoice__student_id=student_id)

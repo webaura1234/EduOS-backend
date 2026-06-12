@@ -12,7 +12,8 @@ def guardian_portal_link(guardian_user_id, student_user_id):
     ).first()
 
 
-def list_receipts_for_student(student_id):
+def list_receipts_for_student(student_user_id):
+    """Receipts for a student, keyed by the student's User id (enrollment-seam safe)."""
     return Receipt.objects.filter(
-        payment__invoice__student_id=student_id, is_active=True
+        payment__invoice__student__student_profile__user_id=student_user_id, is_active=True
     ).select_related("payment", "payment__invoice").order_by("-issued_at")

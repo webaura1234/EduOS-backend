@@ -41,7 +41,7 @@ def update_refund(refund: Refund, fields: dict, user=None) -> Refund:
 
 def list_refunds(branch_id, status=None):
     qs = Refund.objects.filter(payment__invoice__branch_id=branch_id, is_active=True).select_related(
-        "payment", "payment__invoice", "payment__invoice__student", "payment__invoice__student__user"
+        "payment", "payment__invoice", "payment__invoice__student", "payment__invoice__student__student_profile__user"
     )
     if status:
         qs = qs.filter(status=status)

@@ -15,6 +15,7 @@ from apps.accounts.tests.factories import UserFactory
 from apps.accounts.tokens import generate_access_token
 from apps.attendance.enums import AttendanceStatus, SessionStatus
 from apps.attendance.models import AttendanceRecord, AttendanceSession
+from apps.admissions.models import StudentEnrollment
 from apps.organizations.models import TenantSettings
 from apps.organizations.tests.factories import BranchFactory, TenantFactory
 
@@ -60,8 +61,11 @@ def env():
                      must_change_password=False)
     p1 = StudentProfile.objects.create(user=s1, current_batch=batch, academic_status=AcademicStatus.ACTIVE)
     p2 = StudentProfile.objects.create(user=s2, current_batch=batch, academic_status=AcademicStatus.ACTIVE)
+    # Enrollment seam (Stage 5): attendance keys off StudentEnrollment.
+    e1 = StudentEnrollment.objects.create(branch=branch, student_profile=p1, batch=batch, academic_year=year)
+    e2 = StudentEnrollment.objects.create(branch=branch, student_profile=p2, batch=batch, academic_year=year)
     return dict(tenant=tenant, branch=branch, year=year, period=period, batch=batch, bs=bs,
-                slot=slot, admin=admin, faculty=faculty, p1=p1, p2=p2)
+                slot=slot, admin=admin, faculty=faculty, p1=p1, p2=p2, e1=e1, e2=e2)
 
 
 def _open_session(env, date=None):
@@ -110,7 +114,7 @@ def test_late_mark_audited(env, monkeypatch):
     monkeypatch.setattr("apps.attendance.interactors.marking.timezone.now", lambda: late_now)
     c.post(reverse("attendance:session-mark", kwargs={"session_id": sid}),
            {"marks": [{"studentId": str(env["p1"].id), "status": "present"}]}, format="json")
-    rec = AttendanceRecord.objects.get(session_id=sid, student=env["p1"])
+    rec = AttendanceRecord.objects.get(session_id=sid, student=env["e1"])
     assert rec.late_mark is True
     assert rec.audits.filter(audit_type="late_marking").exists()
 
@@ -121,7 +125,7 @@ def test_geo_fence_flagged(env):
     c.post(reverse("attendance:session-mark", kwargs={"session_id": sid}),
            {"marks": [{"studentId": str(env["p1"].id), "status": "present",
                        "geoLat": "1.0", "geoLng": "1.0", "geoValid": False}]}, format="json")
-    rec = AttendanceRecord.objects.get(session_id=sid, student=env["p1"])
+    rec = AttendanceRecord.objects.get(session_id=sid, student=env["e1"])
     assert rec.status == AttendanceStatus.FLAGGED
     assert rec.audits.filter(audit_type="geo_fence_failure").exists()
     flagged = _data(_client(env["admin"]).get(reverse("attendance:flagged")))["flagged"]
@@ -133,7 +137,7 @@ def test_retroactive_correction(env):
     sid, c = _open_session(env)
     c.post(reverse("attendance:session-mark", kwargs={"session_id": sid}),
            {"marks": [{"studentId": str(env["p1"].id), "status": "present"}]}, format="json")
-    rec = AttendanceRecord.objects.get(session_id=sid, student=env["p1"])
+    rec = AttendanceRecord.objects.get(session_id=sid, student=env["e1"])
     resp = _client(env["admin"]).patch(
         reverse("attendance:record-correct", kwargs={"record_id": str(rec.id)}),
         {"newStatus": "absent", "reason": "Marked wrong"}, format="json")
@@ -156,7 +160,7 @@ def test_exam_day_excluded_from_percent(env):
                                             period_slot=env["slot"], date=datetime.date(2024, 7, 2),
                                             status=SessionStatus.COMPLETED, is_exam_day=True)
     for sess in (normal, exam):
-        AttendanceRecord.objects.create(session=sess, student=env["p1"], status="absent",
+        AttendanceRecord.objects.create(session=sess, student=env["e1"], status="absent",
                                         marked_at=datetime.datetime.now(),
                                         idempotency_key=f"{sess.id}:{env['p1'].id}")
     summary = _data(_client(env["p1"].user).get(reverse("attendance:student-summary")))
@@ -171,7 +175,7 @@ def test_leave_apply_approve_converts_absence(env):
     sess = AttendanceSession.objects.create(branch=env["branch"], batch=env["batch"], batch_subject=env["bs"],
                                             period_slot=env["slot"], date=datetime.date(2024, 7, 10),
                                             status=SessionStatus.COMPLETED)
-    AttendanceRecord.objects.create(session=sess, student=env["p1"], status="absent",
+    AttendanceRecord.objects.create(session=sess, student=env["e1"], status="absent",
                                     marked_at=datetime.datetime.now(),
                                     idempotency_key=f"{sess.id}:{env['p1'].id}")
     # Student applies for leave covering that date.
@@ -185,8 +189,8 @@ def test_leave_apply_approve_converts_absence(env):
         reverse("attendance:leave-review", kwargs={"leave_id": leave_id}),
         {"action": "approve"}, format="json")
     assert review.status_code == 200
-    AttendanceRecord.objects.get(session=sess, student=env["p1"]).refresh_from_db()
-    assert AttendanceRecord.objects.get(session=sess, student=env["p1"]).status == "leave"
+    AttendanceRecord.objects.get(session=sess, student=env["e1"]).refresh_from_db()
+    assert AttendanceRecord.objects.get(session=sess, student=env["e1"]).status == "leave"
 
 
 # ── Shortage report respects threshold (F-105) ────────────────────────────────
@@ -196,11 +200,11 @@ def test_shortage_report(env):
         sess = AttendanceSession.objects.create(branch=env["branch"], batch=env["batch"], batch_subject=env["bs"],
                                                 period_slot=env["slot"], date=datetime.date(2024, 7, i + 1),
                                                 status=SessionStatus.COMPLETED)
-        AttendanceRecord.objects.create(session=sess, student=env["p1"],
+        AttendanceRecord.objects.create(session=sess, student=env["e1"],
                                         status="present" if i == 0 else "absent",
                                         marked_at=datetime.datetime.now(),
                                         idempotency_key=f"{sess.id}:{env['p1'].id}")
-        AttendanceRecord.objects.create(session=sess, student=env["p2"], status="present",
+        AttendanceRecord.objects.create(session=sess, student=env["e2"], status="present",
                                         marked_at=datetime.datetime.now(),
                                         idempotency_key=f"{sess.id}:{env['p2'].id}")
     rows = _data(_client(env["admin"]).get(reverse("attendance:report-shortage")))["rows"]
