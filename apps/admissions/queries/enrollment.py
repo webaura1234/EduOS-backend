@@ -113,6 +113,19 @@ def create_enrollment(*, branch, student_profile, batch, academic_year, applicat
     )
 
 
+def soft_delete_enrollment_by_id(enrollment_id, user=None) -> bool:
+    """Soft-delete an enrollment created by a rollover run (undo, EC-ROL-02)."""
+    enr = StudentEnrollment.objects.filter(pk=enrollment_id, is_active=True).first()
+    if not enr:
+        return False
+    enr.is_active = False
+    enr.status = EnrollmentStatus.WITHDRAWN
+    if user:
+        enr.updated_by = user
+    enr.save(update_fields=["is_active", "status", "updated_by", "updated_at"])
+    return True
+
+
 def update_enrollment(enrollment: StudentEnrollment, fields: dict, user=None) -> StudentEnrollment:
     for k, v in fields.items():
         setattr(enrollment, k, v)

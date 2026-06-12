@@ -24,6 +24,16 @@ def _enrollment_id(student_profile):
     return enr.pk if enr else None
 
 
+def _pending_arrears(student_profile) -> list[dict]:
+    """Carried-forward arrears surfaced on the hub (EC-ROL-05)."""
+    enr = enrollment_q.resolve_enrollment_for_profile(student_profile)
+    if not enr:
+        return []
+    return [
+        {**a, "status": "pending_arrear"} for a in (enr.backlog_subjects or [])
+    ]
+
+
 def _serialize_slot(slot) -> dict:
     date, start_time, _ = split_datetime(slot.start_at)
     local_end = timezone.localtime(slot.end_at)
@@ -124,6 +134,7 @@ def build_exam_hub(student_profile, *, tenant) -> dict:
         "upcomingExams": [_serialize_slot(s) for s in slots],
         "hallTicketAvailable": college and exam_fee_paid,
         "publishedResults": _published_result_rows(student_profile),
+        "pendingArrears": _pending_arrears(student_profile),
     }
 
 

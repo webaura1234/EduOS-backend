@@ -9,6 +9,35 @@ from apps.examinations.enums import MarksAuditType, MarksStatus
 from apps.examinations.models import MarksAudit, MarksEntry
 
 
+def open_arrear_subjects(enrollment_id) -> list[dict]:
+    """Subjects the student has failed in published exams = open arrears (EC-ROL-05 / OD-1).
+
+    Derived from results: a published, submitted/locked mark below the subject's pass mark
+    (after grace) is an arrear. Returns [{"subjectId", "subjectName", "examId"}].
+    """
+    entries = (
+        MarksEntry.objects.filter(
+            student_id=enrollment_id,
+            exam__is_published=True,
+            marks_status__in=[MarksStatus.SUBMITTED, MarksStatus.LOCKED],
+            is_active=True,
+        )
+        .select_related("subject", "exam")
+    )
+    arrears = []
+    for e in entries:
+        if e.is_absent or e.marks is None:
+            continue
+        final = e.marks + (e.grace_applied or Decimal("0"))
+        if final < e.subject.pass_marks:
+            arrears.append({
+                "subjectId": str(e.subject_id),
+                "subjectName": e.subject.name,
+                "examId": str(e.exam_id),
+            })
+    return arrears
+
+
 def count_for_subject(subject_id) -> int:
     """Used by academics subject archive guard (EC-DATA-02 / F-096)."""
     return MarksEntry.objects.filter(subject_id=subject_id, is_active=True).count()

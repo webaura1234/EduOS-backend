@@ -15,6 +15,8 @@ from apps.academics.queries import calendar as cal_q
 from apps.academics.queries import rollover as rol_q
 from apps.academics.queries import structure as struct_q
 from apps.academics.queries import timetable as tt_q
+from apps.admissions.queries import enrollment as enr_q
+from apps.examinations.queries import marks as exam_marks_q
 from apps.organizations.models import Branch
 
 ROLLOVER_ASYNC_THRESHOLD = 200
@@ -73,18 +75,27 @@ def build_preview(branch_id, tenant) -> RolloverPreviewDTO:
             "full arrear enrollment copy requires the Examinations module (EC-ROL-05)."
         )
 
+    college = is_college(tenant)
     for profile in students:
         batch = profile.current_batch
         if not batch:
             continue
         next_course = _get_next_course(batch.course.department_id, batch.course_id)
         if next_course is None:
+            # Final year: graduates unless college arrears remain (EC-ROL-05).
+            to_class = "Graduated"
+            if college:
+                old_enr = enr_q.get_active_enrollment_for_profile(
+                    profile.pk, academic_year_id=current.pk
+                )
+                if old_enr and exam_marks_q.open_arrear_subjects(old_enr.pk):
+                    to_class = "Retained (arrears pending)"
             promotions.append(
                 RolloverStudentPreviewDTO(
                     student_id=str(profile.user_id),
                     name=profile.user.full_name,
                     from_class=_batch_label(batch),
-                    to_class="Graduated",
+                    to_class=to_class,
                 )
             )
         else:
@@ -201,29 +212,73 @@ def _execute_rollover_sync(
         )
         batch_map[str(ob.pk)] = str(nb.pk)
 
+    college = is_college(tenant)
     students = rol_q.list_students_in_year(branch.pk, current.pk)
+    student_actions: list[dict] = []
     for profile in students:
         batch = profile.current_batch
         if not batch:
             continue
-        next_course = _get_next_course(batch.course.department_id, batch.course_id)
-        if next_course is None:
-            rol_q.graduate_student(profile, user=user)
-            continue
-        dest_qs = struct_q.list_batches(
-            branch.pk, course_id=next_course.pk, academic_year_id=new_year.pk
+
+        # Carried-forward arrears (college only), derived from the prior-year enrollment.
+        backlog: list[dict] = []
+        old_enrollment = enr_q.get_active_enrollment_for_profile(
+            profile.pk, academic_year_id=current.pk
         )
-        dest = dest_qs.filter(name=batch.name).first()
-        if not dest:
-            dest = struct_q.create_batch(
-                course=next_course,
-                academic_year=new_year,
-                name=batch.name,
-                capacity=batch.capacity,
-                class_teacher_id=batch.class_teacher_id,
-                user=user,
+        if college and old_enrollment:
+            backlog = exam_marks_q.open_arrear_subjects(old_enrollment.pk)
+
+        prior_batch_id = str(batch.pk)
+        prior_status = profile.academic_status
+        next_course = _get_next_course(batch.course.department_id, batch.course_id)
+
+        if next_course is None:
+            if backlog:
+                # Final-year with open arrears: retained in the same final batch (new-year
+                # equivalent) to re-sit; NOT graduated until backlog clears (EC-ROL-05).
+                dest = struct_q.get_batch(branch.pk, batch_map[str(batch.pk)])
+                new_enr = enr_q.create_enrollment(
+                    branch=branch, student_profile=profile, batch=dest,
+                    academic_year=new_year, backlog_subjects=backlog, user=user,
+                )
+                rol_q.set_student_batch(profile, dest.pk, user=user)
+                action, new_enr_id, new_batch_id = "retained_arrear", str(new_enr.pk), str(dest.pk)
+            else:
+                rol_q.graduate_student(profile, user=user)
+                action, new_enr_id, new_batch_id = "graduated", None, None
+        else:
+            dest_qs = struct_q.list_batches(
+                branch.pk, course_id=next_course.pk, academic_year_id=new_year.pk
             )
-        rol_q.set_student_batch(profile, dest.pk, user=user)
+            dest = dest_qs.filter(name=batch.name).first()
+            if not dest:
+                dest = struct_q.create_batch(
+                    course=next_course,
+                    academic_year=new_year,
+                    name=batch.name,
+                    capacity=batch.capacity,
+                    class_teacher_id=batch.class_teacher_id,
+                    user=user,
+                )
+            new_enr = enr_q.create_enrollment(
+                branch=branch, student_profile=profile, batch=dest,
+                academic_year=new_year, backlog_subjects=backlog, user=user,
+            )
+            rol_q.set_student_batch(profile, dest.pk, user=user)
+            action, new_enr_id, new_batch_id = "promoted", str(new_enr.pk), str(dest.pk)
+
+        student_actions.append({
+            "student_profile_id": str(profile.pk),
+            "user_id": str(profile.user_id),
+            "prior_current_batch_id": prior_batch_id,
+            "prior_academic_status": prior_status,
+            "action": action,
+            "new_enrollment_id": new_enr_id,
+            "new_batch_id": new_batch_id,
+            "backlog_subjects": backlog,
+        })
+
+    snapshot["student_actions"] = student_actions
 
     tt_q.soft_delete_timetable_entries_for_branch_year(branch.pk, current.pk, user=user)
 
@@ -286,6 +341,11 @@ def undo_rollover(*, branch_id, user=None):
             academic_status=statuses.get(sid, AcademicStatus.ACTIVE),
             user=user,
         )
+
+    # Soft-delete the enrollments this run created (EC-ROL-02).
+    for act in snap.get("student_actions", []):
+        if act.get("new_enrollment_id"):
+            enr_q.soft_delete_enrollment_by_id(act["new_enrollment_id"], user=user)
 
     # Order matters: drop the new year's current flag BEFORE reactivating the old
     # one, or the unique-current-year constraint would be violated.
