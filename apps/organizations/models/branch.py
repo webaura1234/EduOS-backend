@@ -9,6 +9,12 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 from apps.core.models import BaseModel
+from apps.organizations.models.institution import hex_color_validator
+
+
+def default_working_days() -> list:
+    """Working day-of-week numbers (0=Sun..6=Sat). Default: Mon–Sat working."""
+    return [1, 2, 3, 4, 5, 6]
 
 
 class Branch(BaseModel):
@@ -36,6 +42,16 @@ class Branch(BaseModel):
         help_text="True for the default campus created at tenant onboarding.",
     )
 
+    # Branding overrides — blank means "inherit from the tenant" (effective_* props below).
+    # Use these only when a branch is a distinct sub-brand (e.g. a College under a School group).
+    logo_s3_key = models.CharField(max_length=500, blank=True, default="")
+    primary_color = models.CharField(
+        max_length=7, blank=True, default="", validators=[hex_color_validator],
+    )
+    accent_color = models.CharField(
+        max_length=7, blank=True, default="", validators=[hex_color_validator],
+    )
+
     # Address (may differ from Tenant address for multi-campus)
     address = models.TextField(blank=True, default="")
     city = models.CharField(max_length=100, blank=True, default="")
@@ -45,6 +61,9 @@ class Branch(BaseModel):
 
     # Localization — inherits from Tenant if null
     timezone = models.CharField(max_length=50, blank=True, null=True)
+
+    # Working days for the academic calendar (list of day-of-week ints, 0=Sun..6=Sat).
+    working_days = models.JSONField(default=default_working_days, blank=True)
 
     # Academic calendar config
     academic_year_start_month = models.PositiveSmallIntegerField(
@@ -80,3 +99,16 @@ class Branch(BaseModel):
     @property
     def effective_timezone(self) -> str:
         return self.timezone or self.tenant.timezone
+
+    # Branding inheritance — a branch value wins only when set; otherwise inherit tenant.
+    @property
+    def effective_logo_key(self) -> str:
+        return self.logo_s3_key or self.tenant.logo_s3_key
+
+    @property
+    def effective_primary_color(self) -> str:
+        return self.primary_color or self.tenant.primary_color
+
+    @property
+    def effective_accent_color(self) -> str:
+        return self.accent_color or self.tenant.accent_color

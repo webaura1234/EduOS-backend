@@ -101,3 +101,17 @@ def update_payment(payment: Payment, fields: dict, user=None) -> Payment:
 
 def list_payments_for_invoice(invoice_id):
     return Payment.objects.filter(invoice_id=invoice_id, is_active=True).order_by("-created_at")
+
+
+def list_payments_for_branch(branch_id, *, limit=300):
+    """Recent payments across a branch (admin fees screen)."""
+    return (
+        Payment.objects.filter(invoice__branch_id=branch_id, is_active=True)
+        .select_related(
+            "invoice",
+            "invoice__student__student_profile__user",
+            "invoice__student__batch",
+            "receipt",
+        )
+        .order_by("-created_at")[:limit]
+    )

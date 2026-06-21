@@ -43,6 +43,10 @@ if _use_postgres:
     if _sslmode and _sslmode != "disable":
         DATABASES["default"].setdefault("OPTIONS", {})  # noqa: F405
         DATABASES["default"]["OPTIONS"]["sslmode"] = _sslmode
+    # Neon's pooled endpoint (host ends in "-pooler") runs PgBouncer in transaction
+    # mode, which does NOT support server-side cursors → "InvalidCursorName" errors.
+    # Disabling them is the supported fix for any transaction-pooled Postgres.
+    DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True  # noqa: F405
 else:
     DATABASES = {
         "default": {

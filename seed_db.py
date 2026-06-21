@@ -31,6 +31,8 @@ from apps.organizations.models import (  # noqa: E402
 )
 
 DEFAULT_PASSWORD = "Password123!"
+PLATFORM_OWNER_PHONE = "+919000000001"
+PLATFORM_OWNER_PASSWORD = "Platform@123"
 
 # Per-plan subscription limits.
 _PLAN_LIMITS = {
@@ -134,14 +136,19 @@ def seed():
         parent_access_enabled=False, phone_prefix="+9197654321",
     )
 
-    # Platform owner (SaaS operator) — no tenant.
+    # Platform owner (SaaS operator) — no tenant. Matches frontend mock login hint.
     po, created = User.objects.get_or_create(
-        role=Role.PLATFORM_OWNER, phone="+919000000000",
-        defaults=dict(first_name="Platform", last_name="Owner",
+        role=Role.PLATFORM_OWNER, phone=PLATFORM_OWNER_PHONE,
+        defaults=dict(first_name="Gopal", last_name="Platform Owner",
                       tenant=None, branch=None, must_change_password=False, is_active=True),
     )
-    _ensure_password(po)
-    print(f"\nPlatform Owner +919000000000 [{'created' if created else 'exists'}]  (pass: {DEFAULT_PASSWORD})")
+    if not po.has_usable_password() or not po.check_password(PLATFORM_OWNER_PASSWORD):
+        po.set_password(PLATFORM_OWNER_PASSWORD)
+        po.save(update_fields=["password"])
+    print(
+        f"\nPlatform Owner {PLATFORM_OWNER_PHONE} "
+        f"[{'created' if created else 'exists'}]  (pass: {PLATFORM_OWNER_PASSWORD})"
+    )
 
     print("\nSeeding completed successfully!")
 

@@ -56,6 +56,15 @@ def send_sms(phone: str, message: str) -> None:
         )
 
     if settings.DEBUG:
+        # Dev: no real SMS is sent — print the message (incl. any OTP) straight to the
+        # server terminal so developers can read the code during local testing.
+        print(
+            "\n============== [DEV SMS — not actually sent] ==============\n"
+            f"  To:      {phone}\n"
+            f"  Message: {message}\n"
+            "===========================================================\n",
+            flush=True,
+        )
         logger.info("📩 [DEV SMS] to %s: %s", phone, message)
         _record_success()
         return

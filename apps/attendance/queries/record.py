@@ -34,6 +34,22 @@ def list_records_for_session(session_id):
     )
 
 
+def list_records_for_branch(branch_id, *, limit=200):
+    """Most-recent attendance records across a branch (admin overview)."""
+    return (
+        AttendanceRecord.objects.filter(session__branch_id=branch_id, is_active=True)
+        .select_related(
+            "session",
+            "session__batch",
+            "session__batch_subject__subject",
+            "session__period_slot",
+            "student__student_profile__user",
+            "marked_by",
+        )
+        .order_by("-marked_at")[:limit]
+    )
+
+
 def upsert_record(*, session, student, status, marked_at, marked_by=None,
                   geo_lat=None, geo_lng=None, late_mark=False, user=None) -> tuple[AttendanceRecord, bool]:
     """

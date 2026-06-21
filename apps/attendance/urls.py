@@ -17,10 +17,18 @@ from apps.attendance.views.attendance import (
     StudentSummaryView,
 )
 from apps.attendance.views.leave import AuditLogView, LeaveListCreateView, LeaveReviewView
+from apps.attendance.views.overview import (
+    AdminAttendanceLiveView,
+    AdminAttendanceOverviewView,
+)
 
 app_name = "attendance"
 
 urlpatterns = [
+    # Admin aggregate (AttendanceData shape) + polled live snapshot
+    path("admin-overview/", AdminAttendanceOverviewView.as_view(), name="admin-overview"),
+    path("admin-overview/live/", AdminAttendanceLiveView.as_view(), name="admin-live"),
+
     # Marking (faculty/admin)
     path("sessions/", SessionOpenView.as_view(), name="session-open"),
     path("sessions/<uuid:session_id>/", SessionDetailView.as_view(), name="session-detail"),

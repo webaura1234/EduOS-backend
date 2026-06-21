@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 
+from apps.organizations.branding import tenant_theme
 from apps.organizations.queries.tenant import (
     get_active_tenant_by_subdomain,
     get_tenant_id_labels,
@@ -36,14 +37,16 @@ class TenantConfigView(APIView):
 
         student_id_label, faculty_id_label = get_tenant_id_labels(tenant)
 
-        logo_url = tenant.logo_s3_key or None
+        theme = tenant_theme(tenant)
 
         return Response(
             {
                 "tenant_id": str(tenant.id),
                 "institution_name": tenant.name,
                 "institution_type": tenant.institution_type,
-                "logo_url": logo_url,
+                # logo_url kept for back-compat; theme.logoUrl is the canonical source.
+                "logo_url": theme["logoUrl"],
+                "theme": theme,
                 "subdomain": tenant.subdomain,
                 "student_id_label": student_id_label,
                 "faculty_id_label": faculty_id_label,

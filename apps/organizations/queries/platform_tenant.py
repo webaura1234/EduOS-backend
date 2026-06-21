@@ -75,7 +75,7 @@ def status_counts() -> dict:
 
 def create_tenant(*, name, subdomain, institution_type, city, state,
                   address_line1="", address_line2="", postal_code="",
-                  parent_access_enabled, settings_json) -> Tenant:
+                  parent_access_enabled, settings_json, user=None) -> Tenant:
     return Tenant.objects.create(
         name=name,
         subdomain=subdomain.strip().lower(),
@@ -88,24 +88,34 @@ def create_tenant(*, name, subdomain, institution_type, city, state,
         parent_access_enabled=parent_access_enabled,
         settings=settings_json,
         status="trial",
+        created_by=user,
+        updated_by=user,
     )
 
 
-def create_settings(tenant) -> TenantSettings:
-    return TenantSettings.objects.create(tenant=tenant)
+def create_settings(tenant, user=None) -> TenantSettings:
+    return TenantSettings.objects.create(tenant=tenant, created_by=user, updated_by=user)
 
 
-def create_subscription(tenant, plan, limits: dict) -> PlanSubscription:
-    return PlanSubscription.objects.create(tenant=tenant, plan=plan, **limits)
+def create_subscription(tenant, plan, limits: dict, user=None) -> PlanSubscription:
+    return PlanSubscription.objects.create(
+        tenant=tenant, plan=plan, created_by=user, updated_by=user, **limits
+    )
 
 
-def create_primary_branch(tenant, name, city, state) -> Branch:
+def create_primary_branch(tenant, name, city, state, user=None) -> Branch:
     return Branch.objects.create(
-        tenant=tenant, name=name, city=city, state=state, is_primary=True
+        tenant=tenant,
+        name=name,
+        city=city,
+        state=state,
+        is_primary=True,
+        created_by=user,
+        updated_by=user,
     )
 
 
-def set_status(tenant: Tenant, *, model_status: str) -> Tenant:
+def set_status(tenant: Tenant, *, model_status: str, user=None) -> Tenant:
     now = timezone.now()
     tenant.status = model_status
     if model_status == "active":
@@ -113,5 +123,7 @@ def set_status(tenant: Tenant, *, model_status: str) -> Tenant:
         tenant.deactivated_at = None
     elif model_status == "deactivated":
         tenant.deactivated_at = now
-    tenant.save(update_fields=["status", "activated_at", "deactivated_at"])
+    if user is not None:
+        tenant.updated_by = user
+    tenant.save(update_fields=["status", "activated_at", "deactivated_at", "updated_by"])
     return tenant

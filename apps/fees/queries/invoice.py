@@ -19,6 +19,18 @@ def invoice_exists_for_assignment(assignment_id) -> bool:
     return FeeInvoice.objects.filter(assignment_id=assignment_id, is_active=True).exists()
 
 
+def list_branch_ledger(branch_id):
+    """Open-due invoices for a branch (balance > 0) — super-admin branch fee ledger."""
+    from django.db.models import F
+    return (
+        FeeInvoice.objects.filter(
+            branch_id=branch_id, is_active=True, total_paise__gt=F("paid_paise")
+        )
+        .select_related("student__student_profile__user", "branch")
+        .order_by("-updated_at")
+    )
+
+
 def list_dues_for_student(student_id):
     return FeeInvoice.objects.filter(student_id=student_id, is_active=True).order_by("due_date")
 

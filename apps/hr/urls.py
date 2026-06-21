@@ -2,6 +2,7 @@
 
 from django.urls import path
 
+from apps.hr.views.overview import AdminHROverviewView
 from apps.hr.views.employee import (
     BranchAssignView,
     EmployeeDeactivateView,
@@ -27,6 +28,9 @@ from apps.hr.views.payroll import (
 app_name = "hr"
 
 urlpatterns = [
+    # Admin aggregate overview (HrData shape)
+    path("admin-overview/", AdminHROverviewView.as_view(), name="admin-overview"),
+
     # Employees
     path("employees/", EmployeeListCreateView.as_view(), name="employee-list"),
     path("employees/<uuid:employee_id>/deactivate/", EmployeeDeactivateView.as_view(),

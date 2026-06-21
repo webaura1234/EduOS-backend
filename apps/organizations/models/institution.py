@@ -16,6 +16,17 @@ subdomain_validator = RegexValidator(
     message="Subdomain must be lowercase alphanumeric with hyphens (e.g. greenfield-academy).",
 )
 
+# Branding colors are stored as #RRGGBB hex (validated so a bad value can't break clients).
+hex_color_validator = RegexValidator(
+    regex=r"^#(?:[0-9a-fA-F]{6})$",
+    message="Color must be a #RRGGBB hex value (e.g. #2563EB).",
+)
+
+# Brand defaults — every client falls back to these when nothing is configured.
+# Matches the original design palette (tokens.css --eduos-primary / --eduos-brand).
+DEFAULT_PRIMARY_COLOR = "#1a5f4a"
+DEFAULT_ACCENT_COLOR = "#004634"
+
 
 class Tenant(BaseModel):
     """
@@ -39,8 +50,15 @@ class Tenant(BaseModel):
         help_text="Immutable after the first academic-year rollover.",
     )
 
-    # Branding
+    # Branding — the baseline brand every client (web + mobile) falls back to.
     logo_s3_key = models.CharField(max_length=500, blank=True, default="")
+    # Blank = use the code default (DEFAULT_*). Set only to override the brand color.
+    primary_color = models.CharField(
+        max_length=7, blank=True, default="", validators=[hex_color_validator],
+    )
+    accent_color = models.CharField(
+        max_length=7, blank=True, default="", validators=[hex_color_validator],
+    )
 
     # Contact / Address
     address_line1 = models.CharField(max_length=255, blank=True, default="")

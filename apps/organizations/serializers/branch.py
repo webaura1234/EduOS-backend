@@ -24,6 +24,12 @@ class BranchSerializer(serializers.Serializer):
     geofenceRadiusM = serializers.IntegerField(
         source="geofence_radius_m", read_only=True, allow_null=True,
     )
+    # Resolved branding (branch override → tenant fallback) for white-labeled clients.
+    theme = serializers.SerializerMethodField()
+
+    def get_theme(self, obj) -> dict:
+        from apps.organizations.branding import branch_theme
+        return branch_theme(obj)
 
 
 class CreateBranchSerializer(serializers.Serializer):

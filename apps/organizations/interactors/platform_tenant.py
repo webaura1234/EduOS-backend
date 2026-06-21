@@ -31,7 +31,7 @@ _PLAN_LIMITS = {
 
 
 @transaction.atomic
-def create_tenant(payload: dict):
+def create_tenant(payload: dict, user=None):
     """
     Provision a new tenant from the onboarding wizard payload:
     Tenant + TenantSettings + PlanSubscription + primary Branch + super-admin invite.
@@ -67,17 +67,20 @@ def create_tenant(payload: dict):
             # Parent portal is always on for schools; wizard-driven for colleges.
             parent_access_enabled=(institution_type == "school") or bool(features.get("parentPortal")),
             settings_json={"features": features, "integrations": payload.get("integrations", {})},
+            user=user,
         )
     except IntegrityError as exc:  # subdomain race
         raise ValidationError("Subdomain is already taken.") from exc
 
-    q.create_settings(tenant)
-    q.create_subscription(tenant, plan=plan, limits=_PLAN_LIMITS.get(plan, _PLAN_LIMITS["starter"]))
+    q.create_settings(tenant, user=user)
+    q.create_subscription(
+        tenant, plan=plan, limits=_PLAN_LIMITS.get(plan, _PLAN_LIMITS["starter"]), user=user
+    )
 
     # Primary branch (use first wizard entry name if provided, else "Main Campus").
     entries = branches.get("entries") or []
     primary_name = entries[0]["name"] if entries else "Main Campus"
-    q.create_primary_branch(tenant, name=primary_name, city=city, state=state)
+    q.create_primary_branch(tenant, name=primary_name, city=city, state=state, user=user)
 
     # Super-admin invite (unusable password until they accept the invite).
     create_invited_user(
@@ -89,6 +92,7 @@ def create_tenant(payload: dict):
         phone=invite["superAdminPhone"],
         custom_login_id=None,
         email=None,
+        created_by=user,
     )
 
     logger.info("Tenant provisioned: %s (%s) plan=%s", tenant.name, subdomain, plan)
@@ -96,7 +100,7 @@ def create_tenant(payload: dict):
 
 
 @transaction.atomic
-def change_status(tenant_id, action: str):
+def change_status(tenant_id, action: str, user=None):
     """
     Activate or deactivate a tenant. Deactivation kills all active sessions for the
     tenant's users (EC-TEN-04). Returns (tenant, sessions_terminated, message).
@@ -106,12 +110,12 @@ def change_status(tenant_id, action: str):
         raise ValidationError("Tenant not found.")
 
     if action == "activate":
-        tenant = q.set_status(tenant, model_status="active")
+        tenant = q.set_status(tenant, model_status="active", user=user)
         return tenant, 0, f"{tenant.name} activated."
 
     if action == "deactivate":
         terminated = revoke_tokens_for_tenant(tenant.id)
-        tenant = q.set_status(tenant, model_status="deactivated")
+        tenant = q.set_status(tenant, model_status="deactivated", user=user)
         return tenant, terminated, f"{tenant.name} deactivated. {terminated} session(s) terminated."
 
     raise ValidationError(f"Unsupported action '{action}'.")

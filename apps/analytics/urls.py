@@ -7,6 +7,7 @@ from apps.analytics.views.dashboard import (
     AdminDashboardView,
     CollectionDashboardView,
     SuperAdminDashboardView,
+    StudentDashboardView,
 )
 from apps.analytics.views.report import NaacExportView, ReportCreateView, ReportDetailView
 
@@ -17,6 +18,7 @@ urlpatterns = [
     path("dashboard/admin/", AdminDashboardView.as_view(), name="dashboard-admin"),
     path("dashboard/collection/", CollectionDashboardView.as_view(), name="dashboard-collection"),
     path("dashboard/super-admin/", SuperAdminDashboardView.as_view(), name="dashboard-super-admin"),
+    path("dashboard/student/", StudentDashboardView.as_view(), name="dashboard-student"),
 
     # Audit
     path("audit/", AuditLogListView.as_view(), name="audit-list"),

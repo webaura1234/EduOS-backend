@@ -4,6 +4,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from apps.fees.views import (
+    BranchFeeLedgerView,
     CollectionDashboardView,
     ConcessionRequestViewSet,
     ConcessionRuleViewSet,
@@ -23,6 +24,9 @@ from apps.fees.views import (
     VerifyPaymentCaptureView,
 )
 
+from apps.fees.views.admin_overview import AdminFeesOverviewView
+from apps.fees.views.admin_payment import AdminRecordPaymentByStudentView
+
 app_name = "fees"
 
 router = DefaultRouter()
@@ -34,7 +38,11 @@ router.register("refunds", RefundViewSet, basename="refunds")
 
 urlpatterns = [
     path("", include(router.urls)),
-    
+
+    # Admin aggregate (FeesData shape) + record-payment-by-student
+    path("admin-overview/", AdminFeesOverviewView.as_view(), name="admin-overview"),
+    path("payments/offline-by-student/", AdminRecordPaymentByStudentView.as_view(), name="offline-by-student"),
+
     # Invoices & Assignments
     path("assignments/", StudentFeeAssignmentView.as_view(), name="assignments"),
     path("invoices/generate/", GenerateInvoicesView.as_view(), name="invoices-generate"),
@@ -42,6 +50,7 @@ urlpatterns = [
     # Dashboards & Ops
     path("collection/", CollectionDashboardView.as_view(), name="collection"),
     path("defaulters/", DefaultersListView.as_view(), name="defaulters"),
+    path("branches/<uuid:branch_id>/ledger/", BranchFeeLedgerView.as_view(), name="branch-ledger"),
     
     # Payments, Verify & Webhooks
     path("orders/", CreateOrderView.as_view(), name="orders"),

@@ -98,6 +98,7 @@ def create_and_send_invite(
         phone=phone,
         custom_login_id=custom_login_id,
         email=email,
+        created_by=created_by,
     )
 
     # EC-AUTH-13: link the new account to the existing one(s) sharing this phone.
@@ -112,7 +113,7 @@ def create_and_send_invite(
         logger.info("Linked account created: new=%s group=%s", user.id, group_id)
 
     # Create invite token
-    invite = create_invite_token(user=user, sent_to_phone=phone or "")
+    invite = create_invite_token(user=user, sent_to_phone=phone or "", created_by=created_by)
 
     # Send invite SMS (failures are tolerated — admin can resend)
     _send_invite_sms(phone=phone, token=str(invite.token), user=user)

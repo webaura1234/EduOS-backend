@@ -1,7 +1,17 @@
 """Queries — ConcessionRule, ConcessionRequest, and CreditNote."""
 
 from apps.fees.enums import ConcessionStatus
-from apps.fees.models import ConcessionRequest, ConcessionRule, CreditNote
+from apps.fees.models import (
+    ConcessionRequest,
+    ConcessionRule,
+    CreditNote,
+    WebhookEventLog,
+)
+
+
+def list_webhooks(*, limit=100):
+    """Recent Razorpay webhook events (global; not branch-scoped)."""
+    return WebhookEventLog.objects.filter(is_active=True).order_by("-created_at")[:limit]
 
 
 def list_approved_requests_for_student(student_id):

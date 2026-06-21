@@ -38,3 +38,13 @@ class SuperAdminDashboardView(APIView):
 
     def get(self, request):
         return _with_cache_meta(dash_i.super_admin_dashboard(request.user.tenant))
+
+
+class StudentDashboardView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from rest_framework.exceptions import PermissionDenied
+        if request.user.role != "student":
+            raise PermissionDenied("Only student accounts can read this dashboard.")
+        return _with_cache_meta(dash_i.student_dashboard(request.user))

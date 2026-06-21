@@ -8,29 +8,18 @@ EduOSAuthBackend handles role-based login identifier resolution:
 """
 
 import logging
-import re
 
 from django.contrib.auth.backends import ModelBackend
 
 from apps.accounts.models.user import Role, User
+from apps.accounts.phone import normalize_phone as _normalize_phone
 from apps.accounts.queries.user import get_active_user_for_login
 
 logger = logging.getLogger("apps.accounts.backends")
 
 
-def _normalize_phone(identifier: str) -> str:
-    """Normalize Indian mobile numbers to E.164 (+91...) for lookup."""
-    cleaned = re.sub(r"[\s\-]", "", identifier)
-    if cleaned.startswith("+91"):
-        return cleaned
-    if cleaned.startswith("0") and len(cleaned) == 11:
-        return f"+91{cleaned[1:]}"
-    if re.fullmatch(r"[6-9]\d{9}", cleaned):
-        return f"+91{cleaned}"
-    return identifier
-
-
-# Roles that use phone number as login identifier
+# Re-export for callers that imported from backends.
+normalize_phone = _normalize_phone
 PHONE_LOGIN_ROLES = {Role.SUPER_ADMIN, Role.ADMIN, Role.PARENT}
 
 # Roles that use custom_login_id as login identifier

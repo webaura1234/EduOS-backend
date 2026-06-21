@@ -44,7 +44,7 @@ def _data(resp):
     return resp.json().get("data", resp.json())
 
 
-def test_create_tenant_provisions_everything(client):
+def test_create_tenant_provisions_everything(client, platform_owner):
     resp = client.post(reverse("organizations:platform-tenants"), CREATE_PAYLOAD, format="json")
     assert resp.status_code == 201
     summary = _data(resp)["tenant"]
@@ -55,6 +55,8 @@ def test_create_tenant_provisions_everything(client):
     assert summary["branchCount"] == 1
 
     tenant = Tenant.objects.get(subdomain="newschool")
+    assert tenant.created_by_id == platform_owner.id
+    assert tenant.updated_by_id == platform_owner.id
     assert hasattr(tenant, "subscription") and tenant.subscription.plan == "growth"
     assert tenant.tenant_settings is not None
     assert tenant.branches.count() == 1

@@ -12,10 +12,12 @@ import logging
 import random
 import string
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
 
+from apps.accounts.phone import normalize_phone, phone_lookup_values
 from apps.accounts.constants import (
     OTP_EXPIRY_MINUTES,
     OTP_LENGTH,
@@ -110,10 +112,19 @@ def list_reset_accounts(phone: str, tenant_id: str) -> list[dict]:
     Empty list if none — the caller decides how to present it without leaking
     which specific phones exist.
     """
-    return [
+    phone = normalize_phone(phone.strip())
+    accounts = [
         {"user_id": str(u.id), "role": u.role, "name": u.full_name}
         for u in get_reset_candidates(phone, tenant_id)
     ]
+    if settings.DEBUG:
+        logger.info(
+            "[DEV OTP] reset/accounts phone=%s tenant=%s matches=%d",
+            phone,
+            tenant_id,
+            len(accounts),
+        )
+    return accounts
 
 
 def request_otp_reset(phone: str, tenant_id: str, account_id: str | None = None) -> None:
@@ -133,6 +144,8 @@ def request_otp_reset(phone: str, tenant_id: str, account_id: str | None = None)
 
     Does NOT raise if no account matches (security: don't reveal if phone exists).
     """
+    phone = normalize_phone(phone.strip())
+
     # Rate limit check (apply regardless of whether an account exists)
     otp_count = count_otps_in_window(phone, OTP_WINDOW_MINUTES)
     if otp_count >= OTP_MAX_PER_WINDOW:
@@ -143,6 +156,12 @@ def request_otp_reset(phone: str, tenant_id: str, account_id: str | None = None)
     candidates = get_reset_candidates(phone, tenant_id)
 
     if not candidates:
+        if settings.DEBUG:
+            logger.info(
+                "[DEV OTP] no account for phone=%s tenant=%s — OTP not sent",
+                phone,
+                tenant_id,
+            )
         logger.debug("OTP requested for unknown phone=%s tenant=%s", phone, tenant_id)
         return  # don't leak account existence
 
@@ -162,6 +181,8 @@ def request_otp_reset(phone: str, tenant_id: str, account_id: str | None = None)
     # Generate the OTP, send it FIRST, and only persist on a successful send so a
     # failed dispatch leaves no usable OTP behind (EC-AUTH-16).
     otp = _generate_otp()
+    if settings.DEBUG:
+        logger.info("[DEV OTP] password reset for %s (user=%s): %s", phone, user.id, otp)
     _send_otp(phone, otp)
 
     expiry = timezone.now() + timedelta(minutes=OTP_EXPIRY_MINUTES)
@@ -212,6 +233,8 @@ def verify_otp_and_reset(phone: str, otp: str, new_password: str, tenant_id: str
       AuthenticationFailed — OTP not found, expired, or wrong.
       ValidationError      — password doesn't meet strength requirements.
     """
+    phone = normalize_phone(phone.strip())
+
     # Look up the most recent valid OTP for this phone
     otp_record = get_valid_otp(phone)
     if otp_record is None:

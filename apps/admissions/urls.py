@@ -22,10 +22,17 @@ from apps.admissions.views import (
     WaitlistListCreateView,
     WaitlistPromoteView,
 )
+from apps.admissions.views.admin_overview import AdminAdmissionsOverviewView
+from apps.admissions.views.admin_enroll import AdminEnrollFromApplicationView
 
 app_name = "admissions"
 
 urlpatterns = [
+    # Admin aggregate (AdmissionsData shape) + one-click enroll-from-application
+    path("admin-overview/", AdminAdmissionsOverviewView.as_view(), name="admin-overview"),
+    path("applications/<uuid:application_id>/enroll-from-application/",
+         AdminEnrollFromApplicationView.as_view(), name="enroll-from-application"),
+
     # Enquiries
     path("enquiries/", EnquiryListCreateView.as_view(), name="enquiry-list-create"),
     path("enquiries/<uuid:enquiry_id>/", EnquiryDetailView.as_view(), name="enquiry-detail"),

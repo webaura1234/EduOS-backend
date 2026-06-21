@@ -1,4 +1,5 @@
 from .v1.views import (
+    BranchFeeLedgerView,
     CollectionDashboardView,
     ConcessionRequestViewSet,
     ConcessionRuleViewSet,
@@ -19,6 +20,7 @@ from .v1.views import (
 )
 
 __all__ = [
+    "BranchFeeLedgerView",
     "FeeStructureViewSet",
     "StudentFeeAssignmentView",
     "GenerateInvoicesView",

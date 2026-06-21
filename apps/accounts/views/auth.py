@@ -21,13 +21,18 @@ from apps.accounts.interactors.auth import (
     disambiguate_login,
     login,
     logout,
+    platform_login,
     refresh_tokens,
+    switch_linked_account,
 )
+from apps.accounts.queries.user import list_linked_accounts
 from apps.accounts.serializers.auth import (
     DisambiguateLoginSerializer,
     LoginSerializer,
     LogoutSerializer,
+    PlatformLoginSerializer,
     RefreshSerializer,
+    SwitchLinkedSerializer,
 )
 
 
@@ -147,6 +152,8 @@ class MeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request) -> Response[UserProfileDTO]:
+        from apps.organizations.branding import branch_theme, tenant_theme
+
         user = request.user
         dto = UserProfileDTO(
             id=user.id,
@@ -159,4 +166,97 @@ class MeView(APIView):
             must_change_password=user.must_change_password,
             date_joined=user.date_joined,
         )
-        return Response(dto, status=status.HTTP_200_OK)
+        # Resolved branding for the user's branch (override → tenant fallback) so the
+        # authed app can re-theme per branch without an extra round-trip.
+        if user.branch_id:
+            theme = branch_theme(user.branch)
+        elif user.tenant_id:
+            theme = tenant_theme(user.tenant)
+        else:
+            theme = None
+        return Response({**dto.to_dict(), "theme": theme}, status=status.HTTP_200_OK)
+
+
+def _auth_user_payload(user) -> dict:
+    """AuthUser-shaped dict the frontend consumes directly (F-223 account switch)."""
+    tenant = user.tenant
+    return {
+        "id": str(user.id),
+        "name": user.full_name,
+        "role": user.role,
+        "phone": user.phone,
+        "custom_login_id": user.custom_login_id,
+        "branch_id": str(user.branch_id) if user.branch_id else None,
+        "tenant_subdomain": tenant.subdomain if tenant else None,
+        "linked_user_group_id": (
+            str(user.linked_user_group_id) if user.linked_user_group_id else None
+        ),
+        "institution_type": tenant.institution_type if tenant else None,
+    }
+
+
+class PlatformLoginView(APIView):
+    """
+    POST /api/v1/auth/platform/login/
+
+    Authenticate a tenant-less platform owner (phone + password). Public endpoint.
+    """
+    permission_classes = [AllowAny]
+
+    def post(self, request) -> Response[LoginResponseDTO]:
+        serializer = PlatformLoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result: LoginResponseDTO = platform_login(
+            identifier=serializer.validated_data["identifier"],
+            password=serializer.validated_data["password"],
+            device_info=request.META.get("HTTP_USER_AGENT", ""),
+            ip_address=_get_client_ip(request),
+        )
+        return Response(result, status=status.HTTP_200_OK)
+
+
+class LinkedAccountsView(APIView):
+    """
+    GET /api/v1/auth/linked-accounts/
+
+    The other accounts (same person, multiple roles) linked to the caller (F-223).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request) -> Response:
+        rows = list_linked_accounts(request.user)
+        data = [
+            {
+                "userId": str(u.id),
+                "role": u.role,
+                "name": u.full_name,
+                "label": u.get_role_display(),
+            }
+            for u in rows
+        ]
+        return Response(data, status=status.HTTP_200_OK)
+
+
+class SwitchLinkedAccountView(APIView):
+    """
+    POST /api/v1/auth/switch-linked/
+
+    Switch to a linked account; re-verifies the target account's password and issues a
+    fresh token pair for it (F-223).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request) -> Response:
+        serializer = SwitchLinkedSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        target, dto = switch_linked_account(
+            current_user=request.user,
+            target_user_id=str(serializer.validated_data["target_user_id"]),
+            password=serializer.validated_data["password"],
+            device_info=request.META.get("HTTP_USER_AGENT", ""),
+            ip_address=_get_client_ip(request),
+        )
+        return Response(
+            {"user": _auth_user_payload(target), "access": dto.access, "refresh": dto.refresh},
+            status=status.HTTP_200_OK,
+        )

@@ -95,6 +95,40 @@ def test_super_admin_dashboard_denied_to_admin(env):
     assert resp.status_code == 403
 
 
+def test_student_dashboard_shape(env):
+    from apps.accounts.models.profile import StudentProfile
+    student = UserFactory(role=Role.STUDENT, tenant=env["tenant"], branch=env["branch"], must_change_password=False)
+    StudentProfile.objects.create(user=student)
+
+    resp = _client(student).get(reverse("analytics:dashboard-student"))
+    assert resp.status_code == 200
+    body = _data(resp)
+    assert body["institutionType"] == "school"
+    assert body["profile"]["name"] == student.full_name
+    assert body["attendancePercent"] == 0
+    assert body["attendanceThreshold"] == 75
+    assert isinstance(body["scheduleToday"], list)
+    assert body["upcomingExamsCount"] == 0
+
+
+def test_student_dashboard_no_profile(env):
+    student = UserFactory(role=Role.STUDENT, tenant=env["tenant"], branch=env["branch"], must_change_password=False)
+    resp = _client(student).get(reverse("analytics:dashboard-student"))
+    assert resp.status_code == 200
+    body = _data(resp)
+    assert body["institutionType"] == "school"
+    assert body["profile"]["name"] == student.full_name
+    assert body["attendancePercent"] == 0
+    assert body["attendanceThreshold"] == 75
+    assert isinstance(body["scheduleToday"], list)
+    assert body["upcomingExamsCount"] == 0
+
+
+def test_student_dashboard_denied_to_admin(env):
+    resp = _client(env["admin"]).get(reverse("analytics:dashboard-student"))
+    assert resp.status_code == 403
+
+
 # ── Reports: inline snapshot, large→Celery+S3, snapshot immutability, NAAC ─────
 def test_small_report_inline_snapshot(env):
     create_enquiry(branch=env["branch"], source="walk_in", applicant_name="Asha")

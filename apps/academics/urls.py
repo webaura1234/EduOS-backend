@@ -23,6 +23,9 @@ from apps.academics.views.curriculum import (
     SubjectListCreateView,
 )
 from apps.academics.views.holiday import HolidayDetailView, HolidayListCreateView
+from apps.academics.views.admin_actions import AdminAcademicsActionView
+from apps.academics.views.admin_overview import AdminAcademicsOverviewView
+from apps.academics.views.overview import AcademicYearOverviewView
 from apps.academics.views.rollover import (
     RolloverExecuteView,
     RolloverPreviewView,
@@ -53,7 +56,12 @@ from apps.academics.views.timetable import (
 app_name = "academics"
 
 urlpatterns = [
+    # Admin aggregate (AcademicsData shape) + gap-domain write actions
+    path("admin-overview/", AdminAcademicsOverviewView.as_view(), name="admin-overview"),
+    path("admin-overview/actions/", AdminAcademicsActionView.as_view(), name="admin-actions"),
+
     # Calendar
+    path("academic-years/overview/", AcademicYearOverviewView.as_view(), name="academic-years-overview"),
     path("academic-years/", AcademicYearListCreateView.as_view(), name="academic-years"),
     path("academic-years/actions/", AcademicYearActionsView.as_view(), name="academic-year-actions"),
     path("academic-years/<uuid:year_id>/", AcademicYearDetailView.as_view(), name="academic-year-detail"),

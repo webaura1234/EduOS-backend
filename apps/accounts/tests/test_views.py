@@ -89,8 +89,11 @@ def test_me_view(admin_auth_client, admin_user):
     url = reverse("accounts:me")
     response = admin_auth_client.get(url)
     assert response.status_code == status.HTTP_200_OK
-    assert response.data.id == admin_user.id
-    assert response.data.role == admin_user.role
+    assert str(response.data["id"]) == str(admin_user.id)
+    assert response.data["role"] == admin_user.role
+    # Resolved branch/tenant branding for the authed app (per-branch theming).
+    assert "theme" in response.data
+    assert response.data["theme"]["primaryColor"].startswith("#")
 
 
 def test_me_view_unauthenticated(api_client):

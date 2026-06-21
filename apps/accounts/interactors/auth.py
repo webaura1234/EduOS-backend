@@ -11,7 +11,7 @@ import logging
 from django.contrib.auth import authenticate
 from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
 
-from apps.accounts.backends import _normalize_phone
+from apps.accounts.phone import normalize_phone as _normalize_phone
 from apps.accounts.dtos import LoginResolutionDTO, LoginResponseDTO, TokenPairDTO
 
 from apps.accounts.constants import (
@@ -273,3 +273,37 @@ def logout(refresh_token_str: str) -> None:
     revoked = revoke_refresh_token(refresh_token_str)
     if not revoked:
         logger.debug("Logout: token not found or already revoked.")
+
+
+def platform_login(
+    identifier: str, password: str, device_info: str = "", ip_address=None,
+) -> LoginResponseDTO:
+    """Authenticate a tenant-less PLATFORM_OWNER by phone (separate platform app).
+
+    Platform owners have no tenant, so the standard tenant-scoped login can't serve them.
+    """
+    user = get_active_user_for_login(
+        tenant_id=None, role=Role.PLATFORM_OWNER, phone=_normalize_phone(identifier),
+    )
+    if user is None or not user.check_password(password):
+        raise AuthenticationFailed("Invalid credentials.")
+    return _issue_login_tokens(user, device_info, ip_address)
+
+
+def switch_linked_account(
+    *, current_user, target_user_id, password: str, device_info: str = "", ip_address=None,
+):
+    """Switch to a linked account (same person, multi-role) — re-verifies the password.
+
+    The target must share `current_user.linked_user_group_id`. Returns (target_user, DTO).
+    """
+    from apps.accounts.queries.user import get_linked_account
+
+    target = get_linked_account(current_user, target_user_id)
+    if target is None:
+        raise AuthenticationFailed("Account is not linked to your profile.")
+    if not target.check_password(password):
+        raise AuthenticationFailed("Invalid credentials.")
+    _check_parent_portal(target)
+    dto = _issue_login_tokens(target, device_info, ip_address)
+    return target, dto

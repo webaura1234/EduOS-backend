@@ -583,3 +583,43 @@ class RefundViewSet(viewsets.ModelViewSet):
             return Response(RefundSerializer(refund).data)
         except DjangoValidationError as exc:
             raise ValidationError(exc.messages)
+
+
+# ── Super-admin branch fee ledger ────────────────────────────────────────────
+class BranchFeeLedgerView(APIView):
+    """GET → open-due ledger rows for a branch (super-admin cross-branch view)."""
+    permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
+
+    def get(self, request, branch_id) -> Response:
+        from django.utils import timezone
+
+        from apps.fees.queries.invoice import list_branch_ledger
+        from apps.organizations.queries.branch import get_branch
+
+        branch = get_branch(request.user.tenant_id, branch_id)
+        if branch is None:
+            return Response({"error": "Branch not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        rows = []
+        total = 0
+        for inv in list_branch_ledger(branch.id):
+            balance = inv.total_paise - inv.paid_paise
+            total += balance
+            rows.append({
+                "ledgerId": str(inv.id),
+                "branchId": str(branch.id),
+                "branchName": branch.name,
+                "studentId": str(inv.student.student_profile_id),
+                "studentName": inv.student.user.full_name,
+                "transferId": None,
+                "enrollmentStatus": "active_at_branch",
+                "openDue": round(balance / 100, 2),  # rupees (frontend shows ₹)
+                "updatedAt": inv.updated_at.isoformat(),
+            })
+        return Response({
+            "branchId": str(branch.id),
+            "branchName": branch.name,
+            "rows": rows,
+            "totalOpenDue": round(total / 100, 2),
+            "generatedAt": timezone.now().isoformat(),
+        })

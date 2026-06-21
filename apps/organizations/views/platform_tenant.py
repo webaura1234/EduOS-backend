@@ -51,7 +51,7 @@ class PlatformTenantListCreateView(APIView):
         serializer = CreatePlatformTenantSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            tenant = interactor.create_tenant(serializer.validated_data)
+            tenant = interactor.create_tenant(serializer.validated_data, user=request.user)
         except DjangoValidationError as exc:
             return Response({"error": "; ".join(exc.messages)}, status=http.HTTP_400_BAD_REQUEST)
         return Response({"tenant": tenant_summary(tenant)}, status=http.HTTP_201_CREATED)
@@ -82,7 +82,7 @@ class PlatformTenantActionsView(APIView):
         data = serializer.validated_data
         try:
             tenant, terminated, message = interactor.change_status(
-                str(data["tenantId"]), data["action"]
+                str(data["tenantId"]), data["action"], user=request.user
             )
         except DjangoValidationError as exc:
             return Response({"error": "; ".join(exc.messages)}, status=http.HTTP_400_BAD_REQUEST)

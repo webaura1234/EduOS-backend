@@ -61,11 +61,15 @@ class LeaveDecideView(APIView):
             return Response({"error": "Leave not found."}, status=http.HTTP_404_NOT_FOUND)
         s = DecideLeaveSerializer(data=request.data)
         s.is_valid(raise_exception=True)
-        updated = leave_i.decide_leave(
-            application=app, action=s.validated_data["action"],
-            reviewer=request.user, note=s.validated_data["note"],
-        )
-        return Response({"leave": LeaveApplicationSerializer(updated).data})
+        from rest_framework.exceptions import PermissionDenied
+        try:
+            updated = leave_i.decide_leave(
+                application=app, action=s.validated_data["action"],
+                reviewer=request.user, note=s.validated_data["note"],
+            )
+            return Response({"leave": LeaveApplicationSerializer(updated).data})
+        except PermissionDenied as exc:
+            return Response({"detail": str(exc)}, status=http.HTTP_403_FORBIDDEN)
 
 
 class LeaveBalancesView(APIView):

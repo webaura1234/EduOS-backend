@@ -10,6 +10,13 @@ from .timetable import (
     TimetableEntry,
     TimetableEntryStatus,
 )
+from .admin_extras import (
+    AcademicSubstitution,
+    CalendarChange,
+    CalendarChangeType,
+    StudyMaterial,
+    SubstitutionStatus,
+)
 
 Grade = Course
 Section = Batch
@@ -39,4 +46,9 @@ __all__ = [
     "TimetableEntryStatus",
     "AcademicRolloverRun",
     "RolloverRunStatus",
+    "AcademicSubstitution",
+    "SubstitutionStatus",
+    "StudyMaterial",
+    "CalendarChange",
+    "CalendarChangeType",
 ]

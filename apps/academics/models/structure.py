@@ -37,6 +37,14 @@ class Department(BaseModel):
         related_name="headed_departments",
         limit_choices_to={"role": "faculty"},
     )
+    # Optional nesting: a sub-department points to its parent (null = top-level).
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="children",
+    )
 
     class Meta:
         db_table = "academics_department"
