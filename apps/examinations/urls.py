@@ -42,6 +42,11 @@ from apps.examinations.views.result import (
     ExamResultsPublishView,
     ExamResultsReviseView,
 )
+from apps.examinations.views.internal import (
+    FacultyInternalMarkSaveView,
+    FacultyMarksView,
+)
+from apps.examinations.views.invigilation import FacultyInvigilationView
 
 app_name = "examinations"
 
@@ -135,6 +140,9 @@ urlpatterns = [
     path("me/exams/", StudentExamHubView.as_view(), name="student-exam-hub"),
     path("me/results/", StudentResultsHubView.as_view(), name="student-results-hub"),
     path("me/assignments/", StudentAssignmentsHubView.as_view(), name="student-assignments-hub"),
+    path("me/marks/", FacultyMarksView.as_view(), name="faculty-marks"),
+    path("me/internal-marks/", FacultyInternalMarkSaveView.as_view(), name="faculty-internal-marks-save"),
+    path("me/invigilation/", FacultyInvigilationView.as_view(), name="faculty-invigilation"),
     path(
         "children/<uuid:student_id>/exams/",
         ParentChildExamHubView.as_view(),

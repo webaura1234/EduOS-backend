@@ -15,6 +15,7 @@ from apps.hr.views.leave import (
     LeaveDecideView,
     LeaveListView,
 )
+from apps.hr.views.faculty_payslip import FacultyPayslipView
 from apps.hr.views.payroll import (
     MyPayslipsView,
     PayrollAdjustmentView,
@@ -55,4 +56,5 @@ urlpatterns = [
     path("payroll/adjustments/", PayrollAdjustmentView.as_view(), name="payroll-adjustment"),
     path("payslips/<uuid:payslip_id>/", PayslipDetailView.as_view(), name="payslip-detail"),
     path("me/payslips/", MyPayslipsView.as_view(), name="my-payslips"),
+    path("me/payslip/", FacultyPayslipView.as_view(), name="faculty-payslip"),
 ]

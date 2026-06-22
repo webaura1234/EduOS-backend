@@ -65,6 +65,17 @@ def list_materials_for_batch(branch_id, batch_id):
     )
 
 
+def list_materials_for_faculty(branch_id, faculty_user_id):
+    """Study materials uploaded by a faculty member (faculty-facing)."""
+    return (
+        StudyMaterial.objects.filter(
+            branch_id=branch_id, uploaded_by_id=faculty_user_id, is_active=True,
+        )
+        .select_related("timetable_entry__batch_subject__subject")
+        .order_by("-created_at")
+    )
+
+
 def get_study_material(branch_id, material_id) -> StudyMaterial | None:
     try:
         return StudyMaterial.objects.get(branch_id=branch_id, pk=material_id, is_active=True)

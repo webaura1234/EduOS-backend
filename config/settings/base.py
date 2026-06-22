@@ -69,6 +69,7 @@ LOCAL_APPS = [
     "apps.hr",
     "apps.communications",
     "apps.grievances",
+    "apps.coursework",
     "apps.analytics",
     "apps.integrations",
 ]

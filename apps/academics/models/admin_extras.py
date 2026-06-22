@@ -90,3 +90,30 @@ class CalendarChange(BaseModel):
 
     def __str__(self):
         return f"CalendarChange({self.change_type} @ {self.effective_date})"
+
+
+class SyllabusUnit(BaseModel):
+    """An orderable unit of a subject's syllabus, with completion tracking (faculty)."""
+
+    branch = models.ForeignKey(
+        "organizations.Branch", on_delete=models.CASCADE, related_name="syllabus_units"
+    )
+    subject = models.ForeignKey(
+        "academics.Subject", on_delete=models.CASCADE, related_name="syllabus_units"
+    )
+    title = models.CharField(max_length=255)
+    order = models.PositiveSmallIntegerField(default=0)
+    is_completed = models.BooleanField(default=False, db_index=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    completed_by = models.ForeignKey(
+        "accounts.User", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="completed_syllabus_units",
+    )
+
+    class Meta:
+        db_table = "academics_syllabus_unit"
+        ordering = ["order", "created_at"]
+        indexes = [models.Index(fields=["branch", "subject", "order"])]
+
+    def __str__(self):
+        return f"SyllabusUnit({self.title})"

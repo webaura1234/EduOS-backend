@@ -16,6 +16,7 @@ from .admin_extras import (
     CalendarChangeType,
     StudyMaterial,
     SubstitutionStatus,
+    SyllabusUnit,
 )
 
 Grade = Course
@@ -49,6 +50,7 @@ __all__ = [
     "AcademicSubstitution",
     "SubstitutionStatus",
     "StudyMaterial",
+    "SyllabusUnit",
     "CalendarChange",
     "CalendarChangeType",
 ]

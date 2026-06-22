@@ -36,6 +36,7 @@ from apps.accounts.views.guardians import (
     AdminGuardianOverviewView,
 )
 from apps.accounts.views.student_dashboard import StudentDashboardView
+from apps.accounts.views.faculty_dashboard import FacultyDashboardView
 
 app_name = "accounts"
 
@@ -48,6 +49,7 @@ urlpatterns = [
     path("logout/",             LogoutView.as_view(),            name="logout"),
     path("me/",                 MeView.as_view(),                name="me"),
     path("me/dashboard/",       StudentDashboardView.as_view(),  name="student-dashboard"),
+    path("me/faculty-dashboard/", FacultyDashboardView.as_view(), name="faculty-dashboard"),
     path("linked-accounts/",    LinkedAccountsView.as_view(),    name="linked-accounts"),
     path("switch-linked/",      SwitchLinkedAccountView.as_view(), name="switch-linked"),
 

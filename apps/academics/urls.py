@@ -25,6 +25,12 @@ from apps.academics.views.curriculum import (
 from apps.academics.views.holiday import HolidayDetailView, HolidayListCreateView
 from apps.academics.views.admin_actions import AdminAcademicsActionView
 from apps.academics.views.admin_overview import AdminAcademicsOverviewView
+from apps.academics.views.faculty_materials import FacultyStudyMaterialsView
+from apps.academics.views.faculty_syllabus import FacultySyllabusView
+from apps.academics.views.syllabus_authoring import (
+    SyllabusUnitDetailView,
+    SyllabusUnitListCreateView,
+)
 from apps.academics.views.student_materials import StudentStudyMaterialsView
 from apps.academics.views.overview import AcademicYearOverviewView
 from apps.academics.views.rollover import (
@@ -61,6 +67,11 @@ urlpatterns = [
     path("admin-overview/", AdminAcademicsOverviewView.as_view(), name="admin-overview"),
     path("admin-overview/actions/", AdminAcademicsActionView.as_view(), name="admin-actions"),
     path("me/study-materials/", StudentStudyMaterialsView.as_view(), name="student-materials"),
+    path("faculty/study-materials/", FacultyStudyMaterialsView.as_view(), name="faculty-materials"),
+    path("faculty/syllabus/", FacultySyllabusView.as_view(), name="faculty-syllabus"),
+    path("syllabus-units/", SyllabusUnitListCreateView.as_view(), name="syllabus-units"),
+    path("syllabus-units/<uuid:unit_id>/", SyllabusUnitDetailView.as_view(),
+         name="syllabus-unit-detail"),
 
     # Calendar
     path("academic-years/overview/", AcademicYearOverviewView.as_view(), name="academic-years-overview"),

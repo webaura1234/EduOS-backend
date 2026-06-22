@@ -46,6 +46,18 @@ def create_duty(*, schedule_slot_id, faculty_id, user=None) -> InvigilatorDuty:
     )
 
 
+def list_for_faculty(branch_id, faculty_id):
+    """Invigilation duties assigned to a faculty member, scoped to the branch."""
+    return (
+        InvigilatorDuty.objects.filter(
+            faculty_id=faculty_id, is_active=True,
+            schedule_slot__exam__branch_id=branch_id,
+        )
+        .select_related("schedule_slot", "faculty")
+        .order_by("schedule_slot__start_at")
+    )
+
+
 def faculty_duties_for_overlap_check(faculty_id, *, exclude_slot_id=None):
     qs = InvigilatorDuty.objects.filter(faculty_id=faculty_id, is_active=True).select_related(
         "schedule_slot"

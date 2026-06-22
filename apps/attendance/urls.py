@@ -18,6 +18,8 @@ from apps.attendance.views.attendance import (
 )
 from apps.attendance.views.leave import AuditLogView, LeaveListCreateView, LeaveReviewView
 from apps.attendance.views.student_leave import StudentLeaveView
+from apps.attendance.views.faculty_leave import FacultyLeaveReviewView
+from apps.attendance.views.faculty_attendance import FacultyAttendanceView
 from apps.attendance.views.overview import (
     AdminAttendanceLiveView,
     AdminAttendanceOverviewView,
@@ -52,6 +54,8 @@ urlpatterns = [
     # Leave workflow
     path("leave/", LeaveListCreateView.as_view(), name="leave"),
     path("me/leave/", StudentLeaveView.as_view(), name="student-leave"),
+    path("faculty/leave/", FacultyLeaveReviewView.as_view(), name="faculty-leave-review"),
+    path("faculty/attendance/", FacultyAttendanceView.as_view(), name="faculty-attendance"),
     path("leave/<uuid:leave_id>/", LeaveReviewView.as_view(), name="leave-review"),
 
     # Student / parent
