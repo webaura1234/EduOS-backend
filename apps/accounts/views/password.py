@@ -14,10 +14,12 @@ from apps.accounts.interactors.password import (
     force_change_password,
     list_reset_accounts,
     request_otp_reset,
+    verify_otp,
     verify_otp_and_reset,
 )
 from apps.accounts.serializers.password import (
     ForceChangePasswordSerializer,
+    OTPCheckSerializer,
     OTPRequestSerializer,
     OTPVerifySerializer,
     ResetAccountsSerializer,
@@ -98,6 +100,33 @@ class ResetAccountsView(APIView):
             phone=data["phone"], tenant_id=str(data["tenant_id"])
         )
         return Response({"accounts": accounts}, status=status.HTTP_200_OK)
+
+
+class OTPCheckView(APIView):
+    """
+    POST /api/v1/auth/password/reset/check-otp/
+
+    Verify an OTP without setting a new password.
+    Public endpoint. Throttled at 10 requests/minute.
+    """
+    permission_classes = [AllowAny]
+    throttle_scope = "auth"
+
+    def post(self, request) -> Response[MessageDTO]:
+        serializer = OTPCheckSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        verify_otp(
+            phone=data["phone"],
+            otp=data["otp"],
+            tenant_id=str(data["tenant_id"]),
+        )
+
+        return Response(
+            MessageDTO(detail="OTP verified."),
+            status=status.HTTP_200_OK,
+        )
 
 
 class OTPVerifyView(APIView):

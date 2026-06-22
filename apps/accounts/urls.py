@@ -20,6 +20,7 @@ from apps.accounts.views.admins import SuperAdminAdminsView, SuperAdminAdminDeta
 from apps.accounts.views.invite import AcceptInviteView, CreateInviteView
 from apps.accounts.views.password import (
     ForceChangePasswordView,
+    OTPCheckView,
     OTPRequestView,
     OTPVerifyView,
     ResetAccountsView,
@@ -29,6 +30,10 @@ from apps.accounts.views.users_management import (
     CheckMultiRoleView,
     UserManagementActionView,
     UserManagementView,
+)
+from apps.accounts.views.guardians import (
+    AdminGuardianActionView,
+    AdminGuardianOverviewView,
 )
 
 app_name = "accounts"
@@ -47,14 +52,17 @@ urlpatterns = [
     # ── Password management ───────────────────────────────────────────────
     path("password/change/",         ForceChangePasswordView.as_view(), name="password-change"),
     path("password/reset/accounts/", ResetAccountsView.as_view(),       name="reset-accounts"),
-    path("password/reset/request/",  OTPRequestView.as_view(),          name="otp-request"),
-    path("password/reset/verify/",   OTPVerifyView.as_view(),           name="otp-verify"),
+    path("password/reset/request/",   OTPRequestView.as_view(),          name="otp-request"),
+    path("password/reset/check-otp/", OTPCheckView.as_view(),            name="otp-check"),
+    path("password/reset/verify/",    OTPVerifyView.as_view(),           name="otp-verify"),
 
     # ── Invite (onboarding) ───────────────────────────────────────────────
     path("invite/create/",  CreateInviteView.as_view(),  name="invite-create"),
     path("invite/accept/",  AcceptInviteView.as_view(),  name="invite-accept"),
 
     # ── Admin user actions ────────────────────────────────────────────────
+    path("guardians/overview/", AdminGuardianOverviewView.as_view(), name="guardians-overview"),
+    path("guardians/actions/", AdminGuardianActionView.as_view(), name="guardians-actions"),
     path("users/management/", UserManagementView.as_view(), name="users-management"),
     path("users/management/actions/", UserManagementActionView.as_view(), name="users-management-actions"),
     path("users/management/check-multi-role/", CheckMultiRoleView.as_view(), name="users-check-multi-role"),

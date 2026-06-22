@@ -172,7 +172,8 @@ class AdminAcademicsOverviewView(APIView):
 
         return Response({
             "institutionType": tenant.institution_type,
-            "hierarchyLabel": "Stream" if is_college else "Department",
+            # College uses "Department" hierarchy; school uses "Stream".
+            "hierarchyLabel": "Department" if is_college else "Stream",
             "periodKind": "semester" if is_college else "term",
             "academicYears": [{"id": str(y.id), "label": y.name} for y in years],
             "periods": [_period(p) for p in periods],

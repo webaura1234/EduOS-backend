@@ -45,6 +45,13 @@ class AdminResetPasswordSerializer(serializers.Serializer):
     )
 
 
+class OTPCheckSerializer(serializers.Serializer):
+    """Verify an OTP without setting a new password (multi-step reset UI)."""
+    phone = serializers.CharField()
+    otp = serializers.CharField(min_length=6, max_length=6)
+    tenant_id = serializers.UUIDField()
+
+
 class OTPVerifySerializer(serializers.Serializer):
     phone = serializers.CharField()
     otp = serializers.CharField(min_length=6, max_length=6)

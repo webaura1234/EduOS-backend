@@ -243,6 +243,38 @@ def test_verify_otp_and_reset_success(tenant, branch):
     assert otp_rec.is_used is True
 
 
+def test_verify_otp_success(tenant, branch):
+    phone = "+919876543210"
+    user = UserFactory(
+        role=Role.ADMIN,
+        phone=phone,
+        tenant=tenant,
+        branch=branch,
+    )
+    otp_hash = password_interactor._hash_otp("123456")
+    otp_rec = OTPRecordFactory(user=user, phone=phone, otp_hash=otp_hash)
+
+    password_interactor.verify_otp(phone, "123456", tenant.id)
+
+    otp_rec.refresh_from_db()
+    assert otp_rec.is_used is False
+
+
+def test_verify_otp_wrong_otp(tenant, branch):
+    phone = "+919876543210"
+    user = UserFactory(
+        role=Role.ADMIN,
+        phone=phone,
+        tenant=tenant,
+        branch=branch,
+    )
+    otp_hash = password_interactor._hash_otp("123456")
+    OTPRecordFactory(user=user, phone=phone, otp_hash=otp_hash)
+
+    with pytest.raises(AuthenticationFailed):
+        password_interactor.verify_otp(phone, "000000", tenant.id)
+
+
 def test_verify_otp_and_reset_wrong_otp(tenant, branch):
     phone = "+919876543210"
     user = UserFactory(

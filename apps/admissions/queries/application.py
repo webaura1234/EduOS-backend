@@ -1,5 +1,7 @@
 """Queries — Application, ApplicationDocument, Waitlist (all ORM here)."""
 
+from django.db.models import Prefetch
+
 from apps.admissions.models import Application, ApplicationDocument, Waitlist
 
 
@@ -13,8 +15,16 @@ def get_application(branch_id, application_id) -> Application | None:
 
 
 def list_applications(branch_id, *, status=None, course_id=None):
-    qs = Application.objects.filter(branch_id=branch_id, is_active=True).select_related(
-        "enquiry", "course"
+    qs = (
+        Application.objects.filter(branch_id=branch_id, is_active=True)
+        .select_related("enquiry", "course", "waitlist_entry")
+        .prefetch_related(
+            Prefetch(
+                "documents",
+                queryset=ApplicationDocument.objects.filter(is_active=True),
+                to_attr="active_documents",
+            )
+        )
     )
     if status:
         qs = qs.filter(status=status)

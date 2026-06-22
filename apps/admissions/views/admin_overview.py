@@ -43,6 +43,12 @@ def _enquiry(e) -> dict:
     }
 
 
+def _active_documents(a):
+    # Uses the prefetched `active_documents` (to_attr) when available; falls back otherwise.
+    prefetched = getattr(a, "active_documents", None)
+    return prefetched if prefetched is not None else a.documents.filter(is_active=True)
+
+
 def _document(d) -> dict:
     return {
         "id": str(d.id),
@@ -92,7 +98,7 @@ def _application(a) -> dict:
             "address": "",
         },
         "eligibility": _eligibility(a.eligibility_result),
-        "documents": [_document(d) for d in a.documents.filter(is_active=True)],
+        "documents": [_document(d) for d in _active_documents(a)],
         "meritScore": None,
         "waitlisted": waitlist is not None,
         "waitlistRank": waitlist.rank if waitlist else None,

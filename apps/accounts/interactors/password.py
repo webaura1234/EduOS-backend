@@ -5,6 +5,7 @@ Business logic for:
   - force_change_password: first-login mandatory password change.
   - request_otp_reset: send OTP via SMS (or log in dev).
   - verify_otp_and_reset: verify OTP and set new password.
+  - verify_otp: verify OTP only (multi-step reset UI).
 """
 
 import hashlib
@@ -225,6 +226,31 @@ def admin_reset_password(admin, target_user_id: str, temp_password: str | None =
     return temp
 
 
+def _validate_otp(phone: str, otp: str):
+    """Return the matching unused OTP record, or raise AuthenticationFailed."""
+    phone = normalize_phone(phone.strip())
+    otp_record = get_valid_otp(phone)
+    if otp_record is None:
+        raise AuthenticationFailed("OTP is invalid or has expired.")
+    if otp_record.otp_hash != _hash_otp(otp):
+        increment_otp_attempt(otp_record)
+        raise AuthenticationFailed("Incorrect OTP.")
+    return otp_record
+
+
+def verify_otp(phone: str, otp: str, tenant_id: str) -> None:
+    """
+    Verify the OTP without consuming it.
+
+    Used by the multi-step password-reset UI so invalid codes are rejected
+    before the user chooses a new password.
+
+    Raises:
+      AuthenticationFailed — OTP not found, expired, or wrong.
+    """
+    _validate_otp(phone, otp)
+
+
 def verify_otp_and_reset(phone: str, otp: str, new_password: str, tenant_id: str) -> None:
     """
     Verify the OTP and set the new password.
@@ -233,17 +259,7 @@ def verify_otp_and_reset(phone: str, otp: str, new_password: str, tenant_id: str
       AuthenticationFailed — OTP not found, expired, or wrong.
       ValidationError      — password doesn't meet strength requirements.
     """
-    phone = normalize_phone(phone.strip())
-
-    # Look up the most recent valid OTP for this phone
-    otp_record = get_valid_otp(phone)
-    if otp_record is None:
-        raise AuthenticationFailed("OTP is invalid or has expired.")
-
-    # Verify OTP hash
-    if otp_record.otp_hash != _hash_otp(otp):
-        increment_otp_attempt(otp_record)
-        raise AuthenticationFailed("Incorrect OTP.")
+    otp_record = _validate_otp(phone, otp)
 
     # Mark as used
     mark_otp_used(otp_record)

@@ -47,7 +47,7 @@ def test_overview_returns_academics_data_shape(env):
 def test_school_labels_and_working_days(env):
     body = _data(_client(env["admin"]).get(reverse("academics:admin-overview")))
     assert body["institutionType"] == "school"
-    assert body["hierarchyLabel"] == "Department"
+    assert body["hierarchyLabel"] == "Stream"
     assert body["periodKind"] == "term"
     assert len(body["workingDays"]) == 7
     sunday = next(d for d in body["workingDays"] if d["dayOfWeek"] == 0)
@@ -58,7 +58,7 @@ def test_college_labels(env):
     env["tenant"].institution_type = "college"
     env["tenant"].save(update_fields=["institution_type"])
     body = _data(_client(env["admin"]).get(reverse("academics:admin-overview")))
-    assert body["hierarchyLabel"] == "Stream"
+    assert body["hierarchyLabel"] == "Department"
     assert body["periodKind"] == "semester"
 
 

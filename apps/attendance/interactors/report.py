@@ -23,6 +23,19 @@ def _percent(student_id, *, date_from, date_to, exclude_exam, batch_subject_id=N
     return attendance_percent(present_like, excused, total), total
 
 
+def _percent_map(students, *, date_from, date_to, exclude_exam):
+    """{ student_pk: (percent, total) } for many students in a single query (no N+1)."""
+    counts = record_q.aggregate_counts_by_student(
+        [sp.pk for sp in students], date_from=date_from, date_to=date_to,
+        exclude_exam_days=exclude_exam,
+    )
+    out = {}
+    for sp in students:
+        present_like, excused, total = counts.get(sp.pk, (0, 0, 0))
+        out[sp.pk] = (attendance_percent(present_like, excused, total), total)
+    return out
+
+
 def student_summary(branch, student, *, date_from=_WIDE_FROM, date_to=_WIDE_TO) -> dict:
     """Overall + subject-wise % for one student (F-111/112)."""
     threshold, exam_counts = roster_q.attendance_config(branch)
@@ -64,14 +77,16 @@ def shortage_report(branch, *, threshold=None, batch_id=None) -> dict:
     threshold = threshold if threshold is not None else cfg_threshold
     exclude_exam = not exam_counts
 
-    students = (
+    students = list(
         roster_q.students_in_batch(batch_id) if batch_id
         else roster_q.all_active_students_in_branch(branch.pk)
     )
+    percents = _percent_map(students, date_from=_WIDE_FROM, date_to=_WIDE_TO,
+                            exclude_exam=exclude_exam)
 
     rows = []
     for sp in students:
-        pct, total = _percent(sp.pk, date_from=_WIDE_FROM, date_to=_WIDE_TO, exclude_exam=exclude_exam)
+        pct, total = percents[sp.pk]
         if total > 0 and is_below_threshold(pct, threshold):
             rows.append({
                 "studentId": str(sp.student_profile_id),
@@ -95,14 +110,16 @@ def monthly_report(branch, *, year, month, batch_id=None) -> dict:
     _, exam_counts = roster_q.attendance_config(branch)
     exclude_exam = not exam_counts
 
-    students = (
+    students = list(
         roster_q.students_in_batch(batch_id) if batch_id
         else roster_q.all_active_students_in_branch(branch.pk)
     )
+    percents = _percent_map(students, date_from=date_from, date_to=date_to,
+                            exclude_exam=exclude_exam)
 
     rows = []
     for sp in students:
-        pct, total = _percent(sp.pk, date_from=date_from, date_to=date_to, exclude_exam=exclude_exam)
+        pct, total = percents[sp.pk]
         rows.append({
             "studentId": str(sp.student_profile_id),
             "name": sp.user.full_name,

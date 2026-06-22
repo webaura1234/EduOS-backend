@@ -14,9 +14,19 @@ def create_audit(*, record, audit_type, actor=None, original_status=None,
 
 
 def list_audits(branch_id, *, audit_type=None):
-    qs = AttendanceAudit.objects.filter(
-        record__session__branch_id=branch_id, is_active=True
-    ).select_related("record", "actor").order_by("-created_at")
+    qs = (
+        AttendanceAudit.objects.filter(
+            record__session__branch_id=branch_id, is_active=True
+        )
+        .select_related(
+            "record",
+            "record__session__batch",
+            "record__session__batch_subject__subject",
+            "record__student__student_profile__user",
+            "actor",
+        )
+        .order_by("-created_at")
+    )
     if audit_type:
         qs = qs.filter(audit_type=audit_type)
     return qs

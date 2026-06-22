@@ -131,3 +131,33 @@ def aggregate_counts(student_id, *, date_from, date_to, exclude_exam_days, batch
         excused=Count("id", filter=Q(status__in=[AttendanceStatus.EXCUSED, AttendanceStatus.LEAVE])),
     )
     return agg["present_like"] or 0, agg["excused"] or 0, agg["total"] or 0
+
+
+def aggregate_counts_by_student(student_ids, *, date_from, date_to, exclude_exam_days,
+                                batch_subject_id=None) -> dict:
+    """Bulk variant of aggregate_counts — ONE grouped query for many students.
+
+    Returns { student_id: (present_like, excused, total) }. Students with no records
+    in the window are absent (callers default them to (0, 0, 0)). Same filters as
+    aggregate_counts so per-student results are identical.
+    """
+    qs = AttendanceRecord.objects.filter(
+        student_id__in=list(student_ids),
+        session__date__gte=date_from,
+        session__date__lte=date_to,
+        session__status="completed",
+        is_active=True,
+    )
+    if batch_subject_id:
+        qs = qs.filter(session__batch_subject_id=batch_subject_id)
+    if exclude_exam_days:
+        qs = qs.filter(session__is_exam_day=False)
+    rows = qs.values("student_id").annotate(
+        total=Count("id"),
+        present_like=Count("id", filter=Q(status__in=[AttendanceStatus.PRESENT, AttendanceStatus.LATE])),
+        excused=Count("id", filter=Q(status__in=[AttendanceStatus.EXCUSED, AttendanceStatus.LEAVE])),
+    )
+    return {
+        r["student_id"]: (r["present_like"], r["excused"], r["total"])
+        for r in rows
+    }
