@@ -8,6 +8,7 @@ from apps.hr.views.employee import (
     EmployeeDeactivateView,
     EmployeeListCreateView,
 )
+from apps.hr.views.my_leave import FacultyMyLeaveView
 from apps.hr.views.leave import (
     LeaveApplyView,
     LeaveBalancesView,
@@ -41,6 +42,7 @@ urlpatterns = [
 
     # Leave
     path("leave/", LeaveApplyView.as_view(), name="leave-apply"),
+    path("me/leave/", FacultyMyLeaveView.as_view(), name="my-leave"),
     path("leave/list/", LeaveListView.as_view(), name="leave-list"),
     path("leave/<uuid:application_id>/decide/", LeaveDecideView.as_view(), name="leave-decide"),
 

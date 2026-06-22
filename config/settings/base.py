@@ -68,6 +68,7 @@ LOCAL_APPS = [
     "apps.fees",
     "apps.hr",
     "apps.communications",
+    "apps.grievances",
     "apps.analytics",
     "apps.integrations",
 ]

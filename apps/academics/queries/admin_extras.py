@@ -52,6 +52,19 @@ def list_study_materials(branch_id):
     )
 
 
+def list_materials_for_batch(branch_id, batch_id):
+    """Study materials attached to a batch's timetable slots (student-facing)."""
+    return (
+        StudyMaterial.objects.filter(
+            branch_id=branch_id,
+            timetable_entry__timetable__batch_id=batch_id,
+            is_active=True,
+        )
+        .select_related("timetable_entry__batch_subject__subject")
+        .order_by("-created_at")
+    )
+
+
 def get_study_material(branch_id, material_id) -> StudyMaterial | None:
     try:
         return StudyMaterial.objects.get(branch_id=branch_id, pk=material_id, is_active=True)
