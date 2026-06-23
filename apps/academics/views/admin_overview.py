@@ -48,10 +48,14 @@ def _substitution(s) -> dict:
 
 
 def _study_material(m) -> dict:
+    label = ""
+    if m.batch_id:
+        label = (f"{m.batch.course.name} - {m.batch.name}"
+                 if m.batch.course_id else m.batch.name)
     return {
         "id": str(m.id),
-        "timetableSlotId": str(m.timetable_entry_id),
-        "sessionDate": m.session_date.isoformat(),
+        "classSectionId": str(m.batch_id) if m.batch_id else "",
+        "classLabel": label,
         "fileName": m.file_name,
         "s3Key": m.s3_key,
         "url": m.url,

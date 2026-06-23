@@ -44,7 +44,9 @@ def test_dashboard_shape(env):
         "attendanceMarkedPercent", "syllabusProgressPercent",
     }
     assert isinstance(body["schedule"], list)
-    assert len(body["quickActions"]) == 3
+    # Mark attendance + Apply leave (payslip card removed from the dashboard).
+    assert len(body["quickActions"]) == 2
+    assert {a["id"] for a in body["quickActions"]} == {"mark-attendance", "apply-leave"}
 
 
 def test_dashboard_requires_faculty(env):

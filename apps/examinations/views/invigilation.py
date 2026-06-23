@@ -10,12 +10,14 @@ from apps.examinations.queries import invigilator as inv_q
 
 
 def _assignment(duty) -> dict:
+    slot = duty.schedule_slot
+    exam = slot.exam
     return {
         "examSlotId": str(duty.schedule_slot_id),
+        "slotLabel": f"{exam.name} — {slot.subject.name} ({slot.batch.name})",
         "facultyId": str(duty.faculty_id),
         "facultyName": duty.faculty.full_name if duty.faculty_id else "",
         "assignedAt": duty.created_at.isoformat(),
-        # The model doesn't record auto vs manual assignment; default to manual.
         "assignedBy": "manual",
     }
 

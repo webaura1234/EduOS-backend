@@ -21,9 +21,6 @@ _QUICK_ACTIONS = [
     {"id": "apply-leave", "label": "Apply for leave",
      "description": "Submit a leave request", "href": "/faculty/my-leave",
      "variant": "secondary"},
-    {"id": "payslip", "label": "View payslip",
-     "description": "Download your latest payslip", "href": "/faculty/payslip",
-     "variant": "secondary"},
 ]
 
 

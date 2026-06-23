@@ -9,7 +9,7 @@ import datetime
 
 from django.utils import timezone
 from rest_framework import status as http
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -89,7 +89,12 @@ class FacultyMarksView(APIView):
     def get(self, request) -> Response:
         branch = resolve_branch(request)
         now = timezone.now()
-        internal = [_row(m) for m in int_q.list_recorded_by(branch.pk, request.user.pk)]
+        is_college = branch.tenant.institution_type == "college"
+        internal = (
+            [_row(m) for m in int_q.list_recorded_by(branch.pk, request.user.pk)]
+            if is_college
+            else []
+        )
 
         # Exam slots for the subjects/batches this faculty teaches.
         pairs = _faculty_teaching_pairs(request.user.pk)
@@ -124,6 +129,11 @@ class FacultyInternalMarkSaveView(APIView):
 
     def post(self, request) -> Response:
         branch = resolve_branch(request)
+        if branch.tenant.institution_type != "college":
+            raise PermissionDenied(
+                "Internal marks are not used for schools. Enter marks under scheduled exams instead."
+            )
+
         student_id = request.data.get("studentId")
         subject_id = request.data.get("subjectId")
         if not student_id or not subject_id:

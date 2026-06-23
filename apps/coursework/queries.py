@@ -53,3 +53,9 @@ def update(hw: Homework, *, batch, date, title, details, publish, user=None) -> 
     hw.save(update_fields=["batch", "date", "title", "details", "status",
                            "published_at", "updated_by", "updated_at"])
     return hw
+
+
+def soft_delete(hw: Homework, user=None) -> None:
+    hw.is_active = False
+    hw.updated_by = user
+    hw.save(update_fields=["is_active", "updated_by", "updated_at"])

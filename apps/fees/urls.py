@@ -20,6 +20,7 @@ from apps.fees.views import (
     RefundViewSet,
     StudentFeeAssignmentView,
     StudentPortalDuesView,
+    StudentPortalFeesView,
     StudentPortalReceiptsView,
     VerifyPaymentCaptureView,
 )
@@ -60,6 +61,7 @@ urlpatterns = [
     
     # Student Portal
     path("me/dues/", StudentPortalDuesView.as_view(), name="student-dues"),
+    path("me/fees/", StudentPortalFeesView.as_view(), name="student-fees"),
     path("me/receipts/", StudentPortalReceiptsView.as_view(), name="student-receipts"),
     
     # Parent Portal

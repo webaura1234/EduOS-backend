@@ -64,7 +64,10 @@ def _published_result_rows(student_profile) -> list[dict]:
         if not slot:
             continue
         publication = result_q.get_current_publication(entry.exam_id)
-        published_at = publication.published_at.isoformat() if publication else ""
+        published_dt = (
+            publication.published_at if publication else entry.exam.marks_deadline
+        )
+        published_at = published_dt.isoformat() if published_dt else ""
         if entry.is_absent or entry.marks is None:
             percent = None
             remark = "AB"
@@ -81,6 +84,7 @@ def _published_result_rows(student_profile) -> list[dict]:
         rows.append(
             {
                 "examSlotId": str(slot.pk),
+                "examLabel": entry.exam.name,
                 "subjectName": entry.subject.name,
                 "publishedAt": published_at,
                 "percent": percent,
@@ -144,6 +148,60 @@ def build_results_hub(student_profile, *, tenant) -> dict:
         "institutionType": _institution_type(tenant),
         "results": _published_result_rows(student_profile),
         "gpa": _gpa_summary(student_profile, college=college),
+    }
+
+
+def build_performance_hub(student_profile, *, tenant) -> dict:
+    """Per-subject performance trends derived from the student's published marks.
+
+    Same source as the results hub, but grouped by subject and ordered over time so
+    the UI can show how each subject is trending across exams.
+    """
+    enr_id = _enrollment_id(student_profile)
+    batch_id = student_profile.current_batch_id
+    by_subject: dict = {}
+    if enr_id:
+        for entry in hub_q.list_published_marks_for_student(enr_id):
+            slot = hub_q.get_slot_for_exam_subject_batch(entry.exam_id, entry.subject_id, batch_id)
+            if not slot or entry.is_absent or entry.marks is None:
+                continue
+            final_marks = entry.marks + (entry.grace_applied or 0)
+            pct = grading_svc.percent_of(final_marks, slot.max_marks)
+            if pct is None:
+                continue
+            # Order chronologically by the exam date so trends read left-to-right in time.
+            publication = result_q.get_current_publication(entry.exam_id)
+            order_key = (
+                entry.exam.marks_deadline
+                or (publication.published_at if publication else None)
+            )
+            bucket = by_subject.setdefault(
+                entry.subject_id,
+                {"name": entry.subject.name, "points": []},
+            )
+            bucket["points"].append((order_key, float(pct), entry.exam.name))
+
+    subjects = []
+    latest_values = []
+    for info in by_subject.values():
+        points = sorted(info["points"], key=lambda p: (p[0] is None, p[0]))
+        trend = [{"label": label, "percent": round(pct)} for (_k, pct, label) in points]
+        latest = round(points[-1][1]) if points else None
+        if latest is not None:
+            latest_values.append(latest)
+        subjects.append({
+            "subjectName": info["name"],
+            "latestPercent": latest,
+            "remark": "OK" if latest is not None else "AB",
+            "trend": trend,
+        })
+
+    subjects.sort(key=lambda s: s["subjectName"])
+    overall = round(sum(latest_values) / len(latest_values)) if latest_values else None
+    return {
+        "institutionType": _institution_type(tenant),
+        "overallAverage": overall,
+        "subjects": subjects,
     }
 
 

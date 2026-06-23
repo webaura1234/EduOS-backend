@@ -49,7 +49,10 @@ def test_dashboard_shape(env):
                 "nextExamLabel", "hallTicketAvailable", "announcements"):
         assert key in body, f"missing {key}"
     assert body["profile"]["name"].startswith("Polo")
-    assert body["profile"]["classLabel"] == env["batch"].name
+    # classLabel now shows class + section, e.g. "Course X - Section Y".
+    assert body["profile"]["classLabel"] == f"{env['batch'].course.name} - {env['batch'].name}"
+    assert body["profile"]["sectionName"] == env["batch"].name
+    assert body["profile"]["className"] == env["batch"].course.name
 
 
 def test_dashboard_fee_alert(env):

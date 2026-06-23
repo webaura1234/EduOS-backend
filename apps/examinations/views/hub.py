@@ -40,6 +40,16 @@ class StudentResultsHubView(APIView):
         return Response({"results": StudentResultsHubSerializer(payload).data})
 
 
+class StudentPerformanceHubView(APIView):
+    """Per-subject performance trends for the logged-in student (StudentPerformanceData)."""
+    permission_classes = [IsAuthenticated, IsStudent]
+
+    def get(self, request) -> Response:
+        profile = _student_profile_or_404(request.user)
+        payload = hub_i.build_performance_hub(profile, tenant=request.user.tenant)
+        return Response(payload)
+
+
 class StudentAssignmentsHubView(APIView):
     permission_classes = [IsAuthenticated, IsStudent]
 

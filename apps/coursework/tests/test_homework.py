@@ -34,6 +34,8 @@ def env():
     batch = BatchFactory(course__department__branch=branch, academic_year=year)
     faculty = UserFactory(role=Role.FACULTY, tenant=tenant, branch=branch,
                           custom_login_id="FAC-1", must_change_password=False)
+    batch.class_teacher = faculty  # so it appears among her assigned classes
+    batch.save(update_fields=["class_teacher"])
     su = UserFactory(role=Role.STUDENT, tenant=tenant, branch=branch,
                      custom_login_id="STU-1", must_change_password=False)
     profile = StudentProfile.objects.create(user=su, current_batch=batch)

@@ -19,7 +19,12 @@ from apps.attendance.views.attendance import (
 from apps.attendance.views.leave import AuditLogView, LeaveListCreateView, LeaveReviewView
 from apps.attendance.views.student_leave import StudentLeaveView
 from apps.attendance.views.faculty_leave import FacultyLeaveReviewView
-from apps.attendance.views.faculty_attendance import FacultyAttendanceView
+from apps.attendance.views.faculty_attendance import (
+    FacultyAttendanceView,
+    FacultyBulkMarkView,
+    FacultyLiveAttendanceView,
+    FacultyMarkRecordView,
+)
 from apps.attendance.views.overview import (
     AdminAttendanceLiveView,
     AdminAttendanceOverviewView,
@@ -56,6 +61,11 @@ urlpatterns = [
     path("me/leave/", StudentLeaveView.as_view(), name="student-leave"),
     path("faculty/leave/", FacultyLeaveReviewView.as_view(), name="faculty-leave-review"),
     path("faculty/attendance/", FacultyAttendanceView.as_view(), name="faculty-attendance"),
+    path("faculty/records/<uuid:record_id>/mark/", FacultyMarkRecordView.as_view(),
+         name="faculty-mark-record"),
+    path("faculty/records/bulk-mark/", FacultyBulkMarkView.as_view(),
+         name="faculty-bulk-mark"),
+    path("faculty/live/", FacultyLiveAttendanceView.as_view(), name="faculty-live"),
     path("leave/<uuid:leave_id>/", LeaveReviewView.as_view(), name="leave-review"),
 
     # Student / parent

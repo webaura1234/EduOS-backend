@@ -17,6 +17,7 @@ from apps.examinations.views.hub import (
     ParentChildResultsHubView,
     StudentAssignmentsHubView,
     StudentExamHubView,
+    StudentPerformanceHubView,
     StudentResultsHubView,
 )
 from apps.examinations.views.exam import (
@@ -139,6 +140,7 @@ urlpatterns = [
     ),
     path("me/exams/", StudentExamHubView.as_view(), name="student-exam-hub"),
     path("me/results/", StudentResultsHubView.as_view(), name="student-results-hub"),
+    path("me/performance/", StudentPerformanceHubView.as_view(), name="student-performance-hub"),
     path("me/assignments/", StudentAssignmentsHubView.as_view(), name="student-assignments-hub"),
     path("me/marks/", FacultyMarksView.as_view(), name="faculty-marks"),
     path("me/internal-marks/", FacultyInternalMarkSaveView.as_view(), name="faculty-internal-marks-save"),

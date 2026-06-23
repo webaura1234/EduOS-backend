@@ -8,12 +8,30 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.academics.models import Batch
 from apps.academics.queries import structure as struct_q
+from apps.academics.queries import timetable as tt_q
 from apps.academics.scoping import resolve_branch
 from apps.accounts.permissions import IsStudent
 from apps.admissions.queries.enrollment import get_active_enrollment_for_profile
 from apps.attendance.permissions import IsFacultyOrAdmin
 from apps.coursework import queries as hw_q
+
+
+def _assigned_batches(branch_id, faculty_id):
+    """Classes a faculty is responsible for: class-teacher batches + batches they
+    teach via the timetable. De-duplicated, with proper 'Course - Section' labels."""
+    batches = {
+        b.id: b
+        for b in Batch.objects.filter(
+            course__department__branch_id=branch_id,
+            class_teacher_id=faculty_id, is_active=True,
+        ).select_related("course")
+    }
+    for e in tt_q.list_active_entries_for_branch(branch_id):
+        if e.faculty_id == faculty_id and e.timetable_id and e.timetable.batch_id not in batches:
+            batches[e.timetable.batch_id] = e.timetable.batch
+    return list(batches.values())
 
 
 def _entry(h) -> dict:
@@ -39,7 +57,9 @@ class FacultyHomeworkView(APIView):
         branch = resolve_branch(request)
         view_scope = "college" if branch.tenant.institution_type == "college" else "school"
         classes = [
-            {"id": str(b.id), "label": b.name} for b in struct_q.list_batches(branch.pk)
+            {"id": str(b.id),
+             "label": f"{b.course.name} - {b.name}" if b.course_id else b.name}
+            for b in _assigned_batches(branch.pk, request.user.pk)
         ]
         homework = [_entry(h) for h in hw_q.list_for_faculty(branch.pk, request.user.pk)]
         return Response({
@@ -79,6 +99,23 @@ class FacultyHomeworkView(APIView):
                              details=details, publish=publish, user=request.user)
         return Response({"success": True, "entry": _entry(hw)},
                         status=http.HTTP_201_CREATED)
+
+
+class FacultyHomeworkDetailView(APIView):
+    """DELETE a homework item. Only its author (or an admin) may delete it."""
+    permission_classes = [IsAuthenticated, IsFacultyOrAdmin]
+
+    def delete(self, request, homework_id) -> Response:
+        branch = resolve_branch(request)
+        hw = hw_q.get_in_branch(branch.pk, homework_id)
+        if hw is None:
+            return Response({"error": "Homework not found."}, status=http.HTTP_404_NOT_FOUND)
+        is_admin = request.user.role in ("admin", "super_admin")
+        if not is_admin and hw.created_by_id != request.user.pk:
+            return Response({"error": "You can only delete homework you created."},
+                            status=http.HTTP_403_FORBIDDEN)
+        hw_q.soft_delete(hw, user=request.user)
+        return Response({"success": True})
 
 
 class StudentHomeworkView(APIView):

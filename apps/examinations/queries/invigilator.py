@@ -53,7 +53,7 @@ def list_for_faculty(branch_id, faculty_id):
             faculty_id=faculty_id, is_active=True,
             schedule_slot__exam__branch_id=branch_id,
         )
-        .select_related("schedule_slot", "faculty")
+        .select_related("schedule_slot__exam", "schedule_slot__subject", "schedule_slot__batch", "faculty")
         .order_by("schedule_slot__start_at")
     )
 

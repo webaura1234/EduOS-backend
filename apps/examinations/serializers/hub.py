@@ -26,6 +26,7 @@ class HubExamSlotSerializer(serializers.Serializer):
 
 class HubPublishedResultSerializer(serializers.Serializer):
     examSlotId = serializers.CharField()
+    examLabel = serializers.CharField(default="")
     subjectName = serializers.CharField()
     publishedAt = serializers.CharField()
     percent = serializers.FloatField(allow_null=True)

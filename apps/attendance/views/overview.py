@@ -58,6 +58,7 @@ def _record(r) -> dict:
         "id": str(r.pk),
         "studentId": str(r.student.student_profile_id),
         "studentName": r.student.user.full_name,
+        "rollNumber": r.student.user.custom_login_id or "",
         "classSectionId": str(sess.batch_id),
         "classLabel": sess.batch.name,
         "subjectId": str(sess.batch_subject.subject_id) if has_subject else "",

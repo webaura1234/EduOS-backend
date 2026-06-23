@@ -12,18 +12,19 @@ from apps.admissions.queries.enrollment import get_active_enrollment_for_profile
 
 
 def _material(m) -> dict:
-    bs = m.timetable_entry.batch_subject if m.timetable_entry_id else None
+    label = ""
+    if m.batch_id:
+        label = (f"{m.batch.course.name} - {m.batch.name}"
+                 if m.batch.course_id else m.batch.name)
     return {
         "id": str(m.id),
-        "timetableSlotId": str(m.timetable_entry_id),
-        "sessionDate": m.session_date.isoformat(),
+        "classSectionId": str(m.batch_id) if m.batch_id else "",
+        "classLabel": label,
         "fileName": m.file_name,
         "s3Key": m.s3_key,
         "url": m.url,
         "uploadedAt": m.created_at.isoformat(),
         "uploadedByUserId": str(m.uploaded_by_id) if m.uploaded_by_id else "",
-        "subjectName": bs.subject.name if bs and bs.subject_id else "Subject",
-        # Syllabus units aren't modelled yet → empty.
         "unitTitles": [],
     }
 

@@ -66,12 +66,20 @@ class StudentDashboardView(APIView):
         profile = getattr(user, "student_profile", None)
         enrollment = get_active_enrollment_for_profile(profile.pk) if profile else None
 
-        # Profile block
+        # Profile block — classLabel shows both class and section, e.g. "Class 5 - A".
         batch = enrollment.batch if enrollment else None
+        class_name = batch.course.name if batch and batch.course_id else ""
+        section_name = batch.name if batch else ""
+        if class_name and section_name:
+            class_label = f"{class_name} - {section_name}"
+        else:
+            class_label = class_name or section_name
         profile_block = {
             "studentId": str(profile.id) if profile else str(user.id),
             "name": user.full_name,
-            "classLabel": batch.name if batch else "",
+            "classLabel": class_label,
+            "className": class_name,
+            "sectionName": section_name,
             "classSectionId": str(batch.id) if batch else "",
             "rollNumber": user.custom_login_id,
         }

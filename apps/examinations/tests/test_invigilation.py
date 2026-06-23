@@ -59,4 +59,5 @@ def test_faculty_sees_only_their_duties():
     a = body["assignments"][0]
     assert a["examSlotId"] == str(slot.id)
     assert a["facultyId"] == str(me.id)
+    assert "slotLabel" in a
     assert a["assignedBy"] == "manual"

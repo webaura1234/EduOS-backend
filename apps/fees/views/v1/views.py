@@ -486,6 +486,62 @@ class StudentPortalDuesView(APIView):
         return Response(FeeInvoiceSerializer(invoices, many=True).data)
 
 
+class StudentPortalFeesView(APIView):
+    """Composed StudentFeesData: ledger summary + payments + exam fees + razorpay key."""
+    permission_classes = [IsAuthenticated, IsStudent]
+
+    def get(self, request):
+        import datetime
+
+        from django.conf import settings as dj_settings
+
+        from apps.accounts.models import StudentProfile
+        try:
+            student = request.user.student_profile
+        except StudentProfile.DoesNotExist:
+            raise ValidationError("Student profile not found.")
+
+        tenant = request.user.tenant
+        inst = "college" if getattr(tenant, "institution_type", "") == "college" else "school"
+
+        invoices = list(list_dues_for_student_user(student.user_id))
+        total_due = sum(i.total_paise for i in invoices)
+        paid = sum(i.paid_paise for i in invoices)
+        balance = sum(i.balance_paise for i in invoices)
+        today = datetime.date.today()
+        open_due_dates = [i.due_date for i in invoices if i.due_date and i.balance_paise > 0]
+        next_due = min(open_due_dates).isoformat() if open_due_dates else None
+        is_overdue = any(d < today for d in open_due_dates)
+
+        payments = []
+        for r in list_receipts_for_student(student.user_id):
+            p = r.payment
+            payments.append({
+                "id": str(r.id),
+                "paidAt": r.issued_at.isoformat() if r.issued_at else "",
+                "amount": round(p.amount_paise / 100, 2),
+                "method": p.method,
+                "receiptNo": f"{r.financial_year}/{r.sequence_number}",
+                "orderId": p.razorpay_order_id or "",
+                "status": p.status,
+            })
+
+        return Response({
+            "institutionType": inst,
+            "ledger": {
+                "totalDue": round(total_due / 100, 2),
+                "paid": round(paid / 100, 2),
+                "balance": round(balance / 100, 2),
+                "nextDueDate": next_due,
+                "isOverdue": is_overdue,
+            },
+            "payments": payments,
+            "razorpayKeyId": dj_settings.RAZORPAY_KEY_ID,
+            # Exam fees aren't billed separately in the current data model → nothing due.
+            "examFees": {"rows": [], "allPaid": True},
+        })
+
+
 class StudentPortalReceiptsView(APIView):
     permission_classes = [IsAuthenticated, IsStudent]
 

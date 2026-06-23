@@ -15,6 +15,7 @@ from .v1.views import (
     RefundViewSet,
     StudentFeeAssignmentView,
     StudentPortalDuesView,
+    StudentPortalFeesView,
     StudentPortalReceiptsView,
     VerifyPaymentCaptureView,
 )
@@ -34,6 +35,7 @@ __all__ = [
     "RecordOfflinePaymentView",
     "RazorpayWebhookView",
     "StudentPortalDuesView",
+    "StudentPortalFeesView",
     "StudentPortalReceiptsView",
     "ParentPortalChildDuesView",
     "ParentPortalChildPayView",

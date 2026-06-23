@@ -46,3 +46,27 @@ class Announcement(BaseModel):
 
     def __str__(self):
         return f"Announcement({self.title})"
+
+
+class AnnouncementRead(BaseModel):
+    """Marks an announcement as read by a specific user (per-user read state)."""
+
+    announcement = models.ForeignKey(
+        Announcement, on_delete=models.CASCADE, related_name="reads",
+    )
+    user = models.ForeignKey(
+        "accounts.User", on_delete=models.CASCADE, related_name="announcement_reads",
+    )
+    read_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "communications_announcement_read"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["announcement", "user"], name="unique_announcement_read_per_user",
+            ),
+        ]
+        indexes = [models.Index(fields=["user", "announcement"])]
+
+    def __str__(self):
+        return f"Read({self.announcement_id} by {self.user_id})"

@@ -8,6 +8,7 @@ from apps.hr.views.employee import (
     EmployeeDeactivateView,
     EmployeeListCreateView,
 )
+from apps.hr.views.my_attendance import FacultyMyAttendanceView
 from apps.hr.views.my_leave import FacultyMyLeaveView
 from apps.hr.views.leave import (
     LeaveApplyView,
@@ -57,4 +58,5 @@ urlpatterns = [
     path("payslips/<uuid:payslip_id>/", PayslipDetailView.as_view(), name="payslip-detail"),
     path("me/payslips/", MyPayslipsView.as_view(), name="my-payslips"),
     path("me/payslip/", FacultyPayslipView.as_view(), name="faculty-payslip"),
+    path("me/attendance/", FacultyMyAttendanceView.as_view(), name="faculty-my-attendance"),
 ]

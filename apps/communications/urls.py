@@ -5,6 +5,7 @@ from django.urls import path
 from apps.communications.views.announcement import (
     AdminAnnouncementsView,
     FacultyAnnouncementsView,
+    StudentAnnouncementsUnreadView,
     StudentAnnouncementsView,
 )
 from apps.communications.views.notification import NotificationPreferencesView
@@ -16,5 +17,7 @@ urlpatterns = [
          name="notification-preferences"),
     path("announcements/", AdminAnnouncementsView.as_view(), name="announcements"),
     path("announcements/me/", StudentAnnouncementsView.as_view(), name="student-announcements"),
+    path("announcements/me/unread-count/", StudentAnnouncementsUnreadView.as_view(),
+         name="student-announcements-unread"),
     path("announcements/faculty/", FacultyAnnouncementsView.as_view(), name="faculty-announcements"),
 ]

@@ -42,15 +42,22 @@ class AcademicSubstitution(BaseModel):
 
 
 class StudyMaterial(BaseModel):
-    """A file attached to a timetable slot's session (F-179)."""
+    """A study-material file attached to a class/batch (F-179). Admin-uploaded,
+    visible to that class's students and its faculty."""
 
     branch = models.ForeignKey(
         "organizations.Branch", on_delete=models.CASCADE, related_name="study_materials"
     )
-    timetable_entry = models.ForeignKey(
-        "academics.TimetableEntry", on_delete=models.CASCADE, related_name="study_materials"
+    batch = models.ForeignKey(
+        "academics.Batch", on_delete=models.CASCADE, related_name="study_materials",
+        null=True, blank=True,
     )
-    session_date = models.DateField()
+    # Legacy: materials used to attach to a timetable slot. Kept nullable for old rows.
+    timetable_entry = models.ForeignKey(
+        "academics.TimetableEntry", on_delete=models.CASCADE, related_name="study_materials",
+        null=True, blank=True,
+    )
+    session_date = models.DateField(null=True, blank=True)
     file_name = models.CharField(max_length=255)
     s3_key = models.CharField(max_length=500, blank=True, default="")
     url = models.CharField(max_length=1000, blank=True, default="")
@@ -61,7 +68,7 @@ class StudyMaterial(BaseModel):
 
     class Meta:
         db_table = "academics_study_material"
-        indexes = [models.Index(fields=["branch", "timetable_entry"])]
+        indexes = [models.Index(fields=["branch", "batch"])]
 
     def __str__(self):
         return f"StudyMaterial({self.file_name})"

@@ -48,30 +48,27 @@ def cancel_substitution(sub: AcademicSubstitution, user=None) -> AcademicSubstit
 def list_study_materials(branch_id):
     return (
         StudyMaterial.objects.filter(branch_id=branch_id, is_active=True)
+        .select_related("batch__course")
         .order_by("-created_at")
     )
 
 
 def list_materials_for_batch(branch_id, batch_id):
-    """Study materials attached to a batch's timetable slots (student-facing)."""
+    """Study materials for a class/batch (student-facing)."""
     return (
-        StudyMaterial.objects.filter(
-            branch_id=branch_id,
-            timetable_entry__timetable__batch_id=batch_id,
-            is_active=True,
-        )
-        .select_related("timetable_entry__batch_subject__subject")
+        StudyMaterial.objects.filter(branch_id=branch_id, batch_id=batch_id, is_active=True)
+        .select_related("batch__course")
         .order_by("-created_at")
     )
 
 
-def list_materials_for_faculty(branch_id, faculty_user_id):
-    """Study materials uploaded by a faculty member (faculty-facing)."""
+def list_materials_for_batches(branch_id, batch_ids):
+    """Study materials for a set of classes (faculty-facing — their assigned classes)."""
     return (
         StudyMaterial.objects.filter(
-            branch_id=branch_id, uploaded_by_id=faculty_user_id, is_active=True,
+            branch_id=branch_id, batch_id__in=list(batch_ids), is_active=True,
         )
-        .select_related("timetable_entry__batch_subject__subject")
+        .select_related("batch__course")
         .order_by("-created_at")
     )
 
@@ -83,12 +80,10 @@ def get_study_material(branch_id, material_id) -> StudyMaterial | None:
         return None
 
 
-def create_study_material(*, branch, timetable_entry, session_date, file_name,
-                          s3_key="", url="", user=None) -> StudyMaterial:
+def create_study_material(*, branch, batch, file_name, s3_key="", url="", user=None) -> StudyMaterial:
     return StudyMaterial.objects.create(
-        branch=branch, timetable_entry=timetable_entry, session_date=session_date,
-        file_name=file_name, s3_key=s3_key, url=url, uploaded_by=user,
-        created_by=user, updated_by=user,
+        branch=branch, batch=batch, file_name=file_name, s3_key=s3_key, url=url,
+        uploaded_by=user, created_by=user, updated_by=user,
     )
 
 

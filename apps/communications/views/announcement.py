@@ -6,6 +6,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.academics.queries import structure as struct_q
 from apps.academics.scoping import resolve_branch
 from apps.accounts.models.user import Role, User
 from apps.accounts.permissions import IsAdminOrSuperAdmin, IsStudent
@@ -38,6 +39,25 @@ def _announcement(a) -> dict:
     }
 
 
+def _audience_options(branch) -> dict:
+    """Dropdown options for the 'Target details' field, keyed by audience type."""
+    classes = [
+        {"value": str(b.id),
+         "label": f"{b.course.name} - {b.name}" if b.course_id else b.name}
+        for b in struct_q.list_batches(branch.pk)
+    ]
+    departments = [
+        {"value": str(d.id), "label": d.name} for d in struct_q.list_departments(branch.pk)
+    ]
+    roles = [
+        {"value": "student", "label": "Students"},
+        {"value": "parent", "label": "Parents"},
+        {"value": "faculty", "label": "Faculty"},
+        {"value": "staff", "label": "Staff"},
+    ]
+    return {"batch": classes, "department": departments, "role": roles}
+
+
 def _recipient_count(branch, target_type, target_value) -> int:
     qs = User.objects.filter(branch_id=branch.pk, is_active=True)
     if target_type == "role" and target_value:
@@ -54,7 +74,10 @@ class AdminAnnouncementsView(APIView):
     def get(self, request) -> Response:
         branch = resolve_branch(request)
         rows = ann_q.list_for_branch(branch.pk)
-        return Response({"announcements": [_announcement(a) for a in rows]})
+        return Response({
+            "announcements": [_announcement(a) for a in rows],
+            "options": _audience_options(branch),
+        })
 
     def post(self, request) -> Response:
         branch = resolve_branch(request)
@@ -78,17 +101,50 @@ class AdminAnnouncementsView(APIView):
                         status=http.HTTP_201_CREATED)
 
 
+def _student_notices(request):
+    """All notices visible to the logged-in student (newest first)."""
+    branch = resolve_branch(request)
+    profile = getattr(request.user, "student_profile", None)
+    enrollment = get_active_enrollment_for_profile(profile.pk) if profile else None
+    batch_id = enrollment.batch_id if enrollment else None
+    return list(ann_q.list_for_student(branch.pk, batch_id=batch_id))
+
+
 class StudentAnnouncementsView(APIView):
-    """GET → { announcements } visible to the logged-in student."""
+    """GET → { announcements, unreadCount } — all unread + the 5 most recent read.
+    POST → marks all currently-visible notices read."""
     permission_classes = [IsAuthenticated, IsStudent]
 
     def get(self, request) -> Response:
-        branch = resolve_branch(request)
-        profile = getattr(request.user, "student_profile", None)
-        enrollment = get_active_enrollment_for_profile(profile.pk) if profile else None
-        batch_id = enrollment.batch_id if enrollment else None
-        rows = ann_q.list_for_student(branch.pk, batch_id=batch_id)
-        return Response({"announcements": [_announcement(a) for a in rows]})
+        rows = _student_notices(request)
+        read_ids = ann_q.read_ids_for_user(request.user.pk, [a.pk for a in rows])
+        unread = [a for a in rows if a.pk not in read_ids]
+        read = [a for a in rows if a.pk in read_ids]
+        # Show every unread notice, but only the 5 most recent read ones.
+        visible = sorted(unread + read[:5], key=lambda a: a.created_at, reverse=True)
+
+        def item(a):
+            return {**_announcement(a), "read": a.pk in read_ids}
+
+        return Response({
+            "announcements": [item(a) for a in visible],
+            "unreadCount": len(unread),
+        })
+
+    def post(self, request) -> Response:
+        rows = _student_notices(request)
+        ann_q.mark_read(request.user, rows)
+        return Response({"success": True, "unreadCount": 0})
+
+
+class StudentAnnouncementsUnreadView(APIView):
+    """GET → { unreadCount } — lightweight count for the nav badge/glow."""
+    permission_classes = [IsAuthenticated, IsStudent]
+
+    def get(self, request) -> Response:
+        rows = _student_notices(request)
+        read_ids = ann_q.read_ids_for_user(request.user.pk, [a.pk for a in rows])
+        return Response({"unreadCount": sum(1 for a in rows if a.pk not in read_ids)})
 
 
 class FacultyAnnouncementsView(APIView):
@@ -97,5 +153,9 @@ class FacultyAnnouncementsView(APIView):
 
     def get(self, request) -> Response:
         branch = resolve_branch(request)
-        rows = ann_q.list_for_faculty(branch.pk)
-        return Response({"announcements": [_announcement(a) for a in rows]})
+        rows = ann_q.list_for_faculty(branch.pk, faculty_user_id=request.user.pk)
+        return Response({
+            "announcements": [_announcement(a) for a in rows],
+            "facultyBranchIds": [str(branch.id)],
+            "facultyBranchNames": [branch.name],
+        })

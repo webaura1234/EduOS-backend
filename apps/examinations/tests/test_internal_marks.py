@@ -44,10 +44,18 @@ def env():
                      custom_login_id="STU-1", first_name="Ravi", must_change_password=False)
     profile = StudentProfile.objects.create(user=su, current_batch=batch)
     StudentEnrollmentFactory(student_profile=profile, branch=branch, batch=batch)
-    return dict(branch=branch, subject=subject, faculty=faculty, profile=profile)
+    return dict(branch=branch, subject=subject, faculty=faculty, profile=profile, tenant=tenant)
 
 
-def test_save_and_list_internal_mark(env):
+@pytest.fixture
+def college_env(env):
+    env["tenant"].institution_type = "college"
+    env["tenant"].save(update_fields=["institution_type"])
+    return env
+
+
+def test_save_and_list_internal_mark(college_env):
+    env = college_env
     save_url = reverse("examinations:faculty-internal-marks-save")
     resp = _client(env["faculty"]).post(save_url, {
         "studentId": str(env["profile"].id), "subjectId": str(env["subject"].id),
@@ -63,7 +71,8 @@ def test_save_and_list_internal_mark(env):
     assert body["internal"][0]["subjectName"] == "Maths"
 
 
-def test_exam_slots_and_entries_for_taught_subject(env):
+def test_exam_slots_and_entries_for_taught_subject(college_env):
+    env = college_env
     from apps.academics.models import Room
     from apps.academics.models.calendar import AcademicPeriod, PeriodType
     from apps.academics.models.curriculum import BatchFaculty, BatchSubject
@@ -98,7 +107,8 @@ def test_exam_slots_and_entries_for_taught_subject(env):
     assert body["examEntries"][0]["examSlotId"] == str(slot.id)
 
 
-def test_deadline_blocks_faculty_but_admin_overrides(env):
+def test_deadline_blocks_faculty_but_admin_overrides(college_env):
+    env = college_env
     InternalMark.objects.create(
         branch=env["branch"], student_profile=env["profile"], subject=env["subject"],
         marks=10, max_marks=20, recorded_by=env["faculty"],
@@ -119,3 +129,24 @@ def test_deadline_blocks_faculty_but_admin_overrides(env):
     resp = _client(admin).post(save_url, payload, format="json")
     assert resp.status_code == 201, resp.content
     assert _data(resp)["mark"]["marks"] == 19.0
+
+
+def test_school_faculty_marks_list_omits_internal(env):
+    InternalMark.objects.create(
+        branch=env["branch"], student_profile=env["profile"], subject=env["subject"],
+        marks=12, max_marks=20, recorded_by=env["faculty"],
+    )
+    body = _data(_client(env["faculty"]).get(reverse("examinations:faculty-marks")))
+    assert body["internal"] == []
+
+
+def test_school_internal_mark_save_rejected(env):
+    save_url = reverse("examinations:faculty-internal-marks-save")
+    resp = _client(env["faculty"]).post(save_url, {
+        "studentId": str(env["profile"].id),
+        "subjectId": str(env["subject"].id),
+        "marks": 18,
+        "maxMarks": 20,
+    }, format="json")
+    assert resp.status_code == 403
+    assert "school" in resp.content.decode().lower()

@@ -271,13 +271,12 @@ class AdminAcademicsActionView(APIView):
             return Response({"id": str(sub.id), "status": "cancelled"})
 
         if action == "upload_study_material":
-            entry = tt_q.get_timetable_entry(branch.pk, payload.get("timetableSlotId"))
-            if entry is None:
-                return Response({"error": "Timetable slot not found."},
+            batch = struct_q.get_batch(branch.pk, payload.get("classSectionId"))
+            if batch is None:
+                return Response({"error": "Class not found."},
                                 status=status.HTTP_404_NOT_FOUND)
             material = extra_q.create_study_material(
-                branch=branch, timetable_entry=entry,
-                session_date=_date(payload.get("sessionDate")),
+                branch=branch, batch=batch,
                 file_name=payload.get("fileName", "material"),
                 s3_key=payload.get("s3Key", ""), url=payload.get("url", ""), user=user,
             )
