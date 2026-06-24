@@ -1,6 +1,8 @@
 """Queries — admin academics extras: substitutions, study materials, calendar changes,
 working days, and the derived admin review queue."""
 
+from django.db import models
+
 from apps.academics.models import (
     AcademicSubstitution,
     CalendarChange,
@@ -41,6 +43,32 @@ def cancel_substitution(sub: AcademicSubstitution, user=None) -> AcademicSubstit
     sub.updated_by = user
     sub.save(update_fields=["status", "updated_by", "updated_at"])
     return sub
+
+
+def substitutions_for_faculty(branch_id, faculty_id, from_date, to_date):
+    """Active substitutions where faculty is original or substitute."""
+    return (
+        AcademicSubstitution.objects.filter(
+            branch_id=branch_id,
+            date__gte=from_date,
+            date__lte=to_date,
+            is_active=True,
+        )
+        .exclude(status="cancelled")
+        .filter(
+            models.Q(original_faculty_id=faculty_id) | models.Q(substitute_faculty_id=faculty_id)
+        )
+        .select_related(
+            "timetable_entry",
+            "timetable_entry__batch_subject__subject",
+            "timetable_entry__period_slot",
+            "timetable_entry__timetable__batch",
+            "timetable_entry__room",
+            "original_faculty",
+            "substitute_faculty",
+        )
+        .order_by("date")
+    )
 
 
 # ── Study materials ───────────────────────────────────────────────────────────

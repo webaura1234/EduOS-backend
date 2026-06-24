@@ -42,6 +42,7 @@ def _slot(e) -> dict:
         "statusNote": None,
         "classLabel": e.timetable.batch.name,
         "subjectName": subject.name if subject else "Subject",
+        "roomName": e.room.name if e.room_id else "",
     }
 
 

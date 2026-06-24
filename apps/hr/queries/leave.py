@@ -1,5 +1,6 @@
 """Queries — LeaveBalance + LeaveApplication (all ORM here)."""
 
+import datetime
 from decimal import Decimal
 
 from django.db.models import Count, Q, Sum
@@ -109,3 +110,22 @@ def leave_summary(branch_id) -> dict:
         .annotate(n=Count("id"), days=Sum("days"))
     )
     return {"rows": list(rows)}
+
+
+def approved_leave_dates(employee_id, from_date, to_date) -> dict:
+    """Expand approved leave applications into date → reason map."""
+    apps = LeaveApplication.objects.filter(
+        employee_id=employee_id,
+        status=LeaveStatus.APPROVED,
+        is_active=True,
+        from_date__lte=to_date,
+        to_date__gte=from_date,
+    )
+    result: dict = {}
+    for app in apps:
+        d = max(app.from_date, from_date)
+        end = min(app.to_date, to_date)
+        while d <= end:
+            result[d] = app.reason or "Leave"
+            d += datetime.timedelta(days=1)
+    return result

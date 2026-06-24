@@ -181,16 +181,20 @@ def list_active_entries_for_branch(branch_id):
 
 
 def list_faculty_teaching_slots(branch_id, faculty_id):
-    """Active timetable entries taught by a faculty member, for upload pickers."""
+    """Active published timetable entries taught by a faculty member."""
     return (
         TimetableEntry.objects.filter(
             timetable__batch__course__department__branch_id=branch_id,
+            timetable__is_published=True,
             faculty_id=faculty_id,
             status=TimetableEntryStatus.ACTIVE,
             is_active=True,
         )
         .select_related(
-            "timetable__batch", "batch_subject__subject", "period_slot",
+            "timetable__batch",
+            "batch_subject__subject",
+            "period_slot",
+            "room",
         )
         .order_by("day_of_week", "period_slot__sequence")
     )

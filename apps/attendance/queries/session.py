@@ -56,3 +56,23 @@ def list_sessions_for_date(branch_id, date):
         .select_related("batch", "batch_subject", "batch_subject__subject", "period_slot", "faculty")
         .order_by("period_slot__sequence")
     )
+
+
+def list_sessions_for_faculty(branch_id, faculty_id, from_date, to_date):
+    """Attendance sessions taken by a faculty member in a date range."""
+    return (
+        AttendanceSession.objects.filter(
+            branch_id=branch_id,
+            faculty_id=faculty_id,
+            date__gte=from_date,
+            date__lte=to_date,
+            is_active=True,
+        )
+        .select_related(
+            "batch",
+            "batch_subject",
+            "batch_subject__subject",
+            "period_slot",
+        )
+        .order_by("date", "period_slot__sequence")
+    )

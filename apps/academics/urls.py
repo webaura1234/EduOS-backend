@@ -27,6 +27,7 @@ from apps.academics.views.admin_actions import AdminAcademicsActionView
 from apps.academics.views.admin_overview import AdminAcademicsOverviewView
 from apps.academics.views.faculty_materials import FacultyStudyMaterialsView
 from apps.academics.views.faculty_syllabus import FacultySyllabusView
+from apps.academics.views.faculty_timetable import FacultyTimetableView
 from apps.academics.views.syllabus_authoring import (
     SyllabusUnitDetailView,
     SyllabusUnitListCreateView,
@@ -71,6 +72,7 @@ urlpatterns = [
     path("me/timetable/", StudentTimetableView.as_view(), name="student-timetable"),
     path("faculty/study-materials/", FacultyStudyMaterialsView.as_view(), name="faculty-materials"),
     path("faculty/syllabus/", FacultySyllabusView.as_view(), name="faculty-syllabus"),
+    path("faculty/timetable/", FacultyTimetableView.as_view(), name="faculty-timetable"),
     path("syllabus-units/", SyllabusUnitListCreateView.as_view(), name="syllabus-units"),
     path("syllabus-units/<uuid:unit_id>/", SyllabusUnitDetailView.as_view(),
          name="syllabus-unit-detail"),
