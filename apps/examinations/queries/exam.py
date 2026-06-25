@@ -155,6 +155,7 @@ def find_slot_clashes(
     start_at: datetime.datetime,
     end_at: datetime.datetime,
     exclude_id=None,
+    seating_session_id=None,
 ) -> list[ExamClashDTO]:
     """Return room and batch overlaps for EC-EXAM-06."""
     overlap = _overlap_filter(start_at, end_at)
@@ -168,14 +169,21 @@ def find_slot_clashes(
     clashes: list[ExamClashDTO] = []
     for other in base.select_related("subject", "room", "batch"):
         if str(other.room_id) == str(room_id):
-            clashes.append(
-                ExamClashDTO(
-                    type="room_overlap",
-                    slot_id=str(exclude_id or ""),
-                    other_slot_id=str(other.pk),
-                    message=f"Room {other.room.name} is already booked for {other.subject.name}.",
+            if (
+                seating_session_id
+                and other.seating_session_id
+                and str(other.seating_session_id) == str(seating_session_id)
+            ):
+                pass
+            else:
+                clashes.append(
+                    ExamClashDTO(
+                        type="room_overlap",
+                        slot_id=str(exclude_id or ""),
+                        other_slot_id=str(other.pk),
+                        message=f"Room {other.room.name} is already booked for {other.subject.name}.",
+                    )
                 )
-            )
         if str(other.batch_id) == str(batch_id):
             clashes.append(
                 ExamClashDTO(
@@ -198,6 +206,7 @@ def create_schedule_slot(
     end_at,
     max_marks,
     max_capacity=None,
+    required_invigilators=1,
     user=None,
 ) -> ExamScheduleSlot:
     return ExamScheduleSlot.objects.create(
@@ -209,6 +218,7 @@ def create_schedule_slot(
         end_at=end_at,
         max_marks=max_marks,
         max_capacity=max_capacity,
+        required_invigilators=required_invigilators,
         created_by=user,
         updated_by=user,
     )

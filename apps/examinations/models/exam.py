@@ -1,5 +1,6 @@
 """Examinations — exam setup and scheduling."""
 
+from django.core.validators import MinValueValidator
 from django.db import models
 
 from apps.core.models import BaseModel
@@ -145,6 +146,18 @@ class ExamScheduleSlot(BaseModel):
         decimal_places=2,
         help_text="Snapshot from subject; overridable per slot.",
     )
+    required_invigilators = models.PositiveSmallIntegerField(
+        default=1,
+        validators=[MinValueValidator(1)],
+        help_text="Number of faculty required to invigilate this slot.",
+    )
+    seating_session = models.ForeignKey(
+        "ExamSeatingSession",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="schedule_slots",
+    )
 
     class Meta:
         db_table = "examinations_exam_schedule_slot"
@@ -157,6 +170,32 @@ class ExamScheduleSlot(BaseModel):
 
     def __str__(self):
         return f"{self.exam_id} — {self.subject_id} @ {self.start_at:%Y-%m-%d %H:%M}"
+
+
+class ExamSeatingSession(BaseModel):
+    """Shared hall seating across multiple schedule slots (school combined exams)."""
+
+    exam = models.ForeignKey(
+        Exam,
+        on_delete=models.CASCADE,
+        related_name="seating_sessions",
+    )
+    name = models.CharField(max_length=150)
+    hall_room = models.ForeignKey(
+        "academics.Room",
+        on_delete=models.PROTECT,
+        related_name="exam_seating_sessions",
+    )
+    start_at = models.DateTimeField()
+    end_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "examinations_exam_seating_session"
+        verbose_name = "Exam Seating Session"
+        verbose_name_plural = "Exam Seating Sessions"
+
+    def __str__(self):
+        return f"{self.name} @ {self.start_at:%Y-%m-%d %H:%M}"
 
 
 class InvigilatorDuty(BaseModel):

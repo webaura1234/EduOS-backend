@@ -65,3 +65,10 @@ def reopen(grievance: Grievance, user=None) -> Grievance:
     grievance.updated_by = user
     grievance.save(update_fields=["status", "updated_by", "updated_at"])
     return grievance
+
+
+def count_open(branch_id) -> int:
+    """Grievances still awaiting resolution (open or in review)."""
+    return Grievance.objects.filter(
+        branch_id=branch_id, status__in=["open", "in_review"], is_active=True,
+    ).count()

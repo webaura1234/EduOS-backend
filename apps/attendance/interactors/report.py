@@ -36,6 +36,50 @@ def _percent_map(students, *, date_from, date_to, exclude_exam):
     return out
 
 
+def _students_for_report(branch, batch_id=None):
+    if batch_id:
+        return list(roster_q.students_in_batch(batch_id))
+    return list(roster_q.all_active_students_in_branch(branch.pk))
+
+
+def _attendance_rows(
+    branch,
+    *,
+    date_from,
+    date_to,
+    batch_id=None,
+    threshold=None,
+    below_threshold_only=False,
+) -> dict:
+    cfg_threshold, exam_counts = roster_q.attendance_config(branch)
+    threshold = threshold if threshold is not None else cfg_threshold
+    exclude_exam = not exam_counts
+
+    students = _students_for_report(branch, batch_id)
+    percents = _percent_map(students, date_from=date_from, date_to=date_to, exclude_exam=exclude_exam)
+
+    rows = []
+    for sp in students:
+        pct, total = percents[sp.pk]
+        if below_threshold_only:
+            if total <= 0 or not is_below_threshold(pct, threshold):
+                continue
+        rows.append({
+            "studentId": str(sp.student_profile_id),
+            "name": sp.user.full_name,
+            "batchId": str(sp.current_batch_id) if sp.current_batch_id else None,
+            "percent": pct,
+            "sessions": total,
+        })
+    rows.sort(key=lambda r: r["percent"])
+    return {
+        "threshold": threshold,
+        "dateFrom": date_from.isoformat(),
+        "dateTo": date_to.isoformat(),
+        "rows": rows,
+    }
+
+
 def student_summary(branch, student, *, date_from=_WIDE_FROM, date_to=_WIDE_TO) -> dict:
     """Overall + subject-wise % for one student (F-111/112)."""
     threshold, exam_counts = roster_q.attendance_config(branch)
@@ -71,59 +115,49 @@ def student_summary(branch, student, *, date_from=_WIDE_FROM, date_to=_WIDE_TO) 
     }
 
 
-def shortage_report(branch, *, threshold=None, batch_id=None) -> dict:
-    """Students below the attendance threshold (F-105/114/115)."""
-    cfg_threshold, exam_counts = roster_q.attendance_config(branch)
-    threshold = threshold if threshold is not None else cfg_threshold
-    exclude_exam = not exam_counts
-
-    students = list(
-        roster_q.students_in_batch(batch_id) if batch_id
-        else roster_q.all_active_students_in_branch(branch.pk)
+def ranking_report(branch, *, date_from, date_to, batch_id=None) -> dict:
+    """All students ranked by attendance % for a date range (admin shortage table)."""
+    return _attendance_rows(
+        branch, date_from=date_from, date_to=date_to, batch_id=batch_id, below_threshold_only=False
     )
-    percents = _percent_map(students, date_from=_WIDE_FROM, date_to=_WIDE_TO,
-                            exclude_exam=exclude_exam)
-
-    rows = []
-    for sp in students:
-        pct, total = percents[sp.pk]
-        if total > 0 and is_below_threshold(pct, threshold):
-            rows.append({
-                "studentId": str(sp.student_profile_id),
-                "name": sp.user.full_name,
-                "batchId": str(sp.current_batch_id) if sp.current_batch_id else None,
-                "percent": pct,
-                "sessions": total,
-            })
-    rows.sort(key=lambda r: r["percent"])
-    return {"threshold": threshold, "rows": rows}
 
 
-def detention_report(branch, *, batch_id=None) -> dict:
+def shortage_report(
+    branch,
+    *,
+    threshold=None,
+    batch_id=None,
+    date_from=None,
+    date_to=None,
+) -> dict:
+    """Students below the attendance threshold (F-105/114/115)."""
+    date_from = date_from or _WIDE_FROM
+    date_to = date_to or _WIDE_TO
+    return _attendance_rows(
+        branch,
+        date_from=date_from,
+        date_to=date_to,
+        batch_id=batch_id,
+        threshold=threshold,
+        below_threshold_only=True,
+    )
+
+
+def detention_report(
+    branch,
+    *,
+    batch_id=None,
+    date_from=None,
+    date_to=None,
+) -> dict:
     """Auto-generated detention list = shortage at the configured threshold (F-115)."""
-    return shortage_report(branch, threshold=None, batch_id=batch_id)
+    return shortage_report(branch, batch_id=batch_id, date_from=date_from, date_to=date_to)
 
 
 def monthly_report(branch, *, year, month, batch_id=None) -> dict:
     """Per-student attendance % for one month (F-110)."""
     date_from, date_to = month_bounds(year, month)
-    _, exam_counts = roster_q.attendance_config(branch)
-    exclude_exam = not exam_counts
-
-    students = list(
-        roster_q.students_in_batch(batch_id) if batch_id
-        else roster_q.all_active_students_in_branch(branch.pk)
-    )
-    percents = _percent_map(students, date_from=date_from, date_to=date_to,
-                            exclude_exam=exclude_exam)
-
-    rows = []
-    for sp in students:
-        pct, total = percents[sp.pk]
-        rows.append({
-            "studentId": str(sp.student_profile_id),
-            "name": sp.user.full_name,
-            "percent": pct,
-            "sessions": total,
-        })
-    return {"year": year, "month": month, "rows": rows}
+    report = ranking_report(branch, date_from=date_from, date_to=date_to, batch_id=batch_id)
+    report["year"] = year
+    report["month"] = month
+    return report

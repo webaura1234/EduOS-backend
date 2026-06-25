@@ -67,6 +67,8 @@ class ExamScheduleSlotSerializer(serializers.Serializer):
 
     id = serializers.UUIDField(read_only=True)
     name = serializers.SerializerMethodField()
+    examId = serializers.UUIDField(source="exam_id", read_only=True)
+    examName = serializers.CharField(source="exam.name", read_only=True)
     classSectionId = serializers.UUIDField(source="batch_id", read_only=True)
     classLabel = serializers.CharField(source="batch.name", read_only=True)
     subjectId = serializers.UUIDField(source="subject_id", read_only=True)
@@ -78,6 +80,7 @@ class ExamScheduleSlotSerializer(serializers.Serializer):
     roomName = serializers.CharField(source="room.name", read_only=True)
     status = serializers.SerializerMethodField()
     marksEntryDeadlineAt = serializers.SerializerMethodField()
+    requiredInvigilators = serializers.IntegerField(source="required_invigilators", read_only=True)
     version = serializers.IntegerField(read_only=True)
 
     def get_name(self, obj: ExamScheduleSlot) -> str:
@@ -113,6 +116,7 @@ class CreateScheduleSlotSerializer(serializers.Serializer):
     roomId = serializers.UUIDField()
     status = serializers.ChoiceField(choices=["draft", "published"], required=False, default="draft")
     maxMarks = serializers.DecimalField(max_digits=6, decimal_places=2, required=False)
+    requiredInvigilators = serializers.IntegerField(required=False, default=1, min_value=1)
     override = serializers.BooleanField(required=False, default=False)
 
 
@@ -124,5 +128,6 @@ class UpdateScheduleSlotSerializer(serializers.Serializer):
     endTime = serializers.CharField(required=False)
     roomId = serializers.UUIDField(required=False)
     maxMarks = serializers.DecimalField(max_digits=6, decimal_places=2, required=False)
+    requiredInvigilators = serializers.IntegerField(required=False, min_value=1)
     override = serializers.BooleanField(required=False, default=False)
     version = serializers.IntegerField(required=False)

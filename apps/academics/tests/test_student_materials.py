@@ -6,9 +6,6 @@ import pytest
 from django.urls import reverse
 from rest_framework.test import APIClient
 
-from apps.academics.models import PeriodSlot, Timetable, TimetableEntry
-from apps.academics.models.calendar import AcademicPeriod, PeriodType
-from apps.academics.models.curriculum import BatchSubject, Subject
 from apps.academics.models.admin_extras import StudyMaterial
 from apps.academics.tests.factories import AcademicYearFactory, BatchFactory
 from apps.accounts.models.profile import StudentProfile
@@ -37,20 +34,10 @@ def test_student_sees_materials_for_their_batch():
     branch = BranchFactory(tenant=tenant)
     year = AcademicYearFactory(branch=branch, is_current=True)
     batch = BatchFactory(course__department__branch=branch, academic_year=year)
-    subject = Subject.objects.create(course=batch.course, name="Mathematics", code="MA")
-    period = AcademicPeriod.objects.create(
-        academic_year=year, period_type=PeriodType.TERM, sequence=1, name="Term 1",
-        start_date=datetime.date(2026, 1, 1), end_date=datetime.date(2026, 12, 1),
+
+    StudyMaterial.objects.create(
+        branch=branch, batch=batch, file_name="Unit-1-notes.pdf", s3_key="materials/u1.pdf",
     )
-    bs = BatchSubject.objects.create(batch=batch, subject=subject, academic_period=period)
-    slot = PeriodSlot.objects.create(branch=branch, name="P1", sequence=1,
-                                     start_time=datetime.time(9, 0), end_time=datetime.time(10, 0))
-    tt = Timetable.objects.create(batch=batch, academic_period=period)
-    entry = TimetableEntry.objects.create(timetable=tt, batch_subject=bs, period_slot=slot,
-                                          day_of_week=1, status="active")
-    StudyMaterial.objects.create(branch=branch, timetable_entry=entry,
-                                 session_date=datetime.date(2026, 6, 22),
-                                 file_name="Unit-1-notes.pdf", s3_key="materials/u1.pdf")
 
     student = UserFactory(role=Role.STUDENT, tenant=tenant, branch=branch,
                           custom_login_id="STU-1", must_change_password=False)
@@ -59,11 +46,12 @@ def test_student_sees_materials_for_their_batch():
 
     resp = _client(student).get(reverse("academics:student-materials"))
     assert resp.status_code == 200, resp.content
-    materials = _data(resp)["materials"]
-    assert len(materials) == 1
-    assert materials[0]["fileName"] == "Unit-1-notes.pdf"
-    assert materials[0]["subjectName"] == "Mathematics"
-    assert materials[0]["unitTitles"] == []
+    body = _data(resp)
+    assert len(body["general"]) == 1
+    assert body["general"][0]["fileName"] == "Unit-1-notes.pdf"
+    assert batch.course.name in body["general"][0]["classLabel"]
+    assert body["general"][0]["unitTitles"] == []
+    assert body["folders"] == []
 
 
 def test_student_without_enrollment_gets_empty():
@@ -74,4 +62,6 @@ def test_student_without_enrollment_gets_empty():
     StudentProfile.objects.create(user=student)
     resp = _client(student).get(reverse("academics:student-materials"))
     assert resp.status_code == 200, resp.content
-    assert _data(resp)["materials"] == []
+    body = _data(resp)
+    assert body["folders"] == []
+    assert body["general"] == []

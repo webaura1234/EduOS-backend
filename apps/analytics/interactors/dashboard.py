@@ -11,7 +11,8 @@ from apps.admissions.queries.enquiry import funnel_counts
 from apps.attendance.interactors import report as att_report
 from apps.fees.interactors.report import GetCollectionDashboardInteractor
 from apps.fees.queries.defaulter import list_defaulters
-from apps.hr.queries.leave import leave_summary
+from apps.grievances.queries import count_open as count_open_grievances
+from apps.hr.queries.leave import count_pending_applications, leave_summary
 from apps.organizations.queries.branch import list_branches
 from django.utils import timezone
 from apps.academics.helpers import is_college
@@ -32,12 +33,16 @@ def admin_dashboard(branch, tenant) -> dict:
     fees = GetCollectionDashboardInteractor(branch.pk).execute()
     shortage = att_report.shortage_report(branch)
     defaulters = list(list_defaulters(branch.pk))
+    pending_leave = count_pending_applications(branch.pk)
+    open_grievances = count_open_grievances(branch.pk)
     return {
         "fees": fees,
         "alerts": {
             "lowAttendanceCount": len(shortage["rows"]),
             "lowAttendance": shortage["rows"][:10],
             "pendingFeesCount": len(defaulters),
+            "pendingHrLeaveCount": pending_leave,
+            "openGrievancesCount": open_grievances,
             "attendanceThreshold": shortage["threshold"],
         },
         "admissionsFunnel": funnel_counts(branch.pk),

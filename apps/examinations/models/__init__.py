@@ -9,7 +9,7 @@ from apps.examinations.enums import (
 from .assignment import Assignment, AssignmentSubmission
 from .audit import MarksAudit
 from .internal import InternalMark
-from .exam import Exam, ExamScheduleSlot, GradeScale, InvigilatorDuty
+from .exam import Exam, ExamScheduleSlot, ExamSeatingSession, GradeScale, InvigilatorDuty
 from .results import (
     ExamRegistration,
     HallTicket,
@@ -30,6 +30,7 @@ __all__ = [
     "GradeScale",
     "Exam",
     "ExamScheduleSlot",
+    "ExamSeatingSession",
     "InvigilatorDuty",
     "ExamRegistration",
     "HallTicket",

@@ -17,8 +17,13 @@ def get_leave(branch_id, leave_id) -> LeaveRequest | None:
 
 def list_leaves(branch_id, *, status=None, student_id=None):
     qs = LeaveRequest.objects.filter(branch_id=branch_id, is_active=True).select_related(
-        "student", "student__student_profile__user", "student__batch",
-        "employee", "approver",
+        "student",
+        "student__student_profile__user",
+        "student__batch",
+        "student__batch__course",
+        "employee",
+        "approver",
+        "applied_by",
     )
     if status:
         qs = qs.filter(status=status)

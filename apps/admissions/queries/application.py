@@ -2,7 +2,7 @@
 
 from django.db.models import Prefetch
 
-from apps.admissions.models import Application, ApplicationDocument, Waitlist
+from apps.admissions.models import Application, ApplicationDocument, StudentEnrollment, Waitlist
 
 
 def get_application(branch_id, application_id) -> Application | None:
@@ -23,7 +23,12 @@ def list_applications(branch_id, *, status=None, course_id=None):
                 "documents",
                 queryset=ApplicationDocument.objects.filter(is_active=True),
                 to_attr="active_documents",
-            )
+            ),
+            Prefetch(
+                "enrollments",
+                queryset=StudentEnrollment.objects.filter(is_active=True).select_related("student_profile"),
+                to_attr="active_enrollments",
+            ),
         )
     )
     if status:

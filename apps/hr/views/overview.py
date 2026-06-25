@@ -4,12 +4,12 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.academics.scoping import resolve_branch
 from apps.accounts.permissions import IsAdminOrSuperAdmin
 from apps.accounts.queries.user import list_admins_in_tenant
 from apps.hr.queries import employee as emp_q
 from apps.hr.queries import leave as leave_q
 from apps.hr.queries import payroll as pay_q
-from apps.organizations.queries.branch import list_branches
 
 
 def _rupees(paise: int) -> float:
@@ -17,75 +17,72 @@ def _rupees(paise: int) -> float:
 
 
 class AdminHROverviewView(APIView):
-    """GET → { branches, branchAdmins, employees, assignments, leaveBalances,
-    leaveRequests, payrollRuns, componentTemplates, documents } across the tenant."""
+    """GET → HrData aggregate scoped to the caller's branch (admin operates on own campus only)."""
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
 
     def get(self, request) -> Response:
+        branch = resolve_branch(request)
         tenant_id = request.user.tenant_id
-        branches = list(list_branches(tenant_id))
+        bid, bname = str(branch.id), branch.name
 
         employees, leave_requests, payroll_runs, component_templates = [], [], [], []
 
-        for branch in branches:
-            bid, bname = str(branch.id), branch.name
+        for emp in emp_q.list_employees(branch.id, active_only=False):
+            employees.append({
+                "id": str(emp.id),
+                "name": emp.user.full_name,
+                "roleLabel": emp.user.get_role_display(),
+                "employmentType": emp.employment_type,
+                "primaryBranchId": bid,
+                "primaryBranchName": bname,
+                "active": emp.is_active,
+                "joinedAt": emp.joined_at.isoformat() if emp.joined_at else "",
+                "exitedAt": emp.exited_at.isoformat() if emp.exited_at else None,
+            })
 
-            for emp in emp_q.list_employees(branch.id, active_only=False):
-                employees.append({
-                    "id": str(emp.id),
-                    "name": emp.user.full_name,
-                    "roleLabel": emp.user.get_role_display(),
-                    "employmentType": emp.employment_type,
-                    "primaryBranchId": bid,
-                    "primaryBranchName": bname,
-                    "active": emp.is_active,
-                    "joinedAt": emp.joined_at.isoformat() if emp.joined_at else "",
-                    "exitedAt": emp.exited_at.isoformat() if emp.exited_at else None,
-                })
+        for app in leave_q.list_applications(branch.id):
+            leave_requests.append({
+                "id": str(app.id),
+                "employeeId": str(app.employee_id),
+                "employeeName": app.employee.user.full_name,
+                "branchId": bid,
+                "branchName": bname,
+                "leaveType": app.leave_type,
+                "fromDate": app.from_date.isoformat(),
+                "toDate": app.to_date.isoformat(),
+                "days": float(app.days),
+                "reason": app.reason,
+                "status": app.status,
+                "requestedAt": app.created_at.isoformat(),
+            })
 
-            for app in leave_q.list_applications(branch.id):
-                leave_requests.append({
-                    "id": str(app.id),
-                    "employeeId": str(app.employee_id),
-                    "employeeName": app.employee.user.full_name,
-                    "branchId": bid,
-                    "branchName": bname,
-                    "leaveType": app.leave_type,
-                    "fromDate": app.from_date.isoformat(),
-                    "toDate": app.to_date.isoformat(),
-                    "days": float(app.days),
-                    "reason": app.reason,
-                    "status": app.status,
-                    "requestedAt": app.created_at.isoformat(),
-                })
+        for comp in pay_q.list_components(branch.id):
+            component_templates.append({
+                "id": str(comp.id),
+                "name": comp.name,
+                "kind": comp.kind,
+                "amount": _rupees(comp.amount_paise),
+                "amountPaise": comp.amount_paise,
+                "active": comp.is_active,
+                "createdAt": comp.created_at.isoformat(),
+            })
 
-            for comp in pay_q.list_components(branch.id):
-                component_templates.append({
-                    "id": str(comp.id),
-                    "name": comp.name,
-                    "kind": comp.kind,
-                    "amount": _rupees(comp.amount_paise),
-                    "amountPaise": comp.amount_paise,
-                    "active": comp.is_active,
-                    "createdAt": comp.created_at.isoformat(),
-                })
-
-            for run in pay_q.list_runs(branch.id):
-                totals = run.totals or {}
-                payroll_runs.append({
-                    "id": str(run.id),
-                    "month": run.period_month.strftime("%Y-%m"),
-                    "branchId": bid,
-                    "branchName": bname,
-                    "status": "processed" if run.is_locked else "draft",
-                    "components": [],
-                    "employeeCount": totals.get("headcount", 0),
-                    "totalGross": _rupees(totals.get("grossPaise", 0)),
-                    "totalNet": _rupees(totals.get("netPaise", 0)),
-                    "processedAt": run.executed_at.isoformat() if run.executed_at else None,
-                    "immutable": run.is_locked,
-                    "adjustments": [],
-                })
+        for run in pay_q.list_runs(branch.id):
+            totals = run.totals or {}
+            payroll_runs.append({
+                "id": str(run.id),
+                "month": run.period_month.strftime("%Y-%m"),
+                "branchId": bid,
+                "branchName": bname,
+                "status": "processed" if run.is_locked else "draft",
+                "components": [],
+                "employeeCount": totals.get("headcount", 0),
+                "totalGross": _rupees(totals.get("grossPaise", 0)),
+                "totalNet": _rupees(totals.get("netPaise", 0)),
+                "processedAt": run.executed_at.isoformat() if run.executed_at else None,
+                "immutable": run.is_locked,
+                "adjustments": [],
+            })
 
         branch_admins = [
             {
@@ -95,10 +92,11 @@ class AdminHROverviewView(APIView):
                 "adminName": a.full_name,
             }
             for a in list_admins_in_tenant(tenant_id)
+            if a.branch_id == branch.id
         ]
 
         return Response({
-            "branches": [{"id": str(b.id), "name": b.name} for b in branches],
+            "branches": [{"id": bid, "name": bname}],
             "branchAdmins": branch_admins,
             "employees": employees,
             "assignments": [],

@@ -133,6 +133,23 @@ def upsert_marks_entry(
     return entry
 
 
+def correct_marks_entry(
+    entry: MarksEntry,
+    *,
+    marks,
+    is_absent: bool,
+    user=None,
+) -> MarksEntry:
+    """Admin correction of submitted/locked marks (post-publish revision path)."""
+    entry.marks = marks
+    entry.is_absent = is_absent
+    entry.version += 1
+    if user:
+        entry.updated_by = user
+    entry.save(update_fields=["marks", "is_absent", "version", "updated_by", "updated_at"])
+    return entry
+
+
 def update_marks_entry_versioned(
     entry_id,
     *,

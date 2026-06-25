@@ -3,7 +3,7 @@
 import calendar
 import datetime
 
-from apps.academics.models.timetable import DayOfWeek
+from apps.academics.helpers import batch_display_label
 from apps.academics.queries import calendar as cal_q
 from apps.academics.queries import holiday as hol_q
 from apps.academics.queries import timetable as tt_q
@@ -19,7 +19,7 @@ def _period(entry) -> dict:
     return {
         "entryId": str(entry.id),
         "classSectionId": str(batch.pk),
-        "classLabel": batch.name,
+        "classLabel": batch_display_label(batch),
         "subjectId": str(subject.id) if subject else "",
         "subjectName": subject.name if subject else "Subject",
         "roomId": str(entry.room_id) if entry.room_id else "",

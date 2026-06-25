@@ -73,3 +73,49 @@ class ResultsAnalyticsSerializer(serializers.Serializer):
     averagePercent = serializers.FloatField()
     toppers = AnalyticsTopperSerializer(many=True)
     breakdown = AnalyticsBreakdownSerializer(many=True)
+
+
+class ResultsSlotPreflightSerializer(serializers.Serializer):
+    examSlotId = serializers.CharField()
+    classLabel = serializers.CharField()
+    subjectName = serializers.CharField()
+    registeredCount = serializers.IntegerField()
+    enteredCount = serializers.IntegerField()
+    submittedCount = serializers.IntegerField()
+    status = serializers.CharField()
+
+
+class ResultsPreflightSerializer(serializers.Serializer):
+    examId = serializers.CharField()
+    examName = serializers.CharField()
+    isPublished = serializers.BooleanField()
+    resultStatus = serializers.CharField()
+    slots = ResultsSlotPreflightSerializer(many=True)
+    readyCount = serializers.IntegerField()
+    totalSlots = serializers.IntegerField()
+    canPublish = serializers.BooleanField()
+    blockers = serializers.ListField(child=serializers.CharField())
+
+
+class ResultPublicationSummarySerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    examId = serializers.CharField()
+    publishedAt = serializers.CharField()
+    publishedByUserId = serializers.CharField()
+    revisionNo = serializers.IntegerField()
+    note = serializers.CharField()
+    isCurrent = serializers.BooleanField()
+
+
+class ResultsStatusSerializer(serializers.Serializer):
+    examId = serializers.CharField()
+    isPublished = serializers.BooleanField()
+    resultStatus = serializers.CharField()
+    publications = ResultPublicationSummarySerializer(many=True)
+
+
+class ReportCardSerializer(serializers.Serializer):
+    canDownload = serializers.BooleanField()
+    blockedReason = serializers.CharField(required=False, allow_blank=True)
+    fileName = serializers.CharField()
+    content = serializers.CharField()

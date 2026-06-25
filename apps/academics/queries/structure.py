@@ -70,11 +70,42 @@ def get_course(branch_id, course_id) -> Course | None:
         return None
 
 
+def get_course_by_name(branch_id, name) -> Course | None:
+    normalized = (name or "").strip()
+    if not normalized:
+        return None
+    return (
+        Course.objects.filter(
+            department__branch_id=branch_id, is_active=True, name__iexact=normalized,
+        )
+        .select_related("department")
+        .first()
+    )
+
+
 def course_name_exists(department_id, name, exclude_id=None) -> bool:
     qs = Course.objects.filter(department_id=department_id, name__iexact=name, is_active=True)
     if exclude_id:
         qs = qs.exclude(pk=exclude_id)
     return qs.exists()
+
+
+def get_or_create_course_in_department(department, name, user=None):
+    """School grade (or college program) — find or create under a stream/department."""
+    clean = (name or "").strip()
+    if not clean:
+        raise ValueError("Course name is required")
+    existing = (
+        Course.objects.filter(department_id=department.pk, is_active=True, name__iexact=clean)
+        .first()
+    )
+    if existing:
+        return existing
+    return create_course(department=department, name=clean, user=user)
+
+
+def department_has_active_courses(department_id) -> bool:
+    return Course.objects.filter(department_id=department_id, is_active=True).exists()
 
 
 def create_course(*, department, name, code="", duration_years=1, regulation="", total_credits=None, user=None) -> Course:
@@ -139,6 +170,11 @@ def batch_name_exists(course_id, academic_year_id, name, exclude_id=None) -> boo
 
 def batch_has_students(batch_id) -> bool:
     return StudentProfile.objects.filter(current_batch_id=batch_id, is_active=True).exists()
+
+
+def batch_has_study_materials(batch_id) -> bool:
+    from apps.academics.models import StudyMaterial
+    return StudyMaterial.objects.filter(batch_id=batch_id, is_active=True).exists()
 
 
 def create_batch(*, course, academic_year, name, capacity=40, class_teacher_id=None, user=None) -> Batch:

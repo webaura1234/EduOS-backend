@@ -131,6 +131,23 @@ def get_current_publication(exam_id) -> ResultPublication | None:
     )
 
 
+def list_publications_for_exam(exam_id):
+    return (
+        ResultPublication.objects.filter(exam_id=exam_id, is_active=True)
+        .select_related("published_by")
+        .order_by("-revision_no")
+    )
+
+
+def get_publication_note(publication_id) -> str:
+    row = (
+        ResultRevisionHistory.objects.filter(publication_id=publication_id, is_active=True)
+        .order_by("-created_at")
+        .first()
+    )
+    return row.change_summary if row else ""
+
+
 def create_publication(
     *,
     exam_id,

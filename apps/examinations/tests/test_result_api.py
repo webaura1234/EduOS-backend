@@ -325,3 +325,39 @@ def test_marks_locked_after_publish(result_env):
 
     entry = MarksEntry.objects.get(exam_id=exam_id)
     assert entry.marks_status == MarksStatus.LOCKED
+
+
+def test_results_preflight(result_env):
+    admin = _client(result_env["admin"])
+    exam_id, slot_id = _setup_exam_with_submitted_marks(result_env)
+    resp = admin.post(
+        reverse("examinations:exam-results-preflight", kwargs={"exam_id": exam_id}),
+        format="json",
+    )
+    assert resp.status_code == 200, resp.content
+    preflight = _data(resp)["preflight"]
+    assert preflight["totalSlots"] >= 1
+    assert preflight["canPublish"] is True
+    assert any(s["examSlotId"] == str(slot_id) for s in preflight["slots"])
+
+
+def test_report_card_download_after_publish(result_env):
+    admin = _client(result_env["admin"])
+    exam_id, _ = _setup_exam_with_submitted_marks(result_env)
+    compute = admin.post(reverse("examinations:exam-results-compute", kwargs={"exam_id": exam_id}), format="json")
+    token = _data(compute)["confirmation"]["confirmToken"]
+    publish = admin.post(
+        reverse("examinations:exam-results-publish", kwargs={"exam_id": exam_id}),
+        {"confirmToken": token},
+        format="json",
+    )
+    assert publish.status_code == 200, publish.content
+    student_id = _data(publish)["studentResults"][0]["studentId"]
+    card = admin.get(
+        reverse("examinations:exam-report-card", kwargs={"exam_id": exam_id}),
+        {"studentId": student_id},
+    )
+    assert card.status_code == 200, card.content
+    payload = _data(card)["reportCard"]
+    assert payload["canDownload"] is True
+    assert payload["content"]

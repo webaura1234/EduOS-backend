@@ -64,3 +64,31 @@ def is_late_mark(session_date: datetime.date, slot_end_time: datetime.time,
 def month_bounds(year: int, month: int) -> tuple[datetime.date, datetime.date]:
     last_day = calendar.monthrange(year, month)[1]
     return datetime.date(year, month, 1), datetime.date(year, month, last_day)
+
+
+def iso_week_bounds(year: int, week: int) -> tuple[datetime.date, datetime.date]:
+    """Monday–Sunday for an ISO calendar week."""
+    start = datetime.date.fromisocalendar(year, week, 1)
+    end = datetime.date.fromisocalendar(year, week, 7)
+    return start, end
+
+
+def current_iso_week() -> tuple[int, int]:
+    today = datetime.date.today()
+    iso = today.isocalendar()
+    return iso.year, iso.week
+
+
+def parse_week_param(value: str) -> tuple[datetime.date, datetime.date]:
+    """Parse HTML week input value (e.g. 2026-W23) or ISO date week start."""
+    if "-W" in value:
+        year_str, week_str = value.upper().split("-W", 1)
+        return iso_week_bounds(int(year_str), int(week_str))
+    start = datetime.date.fromisoformat(value)
+    iso = start.isocalendar()
+    return iso_week_bounds(iso.year, iso.week)
+
+
+def parse_month_param(value: str) -> tuple[datetime.date, datetime.date]:
+    year_str, month_str = value.split("-", 1)
+    return month_bounds(int(year_str), int(month_str))

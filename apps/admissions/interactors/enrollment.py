@@ -68,6 +68,17 @@ class ProvisionEnrollmentInteractor:
 
     @transaction.atomic
     def execute(self):
+        if self.application:
+            if self.application.status == ApplicationStatus.ENROLLED:
+                raise ValidationError({"application": "This application is already enrolled."})
+            if self.application.status != ApplicationStatus.ACCEPTED:
+                raise ValidationError({
+                    "application": (
+                        "Application must be accepted before enrollment. "
+                        "Advance the pipeline to verification first."
+                    ),
+                })
+
         # 1. Admission-number uniqueness (EC-AUTH-24).
         if not self.admission_number:
             raise ValidationError({"admissionNumber": "Admission number / roll number is required."})

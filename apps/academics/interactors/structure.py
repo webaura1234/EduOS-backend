@@ -50,6 +50,10 @@ def update_department(dept, tenant_id, *, fields: dict, user=None):
 
 @transaction.atomic
 def delete_department(dept, user=None):
+    if struct_q.department_has_active_courses(dept.pk):
+        raise ValidationError(
+            "Cannot delete a stream/department that still has grades or programs. Remove classes first."
+        )
     return struct_q.soft_delete_department(dept, user=user)
 
 
@@ -123,4 +127,6 @@ def delete_batch(batch, user=None):
 
     if tt_q.batch_has_active_timetable_entries(batch.pk):
         raise ValidationError("Cannot delete a batch with active timetable entries.")
+    if struct_q.batch_has_study_materials(batch.pk):
+        raise ValidationError("Cannot delete a class section that has study materials.")
     return struct_q.soft_delete_batch(batch, user=user)

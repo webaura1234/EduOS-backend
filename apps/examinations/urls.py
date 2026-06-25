@@ -28,7 +28,13 @@ from apps.examinations.views.exam import (
     GradeScaleDetailView,
     GradeScaleListCreateView,
 )
-from apps.examinations.views.logistics import ExamInvigilatorView, ExamSeatingGenerateView
+from apps.examinations.views.logistics import (
+    ExamInvigilatorView,
+    ExamSeatingGenerateView,
+    ExamSeatingListView,
+    ExamSeatingPreflightView,
+    ExamSeatingSessionView,
+)
 from apps.examinations.views.marks import (
     MarksEntryDetailView,
     ScheduleSlotMarksSubmitView,
@@ -39,9 +45,13 @@ from apps.examinations.views.registration import ExamRegistrationListCreateView,
 from apps.examinations.views.result import (
     ExamAnalyticsView,
     ExamGraceMarksView,
+    ExamReportCardView,
     ExamResultsComputeView,
+    ExamResultsExportView,
+    ExamResultsPreflightView,
     ExamResultsPublishView,
     ExamResultsReviseView,
+    ExamResultsStatusView,
 )
 from apps.examinations.views.internal import (
     FacultyInternalMarkSaveView,
@@ -73,9 +83,24 @@ urlpatterns = [
         name="hall-ticket",
     ),
     path(
+        "exams/<uuid:exam_id>/seating/",
+        ExamSeatingListView.as_view(),
+        name="exam-seating-list",
+    ),
+    path(
+        "exams/<uuid:exam_id>/seating/preflight/",
+        ExamSeatingPreflightView.as_view(),
+        name="exam-seating-preflight",
+    ),
+    path(
         "exams/<uuid:exam_id>/seating/generate/",
         ExamSeatingGenerateView.as_view(),
         name="exam-seating-generate",
+    ),
+    path(
+        "exams/<uuid:exam_id>/seating-sessions/",
+        ExamSeatingSessionView.as_view(),
+        name="exam-seating-sessions",
     ),
     path(
         "exams/<uuid:exam_id>/invigilators/",
@@ -121,6 +146,26 @@ urlpatterns = [
         "exams/<uuid:exam_id>/grace-marks/",
         ExamGraceMarksView.as_view(),
         name="exam-grace-marks",
+    ),
+    path(
+        "exams/<uuid:exam_id>/results/preflight/",
+        ExamResultsPreflightView.as_view(),
+        name="exam-results-preflight",
+    ),
+    path(
+        "exams/<uuid:exam_id>/results/status/",
+        ExamResultsStatusView.as_view(),
+        name="exam-results-status",
+    ),
+    path(
+        "exams/<uuid:exam_id>/report-card/",
+        ExamReportCardView.as_view(),
+        name="exam-report-card",
+    ),
+    path(
+        "exams/<uuid:exam_id>/results/export/",
+        ExamResultsExportView.as_view(),
+        name="exam-results-export",
     ),
     path(
         "exams/<uuid:exam_id>/analytics/",

@@ -74,6 +74,29 @@ def test_enroll_no_batch_errors(env):
     assert resp.status_code == 400
 
 
+def test_enroll_rejects_non_accepted_application(env):
+    application = _make_application(env)
+    app_q.update_application(application, {"status": "submitted"})
+    resp = _client(env["admin"]).post(
+        reverse("admissions:enroll-from-application", args=[application.id]),
+        {}, format="json",
+    )
+    assert resp.status_code == 400, resp.content
+
+
+def test_enroll_rejects_already_enrolled_application(env):
+    application = _make_application(env)
+    _client(env["admin"]).post(
+        reverse("admissions:enroll-from-application", args=[application.id]),
+        {}, format="json",
+    )
+    resp = _client(env["admin"]).post(
+        reverse("admissions:enroll-from-application", args=[application.id]),
+        {}, format="json",
+    )
+    assert resp.status_code == 400, resp.content
+
+
 def test_enroll_requires_admin(env):
     application = _make_application(env, name="X", phone="+919800000009")
     student = UserFactory(role=Role.STUDENT, tenant=env["tenant"], branch=env["branch"],

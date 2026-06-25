@@ -21,7 +21,6 @@ def _unit(u) -> dict:
         "subjectId": str(u.subject_id),
         "title": u.title,
         "order": u.order,
-        "isCompleted": u.is_completed,
     }
 
 

@@ -3,6 +3,7 @@
 from rest_framework import serializers
 
 from apps.academics.models import DepartmentType
+from apps.academics.helpers import batch_display_label
 
 
 class DepartmentSerializer(serializers.Serializer):
@@ -65,12 +66,16 @@ class BatchSerializer(serializers.Serializer):
     departmentId = serializers.SerializerMethodField()
     academicYearId = serializers.UUIDField(source="academic_year_id", read_only=True)
     name = serializers.CharField(read_only=True)
+    displayLabel = serializers.SerializerMethodField()
     capacity = serializers.IntegerField(read_only=True)
     classTeacherId = serializers.UUIDField(source="class_teacher_id", read_only=True, allow_null=True)
     version = serializers.IntegerField(read_only=True)
 
     def get_departmentId(self, obj):
         return str(obj.course.department_id)
+
+    def get_displayLabel(self, obj):
+        return batch_display_label(obj)
 
 
 class UpdateBatchSerializer(serializers.Serializer):

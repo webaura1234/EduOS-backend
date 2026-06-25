@@ -2,20 +2,26 @@
 
 import datetime
 
-from django.utils import timezone
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.academics.helpers import batch_display_label
 from apps.academics.queries.structure import list_batches
 from apps.academics.scoping import resolve_branch
 from apps.accounts.permissions import IsAdminOrSuperAdmin
+from apps.attendance.interactors import live_board as live_i
 from apps.attendance.interactors import report as report_i
 from apps.attendance.queries import audit as audit_q
 from apps.attendance.queries import leave as leave_q
 from apps.attendance.queries import record as record_q
 from apps.attendance.queries import roster as roster_q
-from apps.attendance.queries import session as session_q
+from apps.attendance.helpers import (
+    current_iso_week,
+    month_bounds,
+    parse_month_param,
+    parse_week_param,
+)
 
 # FE AttendanceStatus has no "flagged"; coerce anything unexpected to "absent".
 _FE_STATUSES = {"present", "absent", "late", "leave", "excused"}
@@ -26,29 +32,7 @@ def _status(value) -> str:
 
 
 def _live_snapshot(branch) -> dict:
-    today = datetime.date.today()
-    by_batch: dict[str, dict] = {}
-    present_total = total_total = 0
-    for s in session_q.list_sessions_for_date(branch.pk, today):
-        counts = record_q.status_counts_for_session(s.pk)
-        present = counts.get("present", 0) + counts.get("late", 0)
-        total = sum(counts.values())
-        bid = str(s.batch_id)
-        entry = by_batch.setdefault(
-            bid, {"classId": bid, "classLabel": s.batch.name, "present": 0, "total": 0}
-        )
-        entry["present"] += present
-        entry["total"] += total
-        present_total += present
-        total_total += total
-    percent = round(present_total / total_total * 100) if total_total else 0
-    return {
-        "present": present_total,
-        "total": total_total,
-        "percent": percent,
-        "classes": list(by_batch.values()),
-        "updatedAt": timezone.now().isoformat(),
-    }
+    return live_i.branch_live_snapshot(branch)
 
 
 def _record(r) -> dict:
@@ -60,7 +44,7 @@ def _record(r) -> dict:
         "studentName": r.student.user.full_name,
         "rollNumber": r.student.user.custom_login_id or "",
         "classSectionId": str(sess.batch_id),
-        "classLabel": sess.batch.name,
+        "classLabel": batch_display_label(sess.batch),
         "subjectId": str(sess.batch_subject.subject_id) if has_subject else "",
         "subjectName": sess.batch_subject.subject.name if has_subject else "",
         "date": sess.date.isoformat(),
@@ -74,15 +58,27 @@ def _record(r) -> dict:
     }
 
 
+def _class_section(b) -> dict:
+    return {
+        "id": str(b.id),
+        "label": batch_display_label(b),
+        "departmentId": str(b.course.department_id),
+        "courseId": str(b.course_id),
+        "grade": b.course.name,
+        "section": b.name,
+        "academicYearId": str(b.academic_year_id),
+    }
+
+
 def _leave(lv) -> dict:
     student = lv.student
-    has_batch = student and student.current_batch_id
+    batch = student.batch if student and student.batch_id else None
     return {
         "id": str(lv.pk),
         "studentId": str(student.student_profile_id) if student else "",
         "studentName": student.user.full_name if student else "",
-        "classSectionId": str(student.current_batch_id) if has_batch else "",
-        "classLabel": student.current_batch.name if has_batch else "",
+        "classSectionId": str(batch.pk) if batch else "",
+        "classLabel": batch_display_label(batch) if batch else "",
         "fromDate": lv.from_date.isoformat(),
         "toDate": lv.to_date.isoformat(),
         "reason": lv.reason,
@@ -106,7 +102,7 @@ def _audit(a) -> dict:
         "type": a.audit_type,
         "recordId": str(a.record_id) if a.record_id else "",
         "studentName": rec.student.user.full_name if rec else "",
-        "classLabel": sess.batch.name if sess else "",
+        "classLabel": batch_display_label(sess.batch) if sess else "",
         "subjectName": sess.batch_subject.subject.name if has_subject else "",
         "date": sess.date.isoformat() if sess else "",
         "originalStatus": _status(a.original_status) if a.original_status else None,
@@ -123,10 +119,12 @@ def _shortage_rows(report: dict, batch_names: dict) -> list:
     for row in report.get("rows", []):
         sessions = row.get("sessions", 0)
         pct = row.get("percent", 0)
+        batch_id = row.get("batchId") or ""
         rows.append({
             "studentId": row["studentId"],
             "studentName": row["name"],
-            "classLabel": batch_names.get(row.get("batchId") or "", ""),
+            "classSectionId": batch_id,
+            "classLabel": batch_names.get(batch_id, ""),
             "presentDays": round(pct * sessions / 100),
             "totalDays": sessions,
             "percent": pct,
@@ -135,18 +133,19 @@ def _shortage_rows(report: dict, batch_names: dict) -> list:
     return rows
 
 
-def _monthly_student_rows(report: dict, student_class: dict) -> list:
-    """Per-student monthly attendance rows (MonthlyStudentReportRow shape)."""
-    month_label = f"{report['year']}-{report['month']:02d}"
+def _period_student_rows(report: dict, batch_names: dict, *, period_label: str) -> list:
+    """Per-student rows for weekly/monthly period tables."""
     rows = []
     for row in report.get("rows", []):
         sessions = row.get("sessions", 0)
         pct = row.get("percent", 0)
+        batch_id = row.get("batchId") or ""
         rows.append({
-            "month": month_label,
+            "period": period_label,
             "studentId": row["studentId"],
             "studentName": row["name"],
-            "classLabel": student_class.get(row["studentId"], ""),
+            "classSectionId": batch_id,
+            "classLabel": batch_names.get(batch_id, ""),
             "presentDays": round(pct * sessions / 100),
             "totalDays": sessions,
             "percent": pct,
@@ -154,32 +153,76 @@ def _monthly_student_rows(report: dict, student_class: dict) -> list:
     return rows
 
 
+def _resolve_report_range(request) -> tuple[datetime.date, datetime.date, str, dict]:
+    """Return (date_from, date_to, period_label, report_filters dict)."""
+    period = request.query_params.get("period", "monthly")
+    batch_id = request.query_params.get("batchId") or None
+
+    if period == "weekly":
+        week_param = request.query_params.get("week")
+        if week_param:
+            date_from, date_to = parse_week_param(week_param)
+            week_label = week_param.upper() if "-W" in week_param.upper() else date_from.isoformat()
+        else:
+            year, week = current_iso_week()
+            date_from, date_to = datetime.date.fromisocalendar(year, week, 1), datetime.date.fromisocalendar(year, week, 7)
+            week_label = f"{year}-W{week:02d}"
+        filters = {
+            "period": "weekly",
+            "week": week_label,
+            "batchId": batch_id,
+            "dateFrom": date_from.isoformat(),
+            "dateTo": date_to.isoformat(),
+        }
+        return date_from, date_to, week_label, filters
+
+    month_param = request.query_params.get("month")
+    if month_param:
+        date_from, date_to = parse_month_param(month_param)
+        month_label = month_param
+    else:
+        today = datetime.date.today()
+        date_from, date_to = month_bounds(today.year, today.month)
+        month_label = f"{today.year}-{today.month:02d}"
+    filters = {
+        "period": "monthly",
+        "month": month_label,
+        "batchId": batch_id,
+        "dateFrom": date_from.isoformat(),
+        "dateTo": date_to.isoformat(),
+    }
+    return date_from, date_to, month_label, filters
+
+
 class AdminAttendanceOverviewView(APIView):
     """GET → AttendanceData { live, rules, records, leaveRequests, auditLog,
-    shortageReport, detentionList, monthlyReports }."""
+    shortageReport, detentionList, periodReports, reportFilters }."""
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
 
     def get(self, request) -> Response:
         branch = resolve_branch(request)
         threshold, exam_counts = roster_q.attendance_config(branch)
-        batch_names = {str(b.id): b.name for b in list_batches(branch.pk)}
-
-        # studentProfileId → class label, for rows that only carry a student id.
-        student_class = {
-            str(sp.student_profile_id): (sp.current_batch.name if sp.current_batch_id else "")
-            for sp in roster_q.all_active_students_in_branch(branch.pk)
-        }
+        batch_names = {str(b.id): batch_display_label(b) for b in list_batches(branch.pk)}
+        batches = list(list_batches(branch.pk))
 
         records = [_record(r) for r in record_q.list_records_for_branch(branch.pk)]
         leaves = [_leave(lv) for lv in leave_q.list_leaves(branch.pk) if lv.student_id]
         audits = [_audit(a) for a in audit_q.list_audits(branch.pk)[:100]]
 
-        shortage = _shortage_rows(report_i.shortage_report(branch), batch_names)
-        detention = _shortage_rows(report_i.detention_report(branch), batch_names)
+        date_from, date_to, period_label, report_filters = _resolve_report_range(request)
+        batch_id = report_filters.get("batchId")
 
-        today = datetime.date.today()
-        monthly = report_i.monthly_report(branch, year=today.year, month=today.month)
-        monthly_rows = _monthly_student_rows(monthly, student_class)
+        ranking = report_i.ranking_report(
+            branch, date_from=date_from, date_to=date_to, batch_id=batch_id
+        )
+        shortage = _shortage_rows(ranking, batch_names)
+        detention = _shortage_rows(
+            report_i.detention_report(
+                branch, batch_id=batch_id, date_from=date_from, date_to=date_to
+            ),
+            batch_names,
+        )
+        period_rows = _period_student_rows(ranking, batch_names, period_label=period_label)
 
         return Response({
             "live": _live_snapshot(branch),
@@ -189,10 +232,12 @@ class AdminAttendanceOverviewView(APIView):
             },
             "records": records,
             "leaveRequests": leaves,
+            "classSections": [_class_section(b) for b in batches],
             "auditLog": audits,
             "shortageReport": shortage,
             "detentionList": detention,
-            "monthlyReports": monthly_rows,
+            "periodReports": period_rows,
+            "reportFilters": report_filters,
         })
 
 

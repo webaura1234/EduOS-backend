@@ -125,7 +125,7 @@ def adjust_invoice_total(invoice: FeeInvoice, delta_paise: int, user=None) -> Fe
 
 def list_invoices(branch_id, student_id=None, status=None):
     qs = FeeInvoice.objects.filter(branch_id=branch_id, is_active=True).select_related(
-        "student", "student__student_profile__user", "student__batch",
+        "student", "student__student_profile__user", "student__batch", "student__batch__course",
         "assignment", "billing_guardian",
     )
     if student_id:

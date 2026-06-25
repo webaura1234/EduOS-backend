@@ -5,7 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.academics.queries.structure import get_course
+from apps.academics.queries.structure import get_course, get_course_by_name
 from apps.academics.scoping import resolve_branch
 from apps.accounts.permissions import IsAdminOrSuperAdmin
 from apps.admissions.interactors import enquiry as enquiry_i
@@ -41,6 +41,8 @@ class EnquiryListCreateView(APIView):
         course = None
         if data.get("courseId"):
             course = get_course(branch.pk, data["courseId"])
+        elif data.get("courseName"):
+            course = get_course_by_name(branch.pk, data["courseName"])
             
         enquiry = enquiry_i.capture_enquiry(
             branch=branch,

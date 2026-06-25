@@ -19,6 +19,14 @@ def is_college(tenant) -> bool:
     return institution_type(tenant) == InstitutionType.COLLEGE
 
 
+def batch_display_label(batch) -> str:
+    """Human-readable class label, e.g. 'Class 5 - A' (not section letter alone)."""
+    course = getattr(batch, "course", None)
+    if course and getattr(course, "name", None):
+        return f"{course.name} - {batch.name}"
+    return batch.name
+
+
 def reject_class_teacher_for_college(tenant) -> None:
     if is_college(tenant):
         raise PermissionDenied("Class teacher assignment is only available for schools.")

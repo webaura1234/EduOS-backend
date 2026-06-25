@@ -1,6 +1,7 @@
 """Views — Application, Document Upload, Verification, and Rejection/Enrollment."""
 
 from rest_framework import status
+from rest_framework.exceptions import NotFound as DRFNotFound
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -10,8 +11,13 @@ from apps.academics.queries.rollover import get_academic_year
 from apps.academics.scoping import resolve_branch
 from apps.accounts.permissions import IsAdminOrSuperAdmin
 from apps.admissions.interactors import application as app_i
-from apps.admissions.interactors.enrollment import ProvisionEnrollmentInteractor
+from apps.admissions.interactors.enrollment import (
+    DuplicateStudentError,
+    LinkedAccountWarning,
+    ProvisionEnrollmentInteractor,
+)
 from apps.admissions.queries import application as app_q
+from apps.admissions.enums import ApplicationStatus
 from apps.admissions.serializers.application import (
     AddDocumentSerializer,
     ApplicationSerializer,
@@ -20,6 +26,11 @@ from apps.admissions.serializers.application import (
     VerifyDocumentSerializer,
 )
 from apps.admissions.serializers.enrollment import ProvisionEnrollmentSerializer
+
+_ALLOWED_STATUS_TRANSITIONS = {
+    ApplicationStatus.SUBMITTED: {ApplicationStatus.UNDER_REVIEW},   # application → documents
+    ApplicationStatus.UNDER_REVIEW: {ApplicationStatus.ACCEPTED},     # documents → verification
+}
 
 
 class ApplicationListCreateView(APIView):
@@ -40,8 +51,30 @@ class ApplicationDetailView(APIView):
         branch = resolve_branch(request)
         application = app_q.get_application(branch.pk, application_id)
         if not application:
-            return Response({"error": "Application not found."}, status=status.HTTP_404_NOT_FOUND)
+            raise DRFNotFound("Application not found.")
         return Response({"application": ApplicationSerializer(application).data})
+
+
+class ApplicationStatusView(APIView):
+    """PATCH { status } — advance application status through allowed transitions."""
+    permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
+
+    def patch(self, request, application_id) -> Response:
+        branch = resolve_branch(request)
+        application = app_q.get_application(branch.pk, application_id)
+        if not application:
+            raise DRFNotFound("Application not found.")
+
+        new_status = request.data.get("status")
+        allowed = _ALLOWED_STATUS_TRANSITIONS.get(application.status, set())
+        if new_status not in allowed:
+            return Response(
+                {"error": f"Cannot transition from '{application.status}' to '{new_status}'."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        updated = app_q.update_application(application, {"status": new_status}, user=request.user)
+        return Response({"application": ApplicationSerializer(updated).data})
 
 
 class ApplicationStepView(APIView):
@@ -123,8 +156,8 @@ class ApplicationEnrollView(APIView):
         branch = resolve_branch(request)
         application = app_q.get_application(branch.pk, application_id)
         if not application:
-            return Response({"error": "Application not found."}, status=status.HTTP_404_NOT_FOUND)
-            
+            raise DRFNotFound("Application not found.")
+
         serializer = ProvisionEnrollmentSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -158,5 +191,13 @@ class ApplicationEnrollView(APIView):
             sibling_group_id=data.get("siblingGroupId"),
             user=request.user,
         )
-        result = interactor.execute()
-        return Response(result, status=status.HTTP_201_CREATED)
+        try:
+            result = interactor.execute()
+            return Response(result, status=status.HTTP_201_CREATED)
+        except DuplicateStudentError as exc:
+            return Response({"duplicate": exc.detail}, status=status.HTTP_409_CONFLICT)
+        except LinkedAccountWarning as exc:
+            return Response(
+                {"parentLinkConfirmationRequired": True, "details": exc.detail},
+                status=status.HTTP_409_CONFLICT,
+            )

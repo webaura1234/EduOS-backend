@@ -27,7 +27,7 @@ from django.utils import timezone  # noqa: E402
 
 from apps.academics.models import (  # noqa: E402
     AcademicYear, Batch, BatchFaculty, BatchSubject, Course, Department,
-    Room, Subject, SyllabusUnit,
+    Room, Subject, SyllabusUnit, SyllabusUnitProgress,
 )
 from apps.academics.models.calendar import AcademicPeriod, PeriodType  # noqa: E402
 from apps.academics.models.timetable import (  # noqa: E402
@@ -255,7 +255,28 @@ def seed():
             branch=branch, subject=subjects["Mathematics"], title=title,
             defaults=dict(order=i),
         )
-    print("  - 4 syllabus units on Mathematics")
+    for i, title in enumerate(["Reading comprehension", "Grammar", "Writing"], start=1):
+        SyllabusUnit.objects.get_or_create(
+            branch=branch, subject=subjects["English"], title=title,
+            defaults=dict(order=i),
+        )
+    for i, title in enumerate(["Plants", "Animals", "Matter"], start=1):
+        SyllabusUnit.objects.get_or_create(
+            branch=branch, subject=subjects["Science"], title=title,
+            defaults=dict(order=i),
+        )
+    print("  - Syllabus units on Mathematics, English, Science")
+
+    math_units = list(SyllabusUnit.objects.filter(
+        branch=branch, subject=subjects["Mathematics"], is_active=True,
+    ).order_by("order")[:2])
+    for unit in math_units:
+        SyllabusUnitProgress.objects.get_or_create(
+            branch=branch, batch=class5_batch, unit=unit,
+            defaults=dict(completed_at=timezone.now(), completed_by=faculty),
+        )
+    if math_units:
+        print(f"  - Class 5-A Mathematics: {len(math_units)}/4 units marked complete (sample)")
 
     # ── Homework for Class 5-A (published) ──────────────────────────────────
     print("\nHomework:")

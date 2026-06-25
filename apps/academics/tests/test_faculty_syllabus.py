@@ -1,4 +1,4 @@
-"""Faculty syllabus tracking — subjects with units + completion percent + update."""
+"""Faculty syllabus tracking — per-section units + completion percent + update."""
 
 import datetime
 
@@ -6,7 +6,7 @@ import pytest
 from django.urls import reverse
 from rest_framework.test import APIClient
 
-from apps.academics.models import SyllabusUnit
+from apps.academics.models import SyllabusUnit, SyllabusUnitProgress
 from apps.academics.models.calendar import AcademicPeriod, PeriodType
 from apps.academics.models.curriculum import BatchFaculty, BatchSubject, Subject
 from apps.academics.tests.factories import AcademicYearFactory, BatchFactory
@@ -54,7 +54,8 @@ def test_lists_subject_with_units(env):
     assert len(body["subjects"]) == 1
     s = body["subjects"][0]
     assert s["name"] == "Maths" and s["code"] == "MA"
-    assert env["batch"].name in s["classLabels"]
+    assert s["batchId"] == str(env["batch"].id)
+    assert env["batch"].name in s["classLabel"] or env["batch"].course.name in s["classLabel"]
     assert [u["title"] for u in s["syllabusUnits"]] == ["Algebra", "Geometry"]
     assert s["completedUnitIds"] == [] and s["syllabusCompletionPercent"] == 0
 
@@ -63,6 +64,7 @@ def test_update_completion(env):
     url = reverse("academics:faculty-syllabus")
     resp = _client(env["faculty"]).patch(url, {
         "subjectId": str(env["subject"].id),
+        "batchId": str(env["batch"].id),
         "completedUnitIds": [str(env["u1"].id)],
     }, format="json")
     assert resp.status_code == 200, resp.content
@@ -70,30 +72,30 @@ def test_update_completion(env):
     assert s["completedUnitIds"] == [str(env["u1"].id)]
     assert s["syllabusCompletionPercent"] == 50
 
-    env["u1"].refresh_from_db()
-    assert env["u1"].is_completed and env["u1"].completed_at is not None
+    assert SyllabusUnitProgress.objects.filter(
+        batch_id=env["batch"].id, unit_id=env["u1"].id, is_active=True,
+    ).exists()
+    assert not SyllabusUnitProgress.objects.filter(
+        batch_id=env["batch"].id, unit_id=env["u2"].id, is_active=True,
+    ).exists()
 
 
 def test_author_unit_crud(env):
     list_url = reverse("academics:syllabus-units")
     fc = _client(env["faculty"])
 
-    # Create (order auto-assigned after the two seeded units).
     created = _data(fc.post(list_url, {
         "subjectId": str(env["subject"].id), "title": "Trigonometry",
     }, format="json"))["unit"]
     assert created["title"] == "Trigonometry" and created["order"] == 3
 
-    # List for the subject.
     units = _data(fc.get(list_url, {"subjectId": str(env["subject"].id)}))["units"]
     assert len(units) == 3
 
-    # Update.
     detail = reverse("academics:syllabus-unit-detail", args=[created["id"]])
     edited = _data(fc.patch(detail, {"title": "Trig", "order": 5}, format="json"))["unit"]
     assert edited["title"] == "Trig" and edited["order"] == 5
 
-    # Delete (soft).
     assert fc.delete(detail).status_code == 200
     units = _data(fc.get(list_url, {"subjectId": str(env["subject"].id)}))["units"]
     assert len(units) == 2

@@ -53,7 +53,7 @@ def update_session(session: AttendanceSession, fields: dict, user=None) -> Atten
 def list_sessions_for_date(branch_id, date):
     return (
         AttendanceSession.objects.filter(branch_id=branch_id, date=date, is_active=True)
-        .select_related("batch", "batch_subject", "batch_subject__subject", "period_slot", "faculty")
+        .select_related("batch", "batch__course", "batch_subject", "batch_subject__subject", "period_slot", "faculty")
         .order_by("period_slot__sequence")
     )
 

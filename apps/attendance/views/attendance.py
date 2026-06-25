@@ -9,6 +9,7 @@ from rest_framework.views import APIView
 
 from apps.academics.scoping import resolve_branch
 from apps.accounts.permissions import IsAdminOrSuperAdmin, IsParent, IsStudent
+from apps.attendance.interactors import live_board as live_i
 from apps.attendance.interactors import correction as correct_i
 from apps.attendance.interactors import marking as mark_i
 from apps.attendance.interactors import report as report_i
@@ -92,28 +93,14 @@ class SessionMarkView(APIView):
 
 
 class LiveBoardView(APIView):
-    """F-101 — today's (or ?date=) attendance status across all classes."""
+    """F-101 — today's live attendance snapshot (batch-aggregated, polling)."""
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
 
     def get(self, request) -> Response:
         branch = resolve_branch(request)
         date_str = request.query_params.get("date")
-        date = datetime.date.fromisoformat(date_str) if date_str else datetime.date.today()
-        classes = []
-        for session in session_q.list_sessions_for_date(branch.pk, date):
-            counts = record_q.status_counts_for_session(session.pk)
-            classes.append({
-                "sessionId": str(session.pk),
-                "mode": session.mode,
-                "batchId": str(session.batch_id),
-                "batchName": session.batch.name,
-                "batchSubjectId": str(session.batch_subject_id) if session.batch_subject_id else None,
-                "subjectName": session.batch_subject.subject.name if session.batch_subject_id else None,
-                "slot": session.period_slot.name if session.period_slot_id else None,
-                "status": session.status,
-                "counts": counts,
-            })
-        return Response({"date": date.isoformat(), "classes": classes})
+        date = datetime.date.fromisoformat(date_str) if date_str else None
+        return Response(live_i.branch_live_snapshot(branch, date=date))
 
 
 class ShortageReportView(APIView):

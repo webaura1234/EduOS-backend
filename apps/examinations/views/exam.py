@@ -155,6 +155,7 @@ class ExamScheduleListCreateView(APIView):
             end_time=data["endTime"],
             room_id=data["roomId"],
             max_marks=data.get("maxMarks"),
+            required_invigilators=data.get("requiredInvigilators", 1),
             override=data.get("override", False),
             user=request.user,
         )
@@ -188,6 +189,7 @@ class ExamScheduleDetailView(APIView):
             "endTime": "end_time",
             "roomId": "room_id",
             "maxMarks": "max_marks",
+            "requiredInvigilators": "required_invigilators",
             "version": "version",
         })
         slot, warnings, requires_override = exam_i.update_schedule_slot(

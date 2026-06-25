@@ -41,6 +41,33 @@ class AcademicSubstitution(BaseModel):
         return f"Substitution({self.timetable_entry_id} @ {self.date})"
 
 
+class StudyMaterialFolder(BaseModel):
+    """Admin-defined folder for organizing study materials within a class/batch."""
+
+    branch = models.ForeignKey(
+        "organizations.Branch", on_delete=models.CASCADE, related_name="study_material_folders",
+    )
+    batch = models.ForeignKey(
+        "academics.Batch", on_delete=models.CASCADE, related_name="study_material_folders",
+    )
+    name = models.CharField(max_length=100)
+    sort_order = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = "academics_study_material_folder"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["batch", "name"],
+                name="academics_study_material_folder_batch_name_uniq",
+            ),
+        ]
+        indexes = [models.Index(fields=["branch", "batch"])]
+        ordering = ["sort_order", "name"]
+
+    def __str__(self):
+        return f"StudyMaterialFolder({self.name})"
+
+
 class StudyMaterial(BaseModel):
     """A study-material file attached to a class/batch (F-179). Admin-uploaded,
     visible to that class's students and its faculty."""
@@ -50,14 +77,11 @@ class StudyMaterial(BaseModel):
     )
     batch = models.ForeignKey(
         "academics.Batch", on_delete=models.CASCADE, related_name="study_materials",
-        null=True, blank=True,
     )
-    # Legacy: materials used to attach to a timetable slot. Kept nullable for old rows.
-    timetable_entry = models.ForeignKey(
-        "academics.TimetableEntry", on_delete=models.CASCADE, related_name="study_materials",
-        null=True, blank=True,
+    folder = models.ForeignKey(
+        StudyMaterialFolder, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="materials",
     )
-    session_date = models.DateField(null=True, blank=True)
     file_name = models.CharField(max_length=255)
     s3_key = models.CharField(max_length=500, blank=True, default="")
     url = models.CharField(max_length=1000, blank=True, default="")
@@ -100,7 +124,7 @@ class CalendarChange(BaseModel):
 
 
 class SyllabusUnit(BaseModel):
-    """An orderable unit of a subject's syllabus, with completion tracking (faculty)."""
+    """An orderable unit of a subject's syllabus (definition only — progress is per section)."""
 
     branch = models.ForeignKey(
         "organizations.Branch", on_delete=models.CASCADE, related_name="syllabus_units"
@@ -110,12 +134,6 @@ class SyllabusUnit(BaseModel):
     )
     title = models.CharField(max_length=255)
     order = models.PositiveSmallIntegerField(default=0)
-    is_completed = models.BooleanField(default=False, db_index=True)
-    completed_at = models.DateTimeField(null=True, blank=True)
-    completed_by = models.ForeignKey(
-        "accounts.User", on_delete=models.SET_NULL, null=True, blank=True,
-        related_name="completed_syllabus_units",
-    )
 
     class Meta:
         db_table = "academics_syllabus_unit"
@@ -124,3 +142,32 @@ class SyllabusUnit(BaseModel):
 
     def __str__(self):
         return f"SyllabusUnit({self.title})"
+
+
+class SyllabusUnitProgress(BaseModel):
+    """Per class-section completion of a syllabus unit."""
+
+    branch = models.ForeignKey(
+        "organizations.Branch", on_delete=models.CASCADE, related_name="syllabus_unit_progress",
+    )
+    batch = models.ForeignKey(
+        "academics.Batch", on_delete=models.CASCADE, related_name="syllabus_unit_progress",
+    )
+    unit = models.ForeignKey(
+        SyllabusUnit, on_delete=models.CASCADE, related_name="section_progress",
+    )
+    completed_at = models.DateTimeField()
+    completed_by = models.ForeignKey(
+        "accounts.User", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="syllabus_unit_progress_marked",
+    )
+
+    class Meta:
+        db_table = "academics_syllabus_unit_progress"
+        constraints = [
+            models.UniqueConstraint(fields=["batch", "unit"], name="academics_syllabus_progress_batch_unit_uniq"),
+        ]
+        indexes = [models.Index(fields=["branch", "batch"])]
+
+    def __str__(self):
+        return f"SyllabusUnitProgress({self.batch_id}, {self.unit_id})"

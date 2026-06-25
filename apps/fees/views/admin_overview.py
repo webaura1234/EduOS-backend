@@ -19,8 +19,15 @@ from apps.fees.queries import payment as pay_q
 from apps.fees.queries import refund as ref_q
 from apps.fees.queries import structure as struct_q
 
-_PAY_METHOD = {"razorpay": "netbanking", "cheque": "cash", "cash": "cash",
-               "upi": "upi", "card": "card", "netbanking": "netbanking"}
+_PAY_METHOD = {
+    "razorpay": "upi",
+    "bank_transfer": "upi",
+    "cheque": "cash",
+    "cash": "cash",
+    "upi": "upi",
+    "card": "card",
+    "netbanking": "netbanking",
+}
 _PAY_STATUS = {"captured": "captured", "failed": "failed", "refunded": "refunded",
                "created": "pending", "authorized": "pending", "pending": "pending"}
 _REFUND_STATUS = {"requested": "pending", "approved": "approved", "rejected": "rejected",
@@ -39,7 +46,48 @@ def _student_name(enrollment) -> str:
 
 
 def _class_label(enrollment) -> str:
-    return enrollment.current_batch.name if enrollment and enrollment.current_batch_id else ""
+    if not enrollment or not enrollment.current_batch_id:
+        return ""
+    batch = enrollment.current_batch
+    return _batch_label(batch)
+
+
+def _batch_label(batch) -> str:
+    if batch is None:
+        return ""
+    course = getattr(batch, "course", None)
+    course_name = course.name if course else ""
+    section = batch.name or ""
+    if course_name and section:
+        return f"{course_name} - {section}"
+    return course_name or section
+
+
+def _derive_installments_from_components(components: list) -> list:
+    groups: dict[int, dict] = {}
+    for c in components or []:
+        inst_no = int(c.get("installment_no", 1))
+        paise = c.get("amount_paise", c.get("amountPaise", 0)) or 0
+        bucket = groups.setdefault(inst_no, {"amount_paise": 0, "due_dates": [], "labels": []})
+        bucket["amount_paise"] += int(paise)
+        if c.get("due_date"):
+            bucket["due_dates"].append(c["due_date"])
+        label = c.get("label") or c.get("name") or ""
+        if label:
+            bucket["labels"].append(label)
+    installments = []
+    for inst_no in sorted(groups.keys()):
+        g = groups[inst_no]
+        due = max(g["due_dates"]) if g["due_dates"] else ""
+        label = g["labels"][0] if g["labels"] else f"Installment {inst_no}"
+        installments.append({
+            "id": f"inst-{inst_no}",
+            "label": label,
+            "dueDate": due,
+            "amount": _rupees(g["amount_paise"]),
+            "amountPaise": g["amount_paise"],
+        })
+    return installments
 
 
 def _structure(s) -> dict:
@@ -56,9 +104,11 @@ def _structure(s) -> dict:
     return {
         "id": str(s.id),
         "name": s.name,
-        "appliesToLabel": s.batch.name if s.batch_id else "",
+        "appliesToLabel": _batch_label(s.batch) if s.batch_id else "",
+        "batchId": str(s.batch_id) if s.batch_id else None,
+        "academicYearId": str(s.academic_year_id) if s.academic_year_id else None,
         "components": components,
-        "installments": [],
+        "installments": _derive_installments_from_components(s.components or []),
         "createdAt": s.created_at.isoformat(),
         "version": getattr(s, "version", 1),
     }
@@ -159,6 +209,55 @@ def _webhook(w) -> dict:
     }
 
 
+def _installment_schedules(branch) -> dict:
+    today = datetime.date.today()
+    by_student: dict[str, list] = {}
+    invoices = inv_q.list_invoices(branch.pk).prefetch_related("installments")
+    for inv in invoices:
+        enrollment = inv.student
+        sid = str(enrollment.student_profile_id) if enrollment else None
+        if not sid:
+            continue
+        rows = by_student.setdefault(sid, [])
+        for inst in inv.installments.all().order_by("sequence"):
+            due = inst.due_date.isoformat() if inst.due_date else ""
+            status = inst.status or "due"
+            if (
+                status != "paid"
+                and inst.due_date
+                and inst.due_date < today
+                and inst.paid_paise < inst.amount_paise
+            ):
+                status = "overdue"
+            rows.append({
+                "sequence": inst.sequence,
+                "label": f"Installment {inst.sequence}",
+                "dueDate": due,
+                "amount": _rupees(inst.amount_paise),
+                "paid": _rupees(inst.paid_paise),
+                "status": status,
+            })
+    return by_student
+
+
+def _reconciliation_list(branch) -> list:
+    from django.utils import timezone
+    from datetime import timedelta
+
+    cutoff = timezone.now() - timedelta(minutes=5)
+    items = []
+    for p in pay_q.list_pending_payments_for_branch(branch.pk, cutoff):
+        enrollment = p.invoice.student if p.invoice_id else None
+        items.append({
+            "orderId": p.razorpay_order_id or str(p.id),
+            "paymentId": p.razorpay_payment_id or None,
+            "status": "pending",
+            "lastCheckedAt": p.updated_at.isoformat(),
+            "note": f"{_student_name(enrollment)} · ₹{_rupees(p.amount_paise)}",
+        })
+    return items
+
+
 def _ledger_and_collection(branch):
     """Group invoices per student into ledger rows; derive the collection snapshot."""
     today = datetime.date.today()
@@ -227,6 +326,14 @@ class AdminFeesOverviewView(APIView):
         branch = resolve_branch(request)
         ledger, collection = _ledger_and_collection(branch)
 
+        from apps.academics.models import AcademicYear
+        from apps.academics.queries.structure import list_batches
+
+        academic_years = list(
+            AcademicYear.objects.filter(branch_id=branch.pk, is_active=True).order_by("-start_date")
+        )
+        current_ay = next((y for y in academic_years if y.is_current), academic_years[0] if academic_years else None)
+
         return Response({
             "institutionType": branch.tenant.institution_type,
             "structures": [_structure(s) for s in struct_q.list_structures(branch.pk)],
@@ -240,8 +347,10 @@ class AdminFeesOverviewView(APIView):
             "webhooks": [_webhook(w) for w in conc_q.list_webhooks()],
             "ledger": ledger,
             "collection": collection,
-            # Not yet modelled — empty so the screen renders; build per priority.
+            "installmentSchedulesByStudent": _installment_schedules(branch),
+            "batches": [{"id": str(b.id), "label": _batch_label(b)} for b in list_batches(branch.pk)],
+            "currentAcademicYearId": str(current_ay.id) if current_ay else None,
             "creditNoteRequests": [],
             "examFeeInvoices": [],
-            "reconciliation": [],
+            "reconciliation": _reconciliation_list(branch),
         })

@@ -3,6 +3,8 @@
 Kept here so all DB access stays in the queries layer.
 """
 
+from django.db.models import Count
+
 from apps.academics.models import Holiday
 from apps.accounts.models.profile import StudentProfile
 from apps.admissions.enums import EnrollmentStatus
@@ -54,6 +56,22 @@ def students_in_batch(batch_id):
 
 def student_ids_in_batch(batch_id) -> list:
     return list(students_in_batch(batch_id).values_list("id", flat=True))
+
+
+def roster_counts_for_batches(batch_ids) -> dict[str, int]:
+    """Active enrollment count per batch — batch_id (str) → roster size."""
+    if not batch_ids:
+        return {}
+    rows = (
+        StudentEnrollment.objects.filter(
+            batch_id__in=batch_ids,
+            status=EnrollmentStatus.ACTIVE,
+            is_active=True,
+        )
+        .values("batch_id")
+        .annotate(n=Count("id"))
+    )
+    return {str(row["batch_id"]): row["n"] for row in rows}
 
 
 def get_student_profile_in_branch(branch_id, student_id):

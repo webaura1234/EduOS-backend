@@ -10,6 +10,7 @@ from apps.academics.queries import curriculum as curr_q
 from apps.academics.queries import timetable as tt_q
 from apps.examinations.helpers import combine_datetime, parse_time, validate_bands
 from apps.examinations.queries import exam as exam_q
+from apps.examinations.queries import invigilator as inv_q
 
 
 def _resolve_slot_times(*, date, start_time: str, end_time: str):
@@ -129,6 +130,7 @@ def create_schedule_slot(
     end_time,
     room_id,
     max_marks=None,
+    required_invigilators=1,
     override=False,
     user=None,
 ):
@@ -156,6 +158,7 @@ def create_schedule_slot(
         end_at=end_at,
         max_marks=max_marks if max_marks is not None else subject.max_marks,
         max_capacity=room.capacity,
+        required_invigilators=required_invigilators,
         user=user,
     )
     return slot, warnings, False
@@ -197,6 +200,13 @@ def update_schedule_slot(
 
     if any(k in fields for k in ("batch_id", "subject_id", "room_id")):
         _validate_schedule_refs(branch_id, batch_id=batch_id, subject_id=subject_id, room_id=room_id)
+
+    if "required_invigilators" in fields:
+        assigned = inv_q.count_duties_for_slot(slot.pk)
+        if fields["required_invigilators"] < assigned:
+            raise ValidationError(
+                {"requiredInvigilators": "Remove invigilators before lowering the required count."}
+            )
 
     warnings = _holiday_warnings(branch_id, date)
     if warnings and not override:

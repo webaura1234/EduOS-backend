@@ -48,7 +48,11 @@ def _enforce_conflict(actor, student_profile, *, override: bool):
 def _ensure_editable(entry, actor, *, override: bool):
     if entry.marks_status == MarksStatus.DRAFT:
         return
-    if entry.marks_status == MarksStatus.SUBMITTED and is_admin_role(actor) and override:
+    if (
+        entry.marks_status in (MarksStatus.SUBMITTED, MarksStatus.LOCKED)
+        and is_admin_role(actor)
+        and override
+    ):
         return
     raise ValidationError({"marksStatus": "Marks are locked and cannot be edited."})
 
@@ -131,6 +135,26 @@ def bulk_save_draft_marks(
         existing = marks_q.get_marks_for_student(slot.exam_id, slot.subject_id, enrollment_id)
         if existing:
             _ensure_editable(existing, actor, override=override)
+            if existing.marks_status != MarksStatus.DRAFT:
+                if not (is_admin_role(actor) and override):
+                    saved.append(serialize_marks_entry(existing, slot))
+                    continue
+                entry = marks_q.correct_marks_entry(
+                    existing,
+                    marks=marks,
+                    is_absent=is_absent,
+                    user=actor,
+                )
+                marks_q.create_marks_audit(
+                    marks_entry_id=entry.pk,
+                    audit_type=MarksAuditType.LATE_SUBMIT_OVERRIDE,
+                    actor=actor,
+                    reason=override_reason or "Post-publish mark correction",
+                    metadata={"studentId": str(student_id)},
+                    user=actor,
+                )
+                saved.append(serialize_marks_entry(entry, slot))
+                continue
 
         entry = marks_q.upsert_marks_entry(
             exam_id=slot.exam_id,

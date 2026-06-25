@@ -37,9 +37,12 @@ def test_overview_returns_attendance_data_shape(env):
     resp = _client(env["admin"]).get(reverse("attendance:admin-overview"))
     assert resp.status_code == 200, resp.content
     body = _data(resp)
-    for key in ("live", "rules", "records", "leaveRequests", "auditLog",
-                "shortageReport", "detentionList", "monthlyReports"):
+    for key in ("live", "rules", "records", "leaveRequests", "classSections", "auditLog",
+                "shortageReport", "detentionList", "periodReports", "reportFilters"):
         assert key in body, f"missing {key}"
+    assert isinstance(body["classSections"], list)
+    assert isinstance(body["periodReports"], list)
+    assert body["reportFilters"]["period"] in ("weekly", "monthly")
     # live snapshot shape
     assert set(body["live"]) >= {"present", "total", "percent", "classes", "updatedAt"}
     assert body["live"]["percent"] == 0  # no sessions today in a fresh tenant

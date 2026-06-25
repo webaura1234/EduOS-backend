@@ -28,6 +28,18 @@ def list_duties_for_slot(schedule_slot_id):
     )
 
 
+def count_duties_for_slot(schedule_slot_id) -> int:
+    return InvigilatorDuty.objects.filter(schedule_slot_id=schedule_slot_id, is_active=True).count()
+
+
+def duty_exists(schedule_slot_id, faculty_id) -> bool:
+    return InvigilatorDuty.objects.filter(
+        schedule_slot_id=schedule_slot_id,
+        faculty_id=faculty_id,
+        is_active=True,
+    ).exists()
+
+
 def clear_duties_for_slot(schedule_slot_id):
     """Hard-delete prior duties so unique constraints allow reassignment."""
     InvigilatorDuty.objects.filter(schedule_slot_id=schedule_slot_id).delete()
@@ -35,6 +47,16 @@ def clear_duties_for_slot(schedule_slot_id):
 
 def soft_delete_duties_for_slot(schedule_slot_id, user=None):
     clear_duties_for_slot(schedule_slot_id)
+
+
+def soft_delete_duty(schedule_slot_id, faculty_id, user=None):
+    duty = InvigilatorDuty.objects.filter(
+        schedule_slot_id=schedule_slot_id,
+        faculty_id=faculty_id,
+        is_active=True,
+    ).first()
+    if duty:
+        duty.soft_delete(user)
 
 
 def create_duty(*, schedule_slot_id, faculty_id, user=None) -> InvigilatorDuty:

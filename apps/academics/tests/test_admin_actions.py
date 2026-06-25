@@ -101,14 +101,17 @@ def test_create_and_cancel_substitution(env):
 
 
 def test_upload_and_delete_study_material(env):
-    entry = _timetable_entry(env)
+    year = AcademicYearFactory(branch=env["branch"])
+    batch = BatchFactory(course__department__branch=env["branch"], academic_year=year)
     resp = _post(env, {"action": "upload_study_material", "payload": {
-        "timetableSlotId": str(entry.id), "sessionDate": "2026-06-22",
+        "classSectionId": str(batch.id),
         "fileName": "notes.pdf", "s3Key": "materials/notes.pdf",
     }})
     assert resp.status_code == 201, resp.content
     mid = _data(resp)["id"]
-    assert any(m["id"] == mid for m in _overview(env)["studyMaterials"])
+    materials = _overview(env)["studyMaterials"]
+    assert any(m["id"] == mid for m in materials)
+    assert materials[0]["classLabel"]
 
     resp = _post(env, {"action": "delete_study_material", "materialId": mid})
     assert resp.status_code == 200
@@ -141,24 +144,102 @@ def test_save_department_and_hierarchy(env):
     assert depts[parent_id]["parentId"] is None
 
 
-def test_save_subject_resolves_default_course(env):
+def test_save_subject_requires_course_on_create(env):
     resp = _post(env, {"action": "save_subject",
-                       "payload": {"name": "Mathematics", "code": "MATH", "credits": 4}})
+                       "payload": {"name": "Mathematics", "code": "MATH"}})
+    assert resp.status_code == 400
+
+
+def test_save_subject_with_units_and_section_completion(env):
+    year = AcademicYearFactory(branch=env["branch"], is_current=True)
+    dept_resp = _post(env, {"action": "save_department", "payload": {"name": "Primary"}})
+    dept_id = _data(dept_resp)["id"]
+    section_resp = _post(env, {"action": "save_class_section", "payload": {
+        "departmentId": dept_id, "grade": "Class 5", "section": "A",
+    }})
+    assert section_resp.status_code == 201, section_resp.content
+    section = _data(section_resp)
+    course_id = section["courseId"]
+    batch_id = section["id"]
+
+    from apps.academics.models.calendar import AcademicPeriod, PeriodType
+    from apps.academics.models.curriculum import BatchSubject
+    period = AcademicPeriod.objects.create(
+        academic_year=year, period_type=PeriodType.TERM, sequence=1, name="T1",
+        start_date=datetime.date(2026, 1, 1), end_date=datetime.date(2026, 12, 1),
+    )
+
+    resp = _post(env, {"action": "save_subject", "payload": {
+        "courseId": course_id,
+        "name": "Mathematics",
+        "code": "MATH",
+        "syllabusUnits": [{"title": "Algebra"}, {"title": "Geometry"}],
+    }})
     assert resp.status_code == 201, resp.content
+    body = _data(resp)
+    assert len(body["syllabusUnits"]) == 2
+    subject_id = body["id"]
+
+    BatchSubject.objects.create(
+        batch_id=batch_id, subject_id=subject_id, academic_period=period,
+    )
+
+    unit_id = body["syllabusUnits"][0]["id"]
+    prog = _post(env, {"action": "update_syllabus_completion", "payload": {
+        "subjectId": subject_id,
+        "classSectionId": batch_id,
+        "completedUnitIds": [unit_id],
+    }})
+    assert prog.status_code == 200, prog.content
+    assert _data(prog)["syllabusCompletionPercent"] == 50
+
     subjects = _overview(env)["subjects"]
-    assert any(s["name"] == "Mathematics" and s["code"] == "MATH" for s in subjects)
+    saved = next(s for s in subjects if s["id"] == subject_id)
+    section_prog = next(p for p in saved["sectionProgress"] if p["classSectionId"] == batch_id)
+    assert section_prog["syllabusCompletionPercent"] == 50
+    assert unit_id in section_prog["completedUnitIds"]
 
 
 def test_save_class_section_requires_current_year(env):
-    # No current year yet → clear error.
-    resp = _post(env, {"action": "save_class_section", "payload": {"label": "10-A"}})
+    resp = _post(env, {"action": "save_class_section", "payload": {
+        "departmentId": str(env["branch"].id),
+        "grade": "Class 10",
+        "section": "A",
+    }})
     assert resp.status_code == 400
 
-    AcademicYearFactory(branch=env["branch"], is_current=True)
-    resp = _post(env, {"action": "save_class_section", "payload": {"label": "10-A"}})
+    year = AcademicYearFactory(branch=env["branch"], is_current=True)
+    dept_resp = _post(env, {"action": "save_department", "payload": {"name": "Primary"}})
+    dept_id = _data(dept_resp)["id"]
+
+    resp = _post(env, {"action": "save_class_section", "payload": {
+        "departmentId": dept_id,
+        "grade": "Class 10",
+        "section": "A",
+    }})
     assert resp.status_code == 201, resp.content
+    body = _data(resp)
+    assert body["grade"] == "Class 10"
+    assert body["section"] == "A"
+    assert body["label"] == "Class 10 - A"
+
     sections = _overview(env)["classSections"]
-    assert any(s["label"] == "10-A" for s in sections)
+    assert any(s["id"] == body["id"] and s["grade"] == "Class 10" for s in sections)
+
+    dup = _post(env, {"action": "save_class_section", "payload": {
+        "departmentId": dept_id,
+        "grade": "Class 10",
+        "section": "A",
+    }})
+    assert dup.status_code == 400, dup.content
+
+    resp_b = _post(env, {"action": "save_class_section", "payload": {
+        "departmentId": dept_id,
+        "grade": "Class 10",
+        "section": "B",
+    }})
+    assert resp_b.status_code == 201, resp_b.content
+    assert _data(resp_b)["label"] == "Class 10 - B"
 
 
 def test_save_timetable_slot_creates_entry(env):

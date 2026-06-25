@@ -3,6 +3,7 @@
 from django.db import transaction
 from rest_framework.exceptions import ValidationError
 
+from apps.attendance.interactors import live_board as live_i
 from apps.attendance.enums import AuditType
 from apps.attendance.queries import audit as audit_q
 from apps.attendance.queries import record as record_q
@@ -26,4 +27,5 @@ def correct_record(*, record, new_status, reason="", user=None):
         record=record, audit_type=AuditType.RETROACTIVE_EDIT, actor=user,
         original_status=original, new_status=new_status, reason=reason,
     )
+    live_i.invalidate_live_cache(record.session.branch_id, record.session.date)
     return record

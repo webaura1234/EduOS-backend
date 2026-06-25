@@ -1,4 +1,4 @@
-"""Faculty study materials (Notes) — list own uploads + teaching slots, record upload."""
+"""Faculty study materials — read-only list for assigned classes."""
 
 import datetime
 
@@ -6,6 +6,7 @@ import pytest
 from django.urls import reverse
 from rest_framework.test import APIClient
 
+from apps.academics.models.admin_extras import StudyMaterial
 from apps.academics.models.calendar import AcademicPeriod, PeriodType
 from apps.academics.models.curriculum import BatchSubject, Subject
 from apps.academics.models.timetable import (
@@ -36,7 +37,7 @@ def env():
     tenant = TenantFactory(institution_type="school")
     branch = BranchFactory(tenant=tenant)
     year = AcademicYearFactory(branch=branch, is_current=True)
-    batch = BatchFactory(course__department__branch=branch, academic_year=year)
+    batch = BatchFactory(course__department__branch=branch, academic_year=year, name="A")
     subject = Subject.objects.create(course=batch.course, name="Maths", code="MA")
     period = AcademicPeriod.objects.create(
         academic_year=year, period_type=PeriodType.TERM, sequence=1, name="T1",
@@ -48,29 +49,23 @@ def env():
     tt = Timetable.objects.create(batch=batch, academic_period=period, is_published=True)
     faculty = UserFactory(role=Role.FACULTY, tenant=tenant, branch=branch,
                           custom_login_id="FAC-1", must_change_password=False)
-    entry = TimetableEntry.objects.create(
+    TimetableEntry.objects.create(
         timetable=tt, batch_subject=bs, period_slot=slot, day_of_week=1, faculty=faculty)
-    return dict(branch=branch, faculty=faculty, entry=entry)
+    return dict(branch=branch, faculty=faculty, batch=batch)
 
 
-def test_lists_teaching_slots(env):
+def test_lists_materials_for_assigned_class(env):
+    StudyMaterial.objects.create(
+        branch=env["branch"], batch=env["batch"], file_name="algebra-notes.pdf",
+    )
     body = _data(_client(env["faculty"]).get(reverse("academics:faculty-materials")))
-    assert body["materials"] == []
-    assert len(body["uploadSessions"]) == 1
-    s = body["uploadSessions"][0]
-    assert s["timetableSlotId"] == str(env["entry"].id)
-    assert s["subjectName"] == "Maths" and s["dayOfWeek"] == 1 and s["periodIndex"] == 1
+    assert len(body["general"]) == 1
+    assert body["general"][0]["fileName"] == "algebra-notes.pdf"
+    assert env["batch"].course.name in body["general"][0]["classLabel"]
 
 
-def test_upload_then_list_material(env):
-    url = reverse("academics:faculty-materials")
-    resp = _client(env["faculty"]).post(url, {
-        "timetableSlotId": str(env["entry"].id), "sessionDate": "2026-06-22",
-        "fileName": "algebra-notes.pdf",
+def test_faculty_read_only_no_post(env):
+    resp = _client(env["faculty"]).post(reverse("academics:faculty-materials"), {
+        "classSectionId": str(env["batch"].id), "fileName": "notes.pdf",
     }, format="json")
-    assert resp.status_code == 201, resp.content
-    assert _data(resp)["fileName"] == "algebra-notes.pdf"
-
-    body = _data(_client(env["faculty"]).get(url))
-    assert len(body["materials"]) == 1
-    assert body["materials"][0]["timetableSlotId"] == str(env["entry"].id)
+    assert resp.status_code == 405

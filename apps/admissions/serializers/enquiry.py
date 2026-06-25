@@ -26,6 +26,7 @@ class EnquirySerializer(serializers.Serializer):
 class CreateEnquirySerializer(serializers.Serializer):
     source = serializers.ChoiceField(choices=EnquirySource.choices)
     courseId = serializers.UUIDField(required=False, allow_null=True)
+    courseName = serializers.CharField(required=False, allow_blank=True, default="")
     applicantName = serializers.CharField(max_length=150)
     dateOfBirth = serializers.DateField(required=False, allow_null=True)
     phone = serializers.CharField(required=False, allow_blank=True, default="")

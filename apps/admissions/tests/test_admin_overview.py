@@ -58,7 +58,7 @@ def test_enquiry_and_application_reflected(env):
     assert len(body["applications"]) == 1
     app = body["applications"][0]
     assert app["applicantName"] == "Ravi Kumar"
-    assert app["stage"] == "documents"   # submitted → documents
+    assert app["stage"] == "application"   # submitted → application (wizard in progress)
     assert app["status"] == "active"
     assert body["funnel"]["byStage"]["enquiry"] == 1
     assert body["funnel"]["bySource"]["walk_in"] == 1

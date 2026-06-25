@@ -13,6 +13,7 @@ from apps.academics.queries import structure as struct_q
 from apps.academics.queries import timetable as tt_q
 from apps.attendance.enums import AttendanceStatus, AuditType, SessionStatus
 from apps.attendance.helpers import is_late_mark, is_outside_geofence
+from apps.attendance.interactors import live_board as live_i
 from apps.attendance.queries import audit as audit_q
 from apps.attendance.queries import leave as leave_q
 from apps.attendance.queries import record as record_q
@@ -134,4 +135,5 @@ def mark_session(*, branch, session, marks: list[dict], user=None):
         results.append(record)
 
     session_q.update_session(session, {"status": SessionStatus.COMPLETED}, user=user)
+    live_i.invalidate_live_cache(branch.pk, session.date)
     return results

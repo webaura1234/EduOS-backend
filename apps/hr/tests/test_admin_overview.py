@@ -71,3 +71,19 @@ def test_overview_requires_admin(env):
                           must_change_password=False)
     resp = _client(student).get(reverse("hr:admin-overview"))
     assert resp.status_code == 403
+
+
+def test_overview_scoped_to_admin_branch(env):
+    branch_b = BranchFactory(tenant=env["tenant"], name="North campus")
+    fac_b = UserFactory(role=Role.FACULTY, tenant=env["tenant"], branch=branch_b,
+                        custom_login_id="FAC-2", must_change_password=False)
+    Employee.objects.create(
+        user=fac_b, branch=branch_b, employee_code="FAC-2",
+        employment_type="full_time", joined_at=datetime.date(2024, 1, 1),
+    )
+    resp = _client(env["admin"]).get(reverse("hr:admin-overview"))
+    body = _data(resp)
+    assert len(body["branches"]) == 1
+    assert body["branches"][0]["id"] == str(env["branch"].id)
+    assert len(body["employees"]) == 1
+    assert body["employees"][0]["id"] == str(env["emp"].id)

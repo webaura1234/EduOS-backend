@@ -42,7 +42,8 @@ def test_overview_shape(env):
     body = _data(resp)
     for key in ("institutionType", "structures", "concessionRules", "concessionRequests",
                 "payments", "creditNotes", "creditNoteRequests", "examFeeInvoices",
-                "ledger", "collection", "refunds", "webhooks", "reconciliation"):
+                "ledger", "collection", "refunds", "webhooks", "reconciliation",
+                "installmentSchedulesByStudent", "batches", "currentAcademicYearId"):
         assert key in body, f"missing {key}"
     assert set(body["collection"]) == {
         "collectedToday", "collectedThisMonth", "outstandingTotal", "overdueCount", "updatedAt",

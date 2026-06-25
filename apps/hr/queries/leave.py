@@ -112,6 +112,12 @@ def leave_summary(branch_id) -> dict:
     return {"rows": list(rows)}
 
 
+def count_pending_applications(branch_id) -> int:
+    return LeaveApplication.objects.filter(
+        employee__branch_id=branch_id, status=LeaveStatus.PENDING, is_active=True,
+    ).count()
+
+
 def approved_leave_dates(employee_id, from_date, to_date) -> dict:
     """Expand approved leave applications into date → reason map."""
     apps = LeaveApplication.objects.filter(

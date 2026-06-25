@@ -14,7 +14,9 @@ from apps.academics.queries import admin_extras as extra_q
 from apps.academics.queries import calendar as cal_q
 from apps.academics.queries import curriculum as curr_q
 from apps.academics.queries import structure as struct_q
+from apps.academics.queries import syllabus as syl_q
 from apps.academics.queries import timetable as tt_q
+from apps.academics.helpers import batch_display_label, is_school
 from apps.academics.scoping import resolve_branch
 from apps.accounts.permissions import IsAdminOrSuperAdmin
 
@@ -85,6 +87,49 @@ def _resolve_course(branch, department_id, user):
     return course
 
 
+def _subject_payload(branch, subject) -> dict:
+    units = list(syl_q.units_for_subject(branch.pk, subject.pk))
+    batches = syl_q.batches_by_subject(branch.pk, [subject.pk]).get(subject.pk, [])
+    batch_ids = [b.pk for b in batches]
+    progress_map = syl_q.progress_for_batches(branch.pk, batch_ids, [subject.pk])
+    section_progress = []
+    for batch in batches:
+        completed = progress_map.get(batch.pk, {}).get(subject.pk, set())
+        percent, done = syl_q.completion_stats(units, completed)
+        section_progress.append({
+            "classSectionId": str(batch.id),
+            "label": batch_display_label(batch),
+            "syllabusCompletionPercent": percent,
+            "completedUnitIds": done,
+        })
+    return {
+        "id": str(subject.id),
+        "code": subject.code,
+        "name": subject.name,
+        "grade": subject.course.name if subject.course_id else None,
+        "courseId": str(subject.course_id) if subject.course_id else None,
+        "credits": subject.credits,
+        "archived": not subject.is_active,
+        "hasMarks": curr_q.subject_has_marks(subject.pk),
+        "syllabusUnits": [syl_q.unit_dict(u) for u in units],
+        "sectionProgress": section_progress,
+        "syllabusCompletionPercent": 0,
+        "completedUnitIds": [],
+    }
+
+
+def _batch_section_payload(batch) -> dict:
+    return {
+        "id": str(batch.id),
+        "label": batch_display_label(batch),
+        "departmentId": str(batch.course.department_id),
+        "courseId": str(batch.course_id),
+        "grade": batch.course.name,
+        "section": batch.name,
+        "academicYearId": str(batch.academic_year_id),
+    }
+
+
 class AdminAcademicsActionView(APIView):
     """POST { action, ... } → dispatch a gap-domain academics write."""
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
@@ -153,46 +198,136 @@ class AdminAcademicsActionView(APIView):
             return Response({"id": str(dept.id)}, status=status.HTTP_201_CREATED)
 
         if action == "save_subject":
-            # FE sends {id?, code, name, credits?}; resolve a course to attach to.
             sid = payload.get("id")
+            code = (payload.get("code") or "").strip()
+            name = (payload.get("name") or "").strip()
             if sid:
                 subj = curr_q.get_subject(branch.pk, sid)
                 if subj is None:
                     return Response({"error": "Subject not found."}, status=status.HTTP_404_NOT_FOUND)
+                if code and curr_q.subject_code_exists(subj.course_id, code, exclude_id=subj.pk):
+                    return Response(
+                        {"error": "A subject with this code already exists for this grade."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
                 curr_q.update_subject(subj, {
-                    "name": payload.get("name", subj.name),
-                    "code": payload.get("code", subj.code),
+                    "name": name or subj.name,
+                    "code": code or subj.code,
                     "credits": payload.get("credits"),
                 }, user=user)
-                return Response({"id": str(subj.id)})
-            course = _resolve_course(branch, payload.get("departmentId"), user)
-            subj = curr_q.create_subject(
-                course=course, name=payload.get("name", "Subject"),
-                code=payload.get("code", ""), subject_type=SubjectType.THEORY,
-                credits=payload.get("credits"), user=user,
-            )
-            return Response({"id": str(subj.id)}, status=status.HTTP_201_CREATED)
+            else:
+                course_id = payload.get("courseId")
+                if not course_id:
+                    return Response(
+                        {"error": "courseId is required when creating a subject."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                course = struct_q.get_course(branch.pk, course_id)
+                if course is None:
+                    return Response({"error": "Grade/program not found."}, status=status.HTTP_404_NOT_FOUND)
+                if code and curr_q.subject_code_exists(course.pk, code):
+                    return Response(
+                        {"error": "A subject with this code already exists for this grade."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                subj = curr_q.create_subject(
+                    course=course, name=name or "Subject",
+                    code=code, subject_type=SubjectType.THEORY,
+                    credits=payload.get("credits"), user=user,
+                )
+            if "syllabusUnits" in payload:
+                try:
+                    syl_q.sync_units_for_subject(branch, subj, payload.get("syllabusUnits"), user=user)
+                except ValueError as exc:
+                    return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            subj = curr_q.get_subject(branch.pk, subj.pk)
+            return Response(_subject_payload(branch, subj), status=status.HTTP_201_CREATED if not sid else status.HTTP_200_OK)
+
+        if action == "update_syllabus_completion":
+            subject_id = payload.get("subjectId")
+            batch_id = payload.get("classSectionId")
+            if not subject_id or not batch_id:
+                return Response(
+                    {"error": "subjectId and classSectionId are required."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            try:
+                units = syl_q.set_completion(
+                    branch.pk, batch_id, subject_id,
+                    payload.get("completedUnitIds", []), user=user,
+                )
+            except ValueError as exc:
+                return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            completed = syl_q.completed_ids_for_batch(branch.pk, batch_id, subject_id)
+            percent, done = syl_q.completion_stats(units, completed)
+            return Response({
+                "syllabusCompletionPercent": percent,
+                "completedUnitIds": done,
+            })
 
         if action == "save_class_section":
-            name = payload.get("label") or payload.get("name") or "Section"
+            tenant = branch.tenant
             sid = payload.get("id")
             if sid:
                 batch = struct_q.get_batch(branch.pk, sid)
                 if batch is None:
                     return Response({"error": "Class section not found."}, status=status.HTTP_404_NOT_FOUND)
-                struct_q.update_batch(batch, {"name": name}, user=user)
-                return Response({"id": str(batch.id)})
+                if is_school(tenant):
+                    section_name = (payload.get("section") or payload.get("label") or batch.name).strip()
+                    if not section_name:
+                        return Response({"error": "Section is required."}, status=status.HTTP_400_BAD_REQUEST)
+                    if struct_q.batch_name_exists(
+                        batch.course_id, batch.academic_year_id, section_name, exclude_id=batch.pk,
+                    ):
+                        return Response(
+                            {"error": "This section already exists for the grade in the current academic year."},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+                    struct_q.update_batch(batch, {"name": section_name}, user=user)
+                else:
+                    name = payload.get("label") or payload.get("name") or batch.name
+                    struct_q.update_batch(batch, {"name": name}, user=user)
+                batch = struct_q.get_batch(branch.pk, batch.pk)
+                return Response(_batch_section_payload(batch))
+
             year = cal_q.get_current_year(branch.pk)
             if year is None:
                 return Response(
                     {"error": "Set a current academic year before creating class sections."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+
+            if is_school(tenant):
+                grade = (payload.get("grade") or payload.get("label") or "").strip()
+                if not grade:
+                    return Response(
+                        {"error": "Grade is required (e.g. Class 5)."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                dept = struct_q.get_department(branch.pk, payload.get("departmentId"))
+                if dept is None:
+                    return Response({"error": "Stream not found."}, status=status.HTTP_404_NOT_FOUND)
+                section = (payload.get("section") or "A").strip().upper() or "A"
+                course = struct_q.get_or_create_course_in_department(dept, grade, user=user)
+                if struct_q.batch_name_exists(course.pk, year.pk, section):
+                    return Response(
+                        {"error": f"Section {section} already exists for {grade} in the current academic year."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                batch = struct_q.create_batch(
+                    course=course, academic_year=year, name=section, user=user,
+                )
+                batch = struct_q.get_batch(branch.pk, batch.pk)
+                return Response(_batch_section_payload(batch), status=status.HTTP_201_CREATED)
+
+            # College — program + cohort label on the batch row.
+            name = payload.get("label") or payload.get("name") or "Section"
             course = _resolve_course(branch, payload.get("departmentId"), user)
             batch = struct_q.create_batch(
                 course=course, academic_year=year, name=name, user=user,
             )
-            return Response({"id": str(batch.id)}, status=status.HTTP_201_CREATED)
+            batch = struct_q.get_batch(branch.pk, batch.pk)
+            return Response(_batch_section_payload(batch), status=status.HTTP_201_CREATED)
 
         if action == "save_timetable_slot":
             batch = struct_q.get_batch(branch.pk, payload.get("classSectionId"))
@@ -270,13 +405,58 @@ class AdminAcademicsActionView(APIView):
             extra_q.cancel_substitution(sub, user=user)
             return Response({"id": str(sub.id), "status": "cancelled"})
 
+        if action == "create_study_folder":
+            batch = struct_q.get_batch(branch.pk, payload.get("classSectionId"))
+            if batch is None:
+                return Response({"error": "Class not found."}, status=status.HTTP_404_NOT_FOUND)
+            name = (payload.get("name") or "").strip()
+            if not name:
+                return Response({"error": "Folder name is required."}, status=status.HTTP_400_BAD_REQUEST)
+            if extra_q.folder_name_taken(batch.pk, name):
+                return Response({"error": "A folder with this name already exists for the class."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            folder = extra_q.create_folder(branch=branch, batch=batch, name=name, user=user)
+            return Response({"id": str(folder.id), "name": folder.name}, status=status.HTTP_201_CREATED)
+
+        if action == "rename_study_folder":
+            folder = extra_q.get_folder(branch.pk, payload.get("folderId"))
+            if folder is None:
+                return Response({"error": "Folder not found."}, status=status.HTTP_404_NOT_FOUND)
+            name = (payload.get("name") or "").strip()
+            if not name:
+                return Response({"error": "Folder name is required."}, status=status.HTTP_400_BAD_REQUEST)
+            if extra_q.folder_name_taken(folder.batch_id, name, exclude_id=folder.pk):
+                return Response({"error": "A folder with this name already exists for the class."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            folder = extra_q.rename_folder(folder, name, user=user)
+            return Response({"id": str(folder.id), "name": folder.name})
+
+        if action == "delete_study_folder":
+            folder = extra_q.get_folder(branch.pk, request.data.get("folderId"))
+            if folder is None:
+                return Response({"error": "Folder not found."}, status=status.HTTP_404_NOT_FOUND)
+            if extra_q.folder_material_count(folder.pk) > 0:
+                return Response(
+                    {"error": "Remove or delete all files in this folder before deleting it."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            extra_q.delete_folder(folder, user=user)
+            return Response({"ok": True})
+
         if action == "upload_study_material":
             batch = struct_q.get_batch(branch.pk, payload.get("classSectionId"))
             if batch is None:
                 return Response({"error": "Class not found."},
                                 status=status.HTTP_404_NOT_FOUND)
+            folder = None
+            folder_id = payload.get("folderId")
+            if folder_id:
+                folder = extra_q.get_folder(branch.pk, folder_id)
+                if folder is None or folder.batch_id != batch.pk:
+                    return Response({"error": "Folder not found for this class."},
+                                    status=status.HTTP_404_NOT_FOUND)
             material = extra_q.create_study_material(
-                branch=branch, batch=batch,
+                branch=branch, batch=batch, folder=folder,
                 file_name=payload.get("fileName", "material"),
                 s3_key=payload.get("s3Key", ""), url=payload.get("url", ""), user=user,
             )

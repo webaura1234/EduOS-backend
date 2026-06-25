@@ -27,6 +27,7 @@ from apps.fees.views import (
 
 from apps.fees.views.admin_overview import AdminFeesOverviewView
 from apps.fees.views.admin_payment import AdminRecordPaymentByStudentView
+from apps.fees.views.admin_reconciliation import AdminReconcilePaymentsView
 
 app_name = "fees"
 
@@ -43,6 +44,7 @@ urlpatterns = [
     # Admin aggregate (FeesData shape) + record-payment-by-student
     path("admin-overview/", AdminFeesOverviewView.as_view(), name="admin-overview"),
     path("payments/offline-by-student/", AdminRecordPaymentByStudentView.as_view(), name="offline-by-student"),
+    path("reconciliation/run/", AdminReconcilePaymentsView.as_view(), name="reconciliation-run"),
 
     # Invoices & Assignments
     path("assignments/", StudentFeeAssignmentView.as_view(), name="assignments"),

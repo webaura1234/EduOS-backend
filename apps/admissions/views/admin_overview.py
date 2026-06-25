@@ -16,10 +16,14 @@ from apps.academics.scoping import resolve_branch
 from apps.accounts.permissions import IsAdminOrSuperAdmin
 
 # Backend ApplicationStatus → frontend PipelineStage.
+# "submitted" means "wizard started / in progress", not "documents collected",
+# so it belongs in the application column, not documents.
+# The documents column will be populated once document upload (S3) is built
+# and we introduce a dedicated status for that phase.
 _STATUS_TO_STAGE = {
     "draft": "application",
-    "submitted": "documents",
-    "under_review": "verification",
+    "submitted": "application",
+    "under_review": "documents",
     "accepted": "verification",
     "waitlisted": "application",
     "enrolled": "enrollment",
@@ -74,10 +78,32 @@ def _eligibility(result):
     return None
 
 
+def _applicant_profile(a, enq) -> dict:
+    step = a.step if isinstance(a.step, dict) else {}
+    profile = step.get("applicant", {}) if isinstance(step.get("applicant"), dict) else {}
+    dob = profile.get("dateOfBirth") or (
+        enq.date_of_birth.isoformat() if enq.date_of_birth else ""
+    )
+    return {
+        "dateOfBirth": dob,
+        "gender": profile.get("gender", ""),
+        "previousSchool": profile.get("previousSchool", ""),
+        "previousGrade": profile.get("previousGrade", ""),
+        "previousMarksPercent": profile.get("previousMarksPercent"),
+        "parentGuardianName": profile.get("parentGuardianName", ""),
+        "address": profile.get("address", ""),
+    }
+
+
 def _application(a) -> dict:
     enq = a.enquiry
     is_rejected = a.status == "rejected"
     waitlist = getattr(a, "waitlist_entry", None)
+    enrollments = getattr(a, "active_enrollments", None) or []
+    enrolled_profile_id = (
+        str(enrollments[0].student_profile_id) if enrollments else None
+    )
+    profile = _applicant_profile(a, enq)
     return {
         "id": str(a.id),
         "applicantName": enq.applicant_name,
@@ -88,21 +114,14 @@ def _application(a) -> dict:
         "stage": _STATUS_TO_STAGE.get(a.status, "application"),
         "source": enq.source,
         "wizard": _wizard(a.step),
-        "applicant": {
-            "dateOfBirth": enq.date_of_birth.isoformat() if enq.date_of_birth else "",
-            "gender": "",
-            "previousSchool": "",
-            "previousGrade": "",
-            "previousMarksPercent": None,
-            "parentGuardianName": "",
-            "address": "",
-        },
+        "applicant": profile,
         "eligibility": _eligibility(a.eligibility_result),
         "documents": [_document(d) for d in _active_documents(a)],
         "meritScore": None,
         "waitlisted": waitlist is not None,
         "waitlistRank": waitlist.rank if waitlist else None,
-        "parentPhone": None,
+        "waitlistEntryId": str(waitlist.id) if waitlist else None,
+        "parentPhone": enq.phone or None,
         "parentLinkedWarning": False,
         "status": "rejected" if is_rejected else "active",
         "rejection": (
@@ -112,7 +131,7 @@ def _application(a) -> dict:
         "feeSnapshot": None,
         "provisioning": None,
         "archivedBranchLink": None,
-        "enrolledStudentId": None,
+        "enrolledStudentId": enrolled_profile_id,
         "photoS3Key": None,
         "photoUrl": None,
         "idCardGeneratedAt": None,
@@ -149,6 +168,7 @@ class AdminAdmissionsOverviewView(APIView):
         conversion = round(enrolled / len(enquiries) * 100) if enquiries else 0
 
         courses = [c.name for c in struct_q.list_courses(branch.pk)]
+        course_rows = list(struct_q.list_courses(branch.pk))
         intakes = [y.name for y in cal_q.list_years(branch.pk)]
 
         return Response({
@@ -160,6 +180,7 @@ class AdminAdmissionsOverviewView(APIView):
                 "conversionRate": conversion,
             },
             "courses": courses,
+            "courseCatalog": [{"id": str(c.id), "name": c.name} for c in course_rows],
             "intakes": intakes,
             "institutionName": tenant.name,
             # Not yet modelled — empty so the screen renders; build per priority.

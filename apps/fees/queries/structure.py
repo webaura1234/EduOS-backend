@@ -80,7 +80,9 @@ def billing_guardian_for_student(student):
 
 # ── FeeStructure ──────────────────────────────────────────────────────────────
 def list_structures(branch_id, academic_year_id=None):
-    qs = FeeStructure.objects.filter(branch_id=branch_id, is_active=True).select_related("batch", "academic_year")
+    qs = FeeStructure.objects.filter(branch_id=branch_id, is_active=True).select_related(
+        "batch", "batch__course", "academic_year",
+    )
     if academic_year_id:
         qs = qs.filter(academic_year_id=academic_year_id)
     return qs.order_by("name")

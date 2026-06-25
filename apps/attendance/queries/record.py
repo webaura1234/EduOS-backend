@@ -41,6 +41,7 @@ def list_records_for_branch(branch_id, *, limit=200):
         .select_related(
             "session",
             "session__batch",
+            "session__batch__course",
             "session__batch_subject__subject",
             "session__period_slot",
             "student__student_profile__user",
@@ -97,6 +98,22 @@ def status_counts_for_session(session_id) -> dict:
         .values("status").annotate(n=Count("id"))
     )
     return {r["status"]: r["n"] for r in rows}
+
+
+def status_counts_for_sessions(session_ids) -> dict[str, dict[str, int]]:
+    """Batch fetch: session_id (str) → {status: count}."""
+    if not session_ids:
+        return {}
+    rows = (
+        AttendanceRecord.objects.filter(session_id__in=session_ids, is_active=True)
+        .values("session_id", "status")
+        .annotate(n=Count("id"))
+    )
+    result: dict[str, dict[str, int]] = {}
+    for row in rows:
+        sid = str(row["session_id"])
+        result.setdefault(sid, {})[row["status"]] = row["n"]
+    return result
 
 
 def records_for_students_in_range(student_ids, *, date_from, date_to, batch_subject_id=None):

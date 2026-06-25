@@ -627,8 +627,17 @@ class RefundViewSet(viewsets.ModelViewSet):
 
     def partial_update(self, request, *args, **kwargs):
         dec = request.data.get("status")
-        if not dec or dec != RefundStatus.APPROVED:
-            raise ValidationError({"status": "Must set status to approved."})
+        if not dec:
+            raise ValidationError({"status": "status is required."})
+
+        if dec == RefundStatus.REJECTED:
+            refund = self.get_object()
+            from apps.fees.queries.refund import update_refund
+            refund = update_refund(refund, {"status": RefundStatus.REJECTED}, user=request.user)
+            return Response(RefundSerializer(refund).data)
+
+        if dec != RefundStatus.APPROVED:
+            raise ValidationError({"status": "Must set status to approved or rejected."})
 
         try:
             interactor = ApproveRefundInteractor(

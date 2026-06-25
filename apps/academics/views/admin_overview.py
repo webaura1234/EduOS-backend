@@ -10,11 +10,14 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.academics.helpers import batch_display_label
+from apps.academics.interactors.study_materials import folder_summary, material_dict
 from apps.academics.queries import admin_extras as extra_q
 from apps.academics.queries import calendar as cal_q
 from apps.academics.queries import curriculum as curr_q
 from apps.academics.queries import holiday as hol_q
 from apps.academics.queries import structure as struct_q
+from apps.academics.queries import syllabus as syl_q
 from apps.academics.queries import timetable as tt_q
 from apps.academics.scoping import resolve_branch
 from apps.accounts.models.user import Role, User
@@ -48,20 +51,7 @@ def _substitution(s) -> dict:
 
 
 def _study_material(m) -> dict:
-    label = ""
-    if m.batch_id:
-        label = (f"{m.batch.course.name} - {m.batch.name}"
-                 if m.batch.course_id else m.batch.name)
-    return {
-        "id": str(m.id),
-        "classSectionId": str(m.batch_id) if m.batch_id else "",
-        "classLabel": label,
-        "fileName": m.file_name,
-        "s3Key": m.s3_key,
-        "url": m.url,
-        "uploadedAt": m.created_at.isoformat(),
-        "uploadedByUserId": str(m.uploaded_by_id) if m.uploaded_by_id else "",
-    }
+    return material_dict(m)
 
 
 def _calendar_change(c) -> dict:
@@ -111,15 +101,28 @@ def _period(p) -> dict:
     }
 
 
-def _subject(s) -> dict:
+def _subject(s, *, units, batches, progress_map) -> dict:
+    section_progress = []
+    for batch in batches:
+        completed = progress_map.get(batch.pk, {}).get(s.id, set())
+        percent, done = syl_q.completion_stats(units, completed)
+        section_progress.append({
+            "classSectionId": str(batch.id),
+            "label": batch_display_label(batch),
+            "syllabusCompletionPercent": percent,
+            "completedUnitIds": done,
+        })
     return {
         "id": str(s.id),
         "code": s.code,
         "name": s.name,
-        "syllabusUnits": [],          # syllabus units not modelled yet
+        "grade": s.course.name if getattr(s, "course_id", None) else None,
+        "courseId": str(s.course_id) if getattr(s, "course_id", None) else None,
+        "syllabusUnits": [syl_q.unit_dict(u) for u in units],
         "credits": s.credits,
         "archived": not s.is_active,
-        "hasMarks": False,            # avoid an N+1 marks probe per subject
+        "hasMarks": curr_q.subject_has_marks(s.pk),
+        "sectionProgress": section_progress,
         "syllabusCompletionPercent": 0,
         "completedUnitIds": [],
     }
@@ -128,10 +131,12 @@ def _subject(s) -> dict:
 def _class_section(b) -> dict:
     return {
         "id": str(b.id),
-        "label": b.name,
+        "label": batch_display_label(b),
         "departmentId": str(b.course.department_id),
-        "batch": b.name,
-        "section": None,
+        "courseId": str(b.course_id),
+        "grade": b.course.name,
+        "section": b.name,
+        "academicYearId": str(b.academic_year_id),
     }
 
 
@@ -174,6 +179,14 @@ class AdminAcademicsOverviewView(APIView):
             ).order_by("first_name", "last_name")
         ]
 
+        batches = list(struct_q.list_batches(branch.pk))
+        batch_ids = [b.pk for b in batches]
+        subjects = list(curr_q.list_subjects(branch.pk))
+        subject_ids = [s.id for s in subjects]
+        units_map = syl_q.units_by_subject(branch.pk, subject_ids)
+        batches_map = syl_q.batches_by_subject(branch.pk, subject_ids)
+        progress_map = syl_q.progress_for_batches(branch.pk, batch_ids, subject_ids)
+
         return Response({
             "institutionType": tenant.institution_type,
             # College uses "Department" hierarchy; school uses "Stream".
@@ -191,8 +204,16 @@ class AdminAcademicsOverviewView(APIView):
                  "parentId": str(d.parent_id) if d.parent_id else None}
                 for d in struct_q.list_departments(branch.pk)
             ],
-            "classSections": [_class_section(b) for b in struct_q.list_batches(branch.pk)],
-            "subjects": [_subject(s) for s in curr_q.list_subjects(branch.pk)],
+            "classSections": [_class_section(b) for b in batches],
+            "subjects": [
+                _subject(
+                    s,
+                    units=units_map.get(s.id, []),
+                    batches=batches_map.get(s.id, []),
+                    progress_map=progress_map,
+                )
+                for s in subjects
+            ],
             "rooms": [
                 {"id": str(r.id), "name": r.name} for r in tt_q.list_rooms(branch.pk)
             ],
@@ -202,6 +223,9 @@ class AdminAcademicsOverviewView(APIView):
             "faculty": faculty,
             "substitutions": [
                 _substitution(s) for s in extra_q.list_substitutions(branch.pk)
+            ],
+            "studyMaterialFolders": [
+                folder_summary(f, f.material_count) for f in extra_q.list_folders_for_branch(branch.pk)
             ],
             "studyMaterials": [
                 _study_material(m) for m in extra_q.list_study_materials(branch.pk)

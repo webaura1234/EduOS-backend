@@ -86,19 +86,37 @@ def generate_result_pdf(
     institution_name: str,
     exam_name: str,
     student_name: str,
+    class_label: str = "",
     grade: str,
     percentage: str,
     gpa: str = "",
+    subjects: list[dict] | None = None,
 ) -> bytes:
-    """Minimal single-page PDF for school report card or college marksheet."""
+    """School report card or college marksheet with optional per-subject breakdown."""
     lines = [
         title,
         f"Institution: {institution_name}",
         f"Exam: {exam_name}",
         f"Student: {student_name}",
-        f"Grade: {grade}",
-        f"Percentage: {percentage}%",
     ]
+    if class_label:
+        lines.append(f"Class: {class_label}")
+    lines.append("")
+    if subjects:
+        lines.append("Subject-wise marks:")
+        for row in subjects:
+            name = row.get("subjectName", "")
+            if row.get("remark") == "AB" or row.get("marks") is None:
+                lines.append(f"  {name}: AB")
+            else:
+                marks = row.get("marks")
+                max_m = row.get("maxMarks")
+                pct = row.get("percent")
+                pct_str = f" ({pct}%)" if pct is not None else ""
+                lines.append(f"  {name}: {marks}/{max_m}{pct_str}")
+        lines.append("")
+    lines.append(f"Overall grade: {grade}")
+    lines.append(f"Overall percentage: {percentage}%")
     if gpa:
         lines.append(f"SGPA: {gpa}")
 
@@ -146,3 +164,14 @@ def store_result_pdf(*, key: str, pdf_bytes: bytes) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(pdf_bytes)
     return key
+
+
+def read_result_pdf(key: str) -> bytes | None:
+    """Load a stored report card or marksheet PDF by storage key."""
+    if not key:
+        return None
+    media_root = Path(getattr(settings, "MEDIA_ROOT", "media"))
+    path = media_root / key
+    if not path.is_file():
+        return None
+    return path.read_bytes()

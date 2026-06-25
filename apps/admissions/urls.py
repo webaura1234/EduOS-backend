@@ -7,6 +7,7 @@ from apps.admissions.views import (
     ApplicationEnrollView,
     ApplicationListCreateView,
     ApplicationRejectView,
+    ApplicationStatusView,
     ApplicationStepView,
     ApplicationDocumentView,
     DocumentVerifyView,
@@ -44,6 +45,7 @@ urlpatterns = [
     path("applications/<uuid:application_id>/step/", ApplicationStepView.as_view(), name="application-step"),
     path("applications/<uuid:application_id>/documents/", ApplicationDocumentView.as_view(), name="application-documents"),
     path("documents/<uuid:document_id>/verify/", DocumentVerifyView.as_view(), name="document-verify"),
+    path("applications/<uuid:application_id>/status/", ApplicationStatusView.as_view(), name="application-status"),
     path("applications/<uuid:application_id>/reject/", ApplicationRejectView.as_view(), name="application-reject"),
     path("applications/<uuid:application_id>/enroll/", ApplicationEnrollView.as_view(), name="application-enroll"),
 

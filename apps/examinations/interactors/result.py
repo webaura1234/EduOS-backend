@@ -92,6 +92,7 @@ def _compute_for_student(
 ) -> dict:
     subject_percents: list[Decimal | None] = []
     subject_gpa_rows: list[dict] = []
+    subject_rows: list[dict] = []
     arrear_subjects: list[dict] = []
     total_obtained = Decimal("0")
     total_max = Decimal("0")
@@ -109,6 +110,15 @@ def _compute_for_student(
 
         if entry.is_absent or final_marks is None:
             subject_percents.append(None)
+            subject_rows.append(
+                {
+                    "subjectName": entry.subject.name,
+                    "marks": None,
+                    "maxMarks": float(slot_max),
+                    "percent": None,
+                    "remark": "AB",
+                }
+            )
             if college:
                 subject_gpa_rows.append(
                     {"grade_point": None, "credits": entry.subject.credits, "is_absent": True}
@@ -122,6 +132,15 @@ def _compute_for_student(
         total_max += slot_max
         pct = grading_svc.percent_of(final_marks, slot_max)
         subject_percents.append(pct)
+        subject_rows.append(
+            {
+                "subjectName": entry.subject.name,
+                "marks": float(final_marks),
+                "maxMarks": float(slot_max),
+                "percent": float(pct) if pct is not None else None,
+                "remark": "OK",
+            }
+        )
 
         pass_threshold = grading_svc.scaled_pass_marks(
             entry.subject.pass_marks, entry.subject.max_marks, slot_max
@@ -166,6 +185,7 @@ def _compute_for_student(
         "gpa": gpa,
         "is_pass": is_pass,
         "arrear_subjects": arrear_subjects,
+        "subjects": subject_rows,
     }
 
 
@@ -241,9 +261,11 @@ def _persist_student_results(
             institution_name=institution_name,
             exam_name=exam.name,
             student_name=row["student"].user.full_name,
+            class_label=row["student"].current_batch.name if row["student"].current_batch else "",
             grade=row["grade"],
             percentage=str(row["percentage"]),
             gpa=str(row["gpa"]) if row["gpa"] is not None else "",
+            subjects=row.get("subjects") or [],
         )
         if college:
             marksheet_key = marksheet_file_key(
@@ -532,6 +554,200 @@ def apply_grace_marks(exam, *, tenant, entries: list[dict], user) -> dict:
 def get_exam_analytics(exam, *, tenant) -> dict:
     college = is_college(tenant)
     return _analytics_summary(exam, college=college, tenant=tenant)
+
+
+def preflight_results(exam, *, branch) -> dict:
+    """Readiness report for marks entry, submit, and publish across all slots."""
+    from apps.examinations.enums import MarksStatus
+    from apps.examinations.interactors.marks import get_slot_roster
+
+    slots = list(exam_q.list_schedule_slots(exam.pk))
+    slot_rows = []
+    blockers: list[str] = []
+    ready_count = 0
+
+    for slot in slots:
+        roster = get_slot_roster(slot, branch_id=branch.pk)
+        registered = len(roster)
+        entered = sum(
+            1
+            for r in roster
+            if r.get("marksEntryId") or r["marks"] is not None or r.get("isAbsent")
+        )
+        submitted = sum(
+            1
+            for r in roster
+            if r.get("marksStatus") in (MarksStatus.SUBMITTED, MarksStatus.LOCKED)
+        )
+        if registered == 0:
+            status = "blocked"
+            blockers.append(f"No registrations for {slot.batch.name} — {slot.subject.name}.")
+        elif submitted < registered:
+            status = "warning"
+            if entered < registered:
+                blockers.append(
+                    f"{slot.batch.name} {slot.subject.name}: {registered - entered} student(s) missing marks."
+                )
+            else:
+                blockers.append(
+                    f"{slot.batch.name} {slot.subject.name}: marks entered but not submitted."
+                )
+        else:
+            status = "ready"
+            ready_count += 1
+
+        slot_rows.append(
+            {
+                "examSlotId": str(slot.pk),
+                "classLabel": slot.batch.name if slot.batch else "",
+                "subjectName": slot.subject.name,
+                "registeredCount": registered,
+                "enteredCount": entered,
+                "submittedCount": submitted,
+                "status": status,
+            }
+        )
+
+    unsubmitted = result_q.count_unsubmitted_marks_for_exam(exam.pk)
+    can_publish = (
+        not exam.is_published
+        and slots
+        and ready_count == len(slots)
+        and unsubmitted == 0
+    )
+    if exam.is_published:
+        blockers.append("Results already published. Use Revise to update.")
+    elif unsubmitted > 0:
+        blockers.append(f"{unsubmitted} mark row(s) still in draft — submit all slots first.")
+
+    return {
+        "examId": str(exam.pk),
+        "examName": exam.name,
+        "isPublished": exam.is_published,
+        "resultStatus": exam.result_status,
+        "slots": slot_rows,
+        "readyCount": ready_count,
+        "totalSlots": len(slots),
+        "canPublish": can_publish,
+        "blockers": blockers,
+    }
+
+
+def get_results_status(exam) -> dict:
+    """Publication history and exam-level result state."""
+    publications = []
+    for pub in result_q.list_publications_for_exam(exam.pk):
+        note = result_q.get_publication_note(pub.pk)
+        publications.append(
+            {
+                "id": str(pub.pk),
+                "examId": str(exam.pk),
+                "publishedAt": pub.published_at.isoformat(),
+                "publishedByUserId": str(pub.published_by_id) if pub.published_by_id else "",
+                "revisionNo": pub.revision_no,
+                "note": note or ("Published" if pub.revision_no == 1 else "Revised"),
+                "isCurrent": pub.is_current,
+            }
+        )
+    return {
+        "examId": str(exam.pk),
+        "isPublished": exam.is_published,
+        "resultStatus": exam.result_status,
+        "publications": publications,
+    }
+
+
+def download_report_card(exam, *, branch, student_profile_id, college: bool) -> dict:
+    """Return base64 PDF for a published student result."""
+    from apps.fees.queries.structure import get_student_in_branch
+
+    from apps.examinations.services.pdf import hall_ticket_content_payload, read_result_pdf
+
+    student = get_student_in_branch(branch.pk, student_profile_id)
+    if not student:
+        raise ValidationError({"studentId": "Student not found in this branch."})
+
+    if not exam.is_published:
+        return {
+            "canDownload": False,
+            "blockedReason": "Results are not published yet.",
+            "fileName": "",
+            "content": "",
+        }
+
+    result = result_q.get_student_result(exam.pk, student.pk)
+    if not result:
+        return {
+            "canDownload": False,
+            "blockedReason": "No published result found for this student.",
+            "fileName": "",
+            "content": "",
+        }
+
+    key = result.marksheet_key if college else result.report_card_key
+    if not key:
+        key = result.report_card_key or result.marksheet_key
+    if not key:
+        return {
+            "canDownload": False,
+            "blockedReason": "Report card file not generated.",
+            "fileName": "",
+            "content": "",
+        }
+
+    pdf_bytes = read_result_pdf(key)
+    if not pdf_bytes:
+        return {
+            "canDownload": False,
+            "blockedReason": "Report card file missing on server.",
+            "fileName": "",
+            "content": "",
+        }
+
+    label = "marksheet" if college and result.marksheet_key else "report-card"
+    return {
+        "canDownload": True,
+        "fileName": f"{label}-{student_profile_id}.pdf",
+        "content": hall_ticket_content_payload(pdf_bytes),
+    }
+
+
+def export_class_results_csv(exam, *, branch_id, class_section_id) -> str:
+    """CSV marks sheet for one class across all subjects in an exam (e.g. Unit Test 1)."""
+    import csv
+    import io
+
+    from apps.examinations.interactors.marks import get_slot_roster
+
+    slots = sorted(
+        [
+            s
+            for s in exam_q.list_schedule_slots(exam.pk)
+            if str(s.batch_id) == str(class_section_id)
+        ],
+        key=lambda s: s.subject.name,
+    )
+    if not slots:
+        raise ValidationError({"classSectionId": "No exam slots scheduled for this class."})
+
+    subject_names = [s.subject.name for s in slots]
+    students: dict[str, dict] = {}
+
+    for slot in slots:
+        for row in get_slot_roster(slot, branch_id=branch_id):
+            sid = row["studentId"]
+            if sid not in students:
+                students[sid] = {"name": row["studentName"], "marks": {}}
+            marks = row["marks"]
+            students[sid]["marks"][slot.subject.name] = "AB" if marks is None else str(marks)
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["Student ID", "Student Name", *subject_names])
+    for sid in sorted(students.keys(), key=lambda k: students[k]["name"]):
+        data = students[sid]
+        writer.writerow([sid, data["name"], *[data["marks"].get(sub, "") for sub in subject_names]])
+    return buf.getvalue()
 
 
 def delete_published_result(publication_id) -> None:
