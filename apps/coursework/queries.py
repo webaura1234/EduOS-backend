@@ -8,7 +8,15 @@ from apps.coursework.models import Homework
 def list_for_faculty(branch_id, faculty_user_id):
     return (
         Homework.objects.filter(branch_id=branch_id, created_by_id=faculty_user_id, is_active=True)
-        .select_related("batch", "created_by")
+        .select_related("batch", "batch__course", "created_by")
+        .order_by("-date", "-created_at")
+    )
+
+
+def list_for_branch(branch_id):
+    return (
+        Homework.objects.filter(branch_id=branch_id, is_active=True)
+        .select_related("batch", "batch__course", "created_by")
         .order_by("-date", "-created_at")
     )
 

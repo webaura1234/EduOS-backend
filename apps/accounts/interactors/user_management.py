@@ -64,9 +64,11 @@ def invite_dict(invite) -> dict:
     }
 
 
-def _require_user(tenant_id, user_id):
+def _require_user(tenant_id, user_id, *, branch_id=None):
     user = uq.get_managed_user(tenant_id, user_id)
     if user is None:
+        raise NotFound("User not found.")
+    if branch_id and user.branch_id != branch_id:
         raise NotFound("User not found.")
     return user
 
@@ -75,14 +77,14 @@ def _require_user(tenant_id, user_id):
 
 @transaction.atomic
 def set_active(*, admin, user_id, is_active: bool) -> dict:
-    user = _require_user(admin.tenant_id, user_id)
+    user = _require_user(admin.tenant_id, user_id, branch_id=admin.branch_id)
     uq.set_user_active(user, is_active)
     return managed_user_dict(user)
 
 
 @transaction.atomic
 def send_invite(*, admin, user_id) -> dict:
-    user = _require_user(admin.tenant_id, user_id)
+    user = _require_user(admin.tenant_id, user_id, branch_id=admin.branch_id)
     if not user.email and not user.phone:
         raise ValidationError("User has no email or phone to send an invite to.")
     invite = uq.create_invite_token(user, sent_to_phone=user.phone or "")
@@ -90,7 +92,7 @@ def send_invite(*, admin, user_id) -> dict:
 
 
 def reset_password(*, admin, user_id) -> dict:
-    user = _require_user(admin.tenant_id, user_id)
+    user = _require_user(admin.tenant_id, user_id, branch_id=admin.branch_id)
     temp = admin_reset_password(admin=admin, target_user_id=str(user.id))
     user.refresh_from_db()
     return {"user": managed_user_dict(user), "temporary_password": temp}
@@ -100,7 +102,7 @@ def reset_password(*, admin, user_id) -> dict:
 def hard_delete_student(*, admin, user_id) -> dict:
     from apps.fees.queries.invoice import list_dues_for_student_user
 
-    user = _require_user(admin.tenant_id, user_id)
+    user = _require_user(admin.tenant_id, user_id, branch_id=admin.branch_id)
     if user.role != Role.STUDENT:
         raise ValidationError("Only student accounts can be hard-deleted.")
 
@@ -121,7 +123,7 @@ def hard_delete_student(*, admin, user_id) -> dict:
 
 @transaction.atomic
 def promote_student_to_faculty(*, admin, user_id) -> dict:
-    student = _require_user(admin.tenant_id, user_id)
+    student = _require_user(admin.tenant_id, user_id, branch_id=admin.branch_id)
     if student.role != Role.STUDENT:
         raise ValidationError("Only student accounts can be promoted.")
 
@@ -149,6 +151,28 @@ def promote_student_to_faculty(*, admin, user_id) -> dict:
         "student": managed_user_dict(student),
         "faculty": managed_user_dict(faculty),
     }
+
+
+@transaction.atomic
+def update_user(*, admin, user_id, name=None, email=None, phone=None) -> dict:
+    user = _require_user(admin.tenant_id, user_id, branch_id=admin.branch_id)
+    fields: list[str] = []
+    if name is not None and name.strip():
+        first, _, last = name.strip().partition(" ")
+        user.first_name = first
+        user.last_name = last
+        fields.extend(["first_name", "last_name"])
+    if email is not None:
+        user.email = email.strip() or None
+        fields.append("email")
+    if phone is not None:
+        if user.role in {Role.PARENT, Role.ADMIN} and not str(phone).strip():
+            raise ValidationError("Phone number is required for this role.")
+        user.phone = phone.strip() or None
+        fields.append("phone")
+    if fields:
+        user.save(update_fields=fields)
+    return managed_user_dict(user)
 
 
 def check_multi_role(*, admin, phone, email, role) -> dict | None:

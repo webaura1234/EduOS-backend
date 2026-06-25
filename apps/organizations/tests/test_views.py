@@ -13,7 +13,11 @@ def api_client():
 
 
 def test_tenant_config_view_success(api_client):
-    tenant = TenantFactory(subdomain="horizon-college", name="Horizon College")
+    tenant = TenantFactory(
+        subdomain="horizon-college",
+        name="Horizon College",
+        website="https://www.horizon-college.edu.in",
+    )
     TenantSettings.objects.create(
         tenant=tenant,
         student_id_label="Admission Number",
@@ -29,6 +33,7 @@ def test_tenant_config_view_success(api_client):
     assert response.data["subdomain"] == "horizon-college"
     assert response.data["student_id_label"] == "Admission Number"
     assert response.data["faculty_id_label"] == "Staff Code"
+    assert response.data["website"] == "https://www.horizon-college.edu.in"
 
 
 def test_tenant_config_view_missing_subdomain(api_client):

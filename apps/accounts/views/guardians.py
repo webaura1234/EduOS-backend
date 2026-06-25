@@ -6,23 +6,35 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.academics.scoping import resolve_branch
+from apps.accounts.models.guardian import CustodyType, default_notification_channels
 from apps.accounts.models.user import Role, User
 from apps.accounts.permissions import IsAdminOrSuperAdmin
 from apps.accounts.queries import guardian as g_q
 from apps.accounts.queries.guardian import list_guardian_links
 from apps.attendance.queries import roster as roster_q
 
-# Backend custody vocab → frontend CustodyType.
-_CUSTODY = {"primary": "full", "shared": "shared", "emergency": "visitation"}
-# Frontend CustodyType → backend custody vocab.
-_CUSTODY_IN = {"full": "primary", "shared": "shared", "visitation": "emergency",
-               "none": "emergency"}
-
 
 def _student_id(student_user) -> str:
-    # FE studentId = StudentProfile id (matches the students list); fall back to user id.
     profile = getattr(student_user, "student_profile", None)
     return str(profile.id) if profile else str(student_user.id)
+
+
+def _notification_out(link) -> dict:
+    channels = link.notification_channels or default_notification_channels()
+    return {
+        "in_app": bool(channels.get("in_app", True)),
+        "sms": bool(channels.get("sms", True)),
+        "email": bool(channels.get("email", True)),
+    }
+
+
+def _notification_in(payload) -> dict:
+    raw = payload.get("receivesNotifications") or {}
+    return {
+        "in_app": bool(raw.get("in_app", True)),
+        "sms": bool(raw.get("sms", True)),
+        "email": bool(raw.get("email", True)),
+    }
 
 
 def _link(link) -> dict:
@@ -33,11 +45,10 @@ def _link(link) -> dict:
         "guardianUserId": str(link.guardian_id),
         "guardianName": link.guardian.full_name,
         "relationship": link.relationship,
-        "custodyType": _CUSTODY.get(link.custody, "full"),
         "hasPortalAccess": link.has_portal_access,
         "isPrimaryContact": link.is_primary_contact,
-        # Per-link channel routing isn't modelled yet — default to all channels on.
-        "receivesNotifications": {"in_app": True, "sms": True, "email": True},
+        "canPickup": link.can_pickup,
+        "receivesNotifications": _notification_out(link),
         "createdAt": link.created_at.isoformat(),
     }
 
@@ -50,13 +61,10 @@ class AdminGuardianOverviewView(APIView):
         branch = resolve_branch(request)
         links = list(list_guardian_links(branch.pk))
 
-        # Class label where the student has an active enrollment (best-effort).
         class_by_profile = {
             str(e.student_profile_id): (e.current_batch.name if e.current_batch_id else "")
             for e in roster_q.all_active_students_in_branch(branch.pk)
         }
-        # List ALL student users in the branch (a guardian can be linked even before
-        # the student is enrolled), not only enrolled ones.
         students = []
         for u in (
             User.objects.filter(
@@ -74,7 +82,6 @@ class AdminGuardianOverviewView(APIView):
                 "classLabel": class_by_profile.get(sid, ""),
             })
 
-        # Guardians = parent users in the branch (plus any already linked).
         guardians = {
             str(u.id): u.full_name
             for u in User.objects.filter(
@@ -103,7 +110,7 @@ class AdminGuardianActionView(APIView):
 
         if action == "save_link":
             p = request.data.get("payload") or {}
-            custody = _CUSTODY_IN.get(p.get("custodyType"), "primary")
+            channels = _notification_in(p)
             link_id = p.get("id")
             if link_id:
                 link = g_q.get_link(branch.pk, link_id)
@@ -111,9 +118,10 @@ class AdminGuardianActionView(APIView):
                     return Response({"error": "Link not found."}, status=status.HTTP_404_NOT_FOUND)
                 g_q.update_link(link, {
                     "relationship": p.get("relationship", link.relationship),
-                    "custody": custody,
                     "has_portal_access": bool(p.get("hasPortalAccess", link.has_portal_access)),
                     "is_primary_contact": bool(p.get("isPrimaryContact", link.is_primary_contact)),
+                    "can_pickup": bool(p.get("canPickup", link.can_pickup)),
+                    "notification_channels": channels,
                 }, user=user)
                 if link.is_primary_contact:
                     g_q.set_primary_link(link, user=user)
@@ -126,9 +134,13 @@ class AdminGuardianActionView(APIView):
                                 status=status.HTTP_400_BAD_REQUEST)
             link = g_q.create_link(
                 student_user=student_user, guardian_user=guardian,
-                relationship=p.get("relationship", "guardian"), custody=custody,
+                relationship=p.get("relationship", "guardian"),
+                custody=CustodyType.PRIMARY,
                 is_primary=bool(p.get("isPrimaryContact")),
-                has_portal=bool(p.get("hasPortalAccess", True)), user=user,
+                has_portal=bool(p.get("hasPortalAccess", True)),
+                can_pickup=bool(p.get("canPickup", True)),
+                notification_channels=channels,
+                user=user,
             )
             if link.is_primary_contact:
                 g_q.set_primary_link(link, user=user)

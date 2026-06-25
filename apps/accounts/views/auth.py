@@ -260,3 +260,21 @@ class SwitchLinkedAccountView(APIView):
             {"user": _auth_user_payload(target), "access": dto.access, "refresh": dto.refresh},
             status=status.HTTP_200_OK,
         )
+
+
+class StepUpVerifyView(APIView):
+    """
+    POST /api/v1/auth/step-up/
+
+    Re-verify the current user's password before a sensitive action (F-262).
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request) -> Response:
+        password = (request.data.get("password") or "").strip()
+        if not password:
+            return Response({"error": "Password is required."}, status=status.HTTP_400_BAD_REQUEST)
+        if not request.user.check_password(password):
+            return Response({"error": "Incorrect password."}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"verified": True}, status=status.HTTP_200_OK)

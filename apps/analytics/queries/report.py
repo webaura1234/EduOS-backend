@@ -33,5 +33,8 @@ def update_export(export: ReportExport, fields: dict, user=None) -> ReportExport
     return export
 
 
-def list_exports(tenant_id):
-    return ReportExport.objects.filter(tenant_id=tenant_id, is_active=True).order_by("-created_at")
+def list_exports(tenant_id, branch_id=None):
+    qs = ReportExport.objects.filter(tenant_id=tenant_id, is_active=True)
+    if branch_id is not None:
+        qs = qs.filter(branch_id=branch_id)
+    return qs.order_by("-created_at")

@@ -26,6 +26,11 @@ def _rows_to_csv(rows: list[dict]) -> bytes:
     return buf.getvalue().encode("utf-8")
 
 
+def rows_to_csv_bytes(rows: list[dict]) -> bytes:
+    """Public helper for views and Celery tasks."""
+    return _rows_to_csv(rows)
+
+
 @shared_task
 def generate_export_task(export_id):
     """Build a CSV from the frozen snapshot and upload it to S3; set the signed URL."""
@@ -35,7 +40,7 @@ def generate_export_task(export_id):
     report_q.update_export(export, {"status": ReportStatus.RUNNING})
     try:
         rows = (export.snapshot or {}).get("rows", [])
-        content = _rows_to_csv(rows)
+        content = rows_to_csv_bytes(rows)
         s3 = get_s3_adapter()
         key = f"exports/{export.tenant_id}/{export.pk}.csv"
         s3.upload(key=key, content=content, content_type="text/csv")

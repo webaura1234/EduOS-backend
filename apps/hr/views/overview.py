@@ -1,5 +1,7 @@
 """Admin HR overview — the tenant-wide HrData aggregate the admin HR screen consumes."""
 
+import datetime
+
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -10,6 +12,7 @@ from apps.accounts.queries.user import list_admins_in_tenant
 from apps.hr.queries import employee as emp_q
 from apps.hr.queries import leave as leave_q
 from apps.hr.queries import payroll as pay_q
+from apps.hr.queries import staff_attendance as sa_q
 
 
 def _rupees(paise: int) -> float:
@@ -26,8 +29,10 @@ class AdminHROverviewView(APIView):
         bid, bname = str(branch.id), branch.name
 
         employees, leave_requests, payroll_runs, component_templates = [], [], [], []
+        today = datetime.date.today()
 
         for emp in emp_q.list_employees(branch.id, active_only=False):
+            summary = sa_q.month_attendance_summary(emp.user_id, branch, today.year, today.month)
             employees.append({
                 "id": str(emp.id),
                 "name": emp.user.full_name,
@@ -38,6 +43,9 @@ class AdminHROverviewView(APIView):
                 "active": emp.is_active,
                 "joinedAt": emp.joined_at.isoformat() if emp.joined_at else "",
                 "exitedAt": emp.exited_at.isoformat() if emp.exited_at else None,
+                "presentDays": summary["presentDays"],
+                "absentDays": summary["absentDays"],
+                "leaveDays": summary["leaveDays"],
             })
 
         for app in leave_q.list_applications(branch.id):
@@ -95,10 +103,21 @@ class AdminHROverviewView(APIView):
             if a.branch_id == branch.id
         ]
 
+        available_faculty = [
+            {
+                "userId": str(u.id),
+                "name": u.full_name,
+                "employeeCode": u.custom_login_id or f"FAC-{str(u.id)[:8].upper()}",
+                "roleLabel": u.get_role_display(),
+            }
+            for u in emp_q.list_faculty_without_employee(branch.id)
+        ]
+
         return Response({
             "branches": [{"id": bid, "name": bname}],
             "branchAdmins": branch_admins,
             "employees": employees,
+            "availableFaculty": available_faculty,
             "assignments": [],
             "leaveBalances": [],
             "leaveRequests": leave_requests,

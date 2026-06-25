@@ -9,7 +9,12 @@ from apps.analytics.views.dashboard import (
     SuperAdminDashboardView,
     StudentDashboardView,
 )
-from apps.analytics.views.report import NaacExportView, ReportCreateView, ReportDetailView
+from apps.analytics.views.report import (
+    NaacExportView,
+    ReportDetailView,
+    ReportDownloadView,
+    ReportExportsView,
+)
 
 app_name = "analytics"
 
@@ -25,7 +30,8 @@ urlpatterns = [
     path("audit/verify/", AuditVerifyView.as_view(), name="audit-verify"),
 
     # Reports
-    path("reports/", ReportCreateView.as_view(), name="report-create"),
+    path("reports/", ReportExportsView.as_view(), name="report-exports"),
     path("reports/naac/", NaacExportView.as_view(), name="report-naac"),
     path("reports/<uuid:export_id>/", ReportDetailView.as_view(), name="report-detail"),
+    path("reports/<uuid:export_id>/download/", ReportDownloadView.as_view(), name="report-download"),
 ]

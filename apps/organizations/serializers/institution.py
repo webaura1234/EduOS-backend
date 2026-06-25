@@ -19,6 +19,7 @@ class UpdateInstitutionSettingsSerializer(serializers.Serializer):
     institutionName = serializers.CharField(max_length=255, required=False)
     institutionType = serializers.ChoiceField(choices=["school", "college"], required=False)
     logoUrl = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    website = serializers.URLField(required=False, allow_blank=True, allow_null=True)
     address = AddressInputSerializer(required=False)
     parentPortalEnabled = serializers.BooleanField(required=False)
 
@@ -49,6 +50,7 @@ def institution_settings_dict(tenant) -> dict:
         "institutionName": tenant.name,
         "institutionType": tenant.institution_type,
         "logoUrl": tenant.logo_s3_key or None,
+        "website": tenant.website or None,
         "address": {
             "line1": tenant.address_line1,
             "line2": tenant.address_line2,

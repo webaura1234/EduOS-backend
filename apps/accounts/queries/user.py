@@ -452,27 +452,25 @@ def record_login_attempt(
 # Admin user-management screen
 # ─────────────────────────────────────────────────────────────────────────────
 
-def list_managed_users(tenant_id):
-    """All manageable users (admin/faculty/student/parent) in a tenant."""
+def list_managed_users(tenant_id, *, branch_id=None):
+    """Manageable users in a tenant, optionally scoped to one branch."""
     from apps.accounts.models.user import Role
 
-    return (
-        User.objects.filter(
-            tenant_id=tenant_id,
-            role__in=[Role.ADMIN, Role.FACULTY, Role.STUDENT, Role.PARENT],
-        )
-        .select_related("branch")
-        .order_by("role", "first_name", "last_name")
-    )
+    qs = User.objects.filter(
+        tenant_id=tenant_id,
+        role__in=[Role.ADMIN, Role.FACULTY, Role.STUDENT, Role.PARENT],
+    ).select_related("branch")
+    if branch_id:
+        qs = qs.filter(branch_id=branch_id)
+    return qs.order_by("role", "first_name", "last_name")
 
 
-def list_pending_invites(tenant_id):
-    """Unused invite tokens for users in a tenant, newest first."""
-    return (
-        InviteToken.objects.filter(user__tenant_id=tenant_id, is_used=False)
-        .select_related("user")
-        .order_by("-created_at")
-    )
+def list_pending_invites(tenant_id, *, branch_id=None):
+    """Unused invite tokens, optionally scoped to users in one branch."""
+    qs = InviteToken.objects.filter(user__tenant_id=tenant_id, is_used=False).select_related("user")
+    if branch_id:
+        qs = qs.filter(user__branch_id=branch_id)
+    return qs.order_by("-created_at")
 
 
 def get_managed_user(tenant_id, user_id) -> User | None:

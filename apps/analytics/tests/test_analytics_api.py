@@ -132,7 +132,7 @@ def test_student_dashboard_denied_to_admin(env):
 # ── Reports: inline snapshot, large→Celery+S3, snapshot immutability, NAAC ─────
 def test_small_report_inline_snapshot(env):
     create_enquiry(branch=env["branch"], source="walk_in", applicant_name="Asha")
-    resp = _client(env["admin"]).post(reverse("analytics:report-create"),
+    resp = _client(env["admin"]).post(reverse("analytics:report-exports"),
                                       {"reportType": ReportType.ADMISSION_FUNNEL}, format="json")
     assert resp.status_code == 201, resp.content
     report = _data(resp)["report"]

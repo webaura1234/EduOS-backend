@@ -15,6 +15,7 @@ from apps.accounts.views.auth import (
     PlatformLoginView,
     RefreshView,
     SwitchLinkedAccountView,
+    StepUpVerifyView,
 )
 from apps.accounts.views.admins import SuperAdminAdminsView, SuperAdminAdminDetailView
 from apps.accounts.views.invite import AcceptInviteView, CreateInviteView
@@ -54,6 +55,7 @@ urlpatterns = [
     path("me/faculty-dashboard/", FacultyDashboardView.as_view(), name="faculty-dashboard"),
     path("linked-accounts/",    LinkedAccountsView.as_view(),    name="linked-accounts"),
     path("switch-linked/",      SwitchLinkedAccountView.as_view(), name="switch-linked"),
+    path("step-up/",            StepUpVerifyView.as_view(),      name="step-up"),
 
     # ── Password management ───────────────────────────────────────────────
     path("password/change/",         ForceChangePasswordView.as_view(), name="password-change"),

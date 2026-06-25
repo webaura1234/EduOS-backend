@@ -62,8 +62,8 @@ def test_link_reflected(env):
     assert link["studentName"].startswith("Riya")
     assert link["guardianName"].startswith("Vijay")
     assert link["relationship"] == "father"
-    assert link["custodyType"] == "full"   # primary → full
     assert link["isPrimaryContact"] is True
+    assert link["canPickup"] is True
     assert any(g["userId"] == str(parent_user.id) for g in body["guardians"])
     # Student appears in the dropdown list even without an active enrollment.
     assert any(s["studentId"] == str(profile.id) for s in body["students"])
@@ -98,16 +98,20 @@ def test_save_remove_and_set_primary(env):
     # Create a link.
     resp = c.post(url, {"action": "save_link", "payload": {
         "studentId": str(profile.id), "guardianUserId": str(parent.id),
-        "relationship": "father", "custodyType": "full",
+        "relationship": "father",
         "hasPortalAccess": True, "isPrimaryContact": True,
+        "canPickup": True,
+        "receivesNotifications": {"in_app": True, "sms": False, "email": True},
     }}, format="json")
     assert resp.status_code == 201, resp.content
     link_id = _data(resp)["id"]
+    links = {l["id"]: l for l in _data(c.get(reverse("accounts:guardians-overview")))["links"]}
+    assert links[link_id]["receivesNotifications"]["sms"] is False
 
     # Second guardian, set primary → should flip the first off.
     resp = c.post(url, {"action": "save_link", "payload": {
         "studentId": str(profile.id), "guardianUserId": str(parent2.id),
-        "relationship": "mother", "custodyType": "shared", "hasPortalAccess": True,
+        "relationship": "mother", "hasPortalAccess": True,
         "isPrimaryContact": False,
     }}, format="json")
     link2_id = _data(resp)["id"]

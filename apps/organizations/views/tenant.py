@@ -50,6 +50,7 @@ class TenantConfigView(APIView):
                 "subdomain": tenant.subdomain,
                 "student_id_label": student_id_label,
                 "faculty_id_label": faculty_id_label,
+                "website": tenant.website or None,
             },
             status=status.HTTP_200_OK,
         )

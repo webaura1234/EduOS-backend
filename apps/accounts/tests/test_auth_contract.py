@@ -97,6 +97,6 @@ def test_tenant_config_envelope_shape(api_client, tenant):
     data = resp.json()["data"]
     # Exact fields the FE login flow reads to resolve tenant_id + login config.
     for field in ("tenant_id", "institution_type", "subdomain", "student_id_label",
-                  "faculty_id_label"):
+                  "faculty_id_label", "website"):
         assert field in data, f"tenant-config.data missing '{field}'"
     assert data["tenant_id"] == str(tenant.id)

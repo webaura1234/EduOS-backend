@@ -42,10 +42,14 @@ def guardian_user(branch_id, user_id) -> User | None:
 
 
 def create_link(*, student_user, guardian_user, relationship, custody,
-                is_primary, has_portal, user=None) -> StudentGuardianLink:
+                is_primary, has_portal, can_pickup=True, notification_channels=None,
+                user=None) -> StudentGuardianLink:
+    from apps.accounts.models.guardian import default_notification_channels
     return StudentGuardianLink.objects.create(
         student=student_user, guardian=guardian_user, relationship=relationship,
         custody=custody, is_primary_contact=is_primary, has_portal_access=has_portal,
+        can_pickup=can_pickup,
+        notification_channels=notification_channels or default_notification_channels(),
         created_by=user, updated_by=user,
     )
 

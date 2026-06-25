@@ -1,5 +1,6 @@
 """Views — report exports + NAAC (admin/super_admin)."""
 
+from django.http import HttpResponse
 from rest_framework import status as http
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -7,13 +8,23 @@ from rest_framework.views import APIView
 
 from apps.academics.scoping import resolve_branch
 from apps.accounts.permissions import IsAdminOrSuperAdmin
+from apps.analytics.enums import ReportStatus
 from apps.analytics.interactors import report as report_i
 from apps.analytics.queries import report as report_q
 from apps.analytics.serializers.report import CreateReportSerializer, ReportExportSerializer
+from apps.analytics.tasks import rows_to_csv_bytes
 
 
-class ReportCreateView(APIView):
+class ReportExportsView(APIView):
+    """GET → recent exports; POST → create export."""
+
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
+
+    def get(self, request):
+        branch = resolve_branch(request)
+        limit = min(int(request.query_params.get("limit", 50)), 100)
+        rows = report_q.list_exports(request.user.tenant_id, branch_id=branch.pk)[:limit]
+        return Response({"reports": ReportExportSerializer(rows, many=True).data})
 
     def post(self, request):
         branch = resolve_branch(request)
@@ -36,6 +47,29 @@ class ReportDetailView(APIView):
         if not export:
             return Response({"error": "Report not found."}, status=http.HTTP_404_NOT_FOUND)
         return Response({"report": ReportExportSerializer(export).data})
+
+
+class ReportDownloadView(APIView):
+    """GET → CSV file for a ready export (inline snapshot or S3-backed)."""
+
+    permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
+
+    def get(self, request, export_id):
+        export = report_q.get_export(request.user.tenant_id, export_id)
+        if not export:
+            return Response({"error": "Report not found."}, status=http.HTTP_404_NOT_FOUND)
+        if export.status != ReportStatus.READY:
+            return Response({"error": "Export is not ready yet."}, status=http.HTTP_409_CONFLICT)
+
+        if export.download_url:
+            return Response({"downloadUrl": export.download_url})
+
+        rows = (export.snapshot or {}).get("rows", [])
+        content = rows_to_csv_bytes(rows)
+        filename = f"{export.report_type}-{export.pk}.csv"
+        response = HttpResponse(content, content_type="text/csv")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
 
 
 class NaacExportView(APIView):

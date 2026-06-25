@@ -63,6 +63,9 @@ def test_overview_includes_employee_with_camelcase_fields(env):
     assert emp["employmentType"] == "full_time"
     assert emp["active"] is True
     assert emp["joinedAt"].startswith("2024-01-01")
+    assert emp["presentDays"] == 0
+    assert emp["absentDays"] == 0
+    assert emp["leaveDays"] == 0
 
 
 def test_overview_requires_admin(env):

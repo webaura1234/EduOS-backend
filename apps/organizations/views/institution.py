@@ -74,6 +74,8 @@ class InstitutionSettingsView(APIView):
             fields["institution_type"] = data["institutionType"]
         if "logoUrl" in data:
             fields["logo_s3_key"] = (data["logoUrl"] or "").strip()
+        if "website" in data:
+            fields["website"] = (data["website"] or "").strip()
         if "parentPortalEnabled" in data:
             fields["parent_access_enabled"] = data["parentPortalEnabled"]
         if "address" in data:

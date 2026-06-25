@@ -21,6 +21,23 @@ class CustodyType(models.TextChoices):
     EMERGENCY = "emergency", "Emergency Only"
 
 
+RELATIONSHIP_CHOICES = [
+    ("father", "Father"),
+    ("mother", "Mother"),
+    ("step_father", "Step father"),
+    ("step_mother", "Step mother"),
+    ("guardian", "Guardian"),
+    ("custodian", "Custodian"),
+    ("sibling", "Sibling"),
+    ("grandparent", "Grandparent"),
+    ("other", "Other"),
+]
+
+
+def default_notification_channels():
+    return {"in_app": True, "sms": True, "email": True}
+
+
 class StudentGuardianLink(BaseModel):
     """
     Many-to-many link between Students and their Guardians.
@@ -46,14 +63,7 @@ class StudentGuardianLink(BaseModel):
     # Relationship specifics per student (overrides GuardianProfile.relationship_default)
     relationship = models.CharField(
         max_length=20,
-        choices=[
-            ("father", "Father"),
-            ("mother", "Mother"),
-            ("guardian", "Guardian"),
-            ("grandparent", "Grandparent"),
-            ("sibling", "Sibling"),
-            ("other", "Other"),
-        ],
+        choices=RELATIONSHIP_CHOICES,
         default="guardian",
     )
     custody = models.CharField(
@@ -61,6 +71,7 @@ class StudentGuardianLink(BaseModel):
         choices=CustodyType.choices,
         default=CustodyType.PRIMARY,
     )
+    notification_channels = models.JSONField(default=dict, blank=True)
 
     # Portal & communication flags
     is_primary_contact = models.BooleanField(

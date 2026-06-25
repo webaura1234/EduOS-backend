@@ -35,6 +35,20 @@ def list_employees(branch_id, *, active_only=True):
     return qs.order_by("employee_code")
 
 
+def list_faculty_without_employee(branch_id):
+    """Faculty users in a branch who do not yet have an HR employee record."""
+    from apps.accounts.models.user import Role, User
+
+    linked = set(
+        Employee.objects.filter(branch_id=branch_id, is_active=True).values_list("user_id", flat=True)
+    )
+    return (
+        User.objects.filter(branch_id=branch_id, role=Role.FACULTY, is_active=True)
+        .exclude(pk__in=linked)
+        .order_by("first_name", "last_name")
+    )
+
+
 def create_employee(*, user_obj, branch, employee_code, employment_type, joined_at,
                     designation="", base_components=None, bank_account="", ifsc="", pan="",
                     user=None) -> Employee:
