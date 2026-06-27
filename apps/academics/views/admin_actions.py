@@ -10,6 +10,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.academics.models import DepartmentType, SubjectType
+from apps.academics.queries import substitution_availability as avail_q
 from apps.academics.queries import admin_extras as extra_q
 from apps.academics.queries import calendar as cal_q
 from apps.academics.queries import curriculum as curr_q
@@ -17,6 +18,8 @@ from apps.academics.queries import structure as struct_q
 from apps.academics.queries import syllabus as syl_q
 from apps.academics.queries import timetable as tt_q
 from apps.academics.helpers import batch_display_label, is_school
+from apps.academics.interactors import curriculum as curr_i
+from apps.academics.interactors import structure as struct_i
 from apps.academics.scoping import resolve_branch
 from apps.accounts.permissions import IsAdminOrSuperAdmin
 
@@ -54,6 +57,39 @@ def _resolve_period_slot(branch, period_index, start_time, end_time, user):
         start_time=_time(start_time) or datetime.time(9, 0),
         end_time=_time(end_time) or datetime.time(10, 0), user=user,
     )
+
+
+def _resolve_period(branch, period_id=None):
+    year = cal_q.get_current_year(branch.pk)
+    if year is None:
+        return None
+    if period_id:
+        return cal_q.get_period(year.pk, period_id)
+    return cal_q.resolve_current_period(year.pk)
+
+
+def _subject_teacher_payload(assignment) -> dict:
+    bs = assignment.batch_subject
+    return {
+        "id": str(assignment.id),
+        "classSectionId": str(bs.batch_id),
+        "subjectId": str(bs.subject_id),
+        "facultyUserId": str(assignment.faculty_id),
+        "academicPeriodId": str(bs.academic_period_id),
+        "assignedAt": assignment.assigned_at.isoformat(),
+        "batchSubjectId": str(bs.id),
+        "version": assignment.version,
+    }
+
+
+def _class_teacher_payload(batch) -> dict:
+    return {
+        "classSectionId": str(batch.id),
+        "classLabel": batch_display_label(batch),
+        "teacherUserId": str(batch.class_teacher_id),
+        "teacherName": batch.class_teacher.full_name,
+        "assignedAt": batch.updated_at.isoformat(),
+    }
 
 
 def _resolve_batch_subject(branch, batch, subject, period, user):
@@ -329,6 +365,119 @@ class AdminAcademicsActionView(APIView):
             batch = struct_q.get_batch(branch.pk, batch.pk)
             return Response(_batch_section_payload(batch), status=status.HTTP_201_CREATED)
 
+        if action == "assign_class_teacher":
+            if not is_school(branch.tenant):
+                return Response(
+                    {"error": "Class teachers are only used for schools."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            batch = struct_q.get_batch(branch.pk, payload.get("classSectionId"))
+            if batch is None:
+                return Response({"error": "Class section not found."}, status=status.HTTP_404_NOT_FOUND)
+            teacher_id = payload.get("teacherUserId")
+            if not teacher_id:
+                return Response({"error": "teacherUserId is required."}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                struct_i.update_batch(
+                    branch.tenant, batch, fields={"class_teacher_id": teacher_id}, user=user,
+                )
+            except Exception as exc:
+                from rest_framework.exceptions import ValidationError
+                if isinstance(exc, ValidationError):
+                    detail = exc.detail
+                    msg = detail.get("classTeacherId", detail) if isinstance(detail, dict) else str(detail)
+                    return Response({"error": str(msg)}, status=status.HTTP_400_BAD_REQUEST)
+                raise
+            batch = struct_q.get_batch(branch.pk, batch.pk)
+            return Response(_class_teacher_payload(batch))
+
+        if action == "unassign_class_teacher":
+            if not is_school(branch.tenant):
+                return Response(
+                    {"error": "Class teachers are only used for schools."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            batch = struct_q.get_batch(branch.pk, payload.get("classSectionId"))
+            if batch is None:
+                return Response({"error": "Class section not found."}, status=status.HTTP_404_NOT_FOUND)
+            try:
+                struct_i.update_batch(
+                    branch.tenant, batch, fields={"class_teacher_id": None}, user=user,
+                )
+            except Exception as exc:
+                from rest_framework.exceptions import ValidationError
+                if isinstance(exc, ValidationError):
+                    return Response({"error": str(exc.detail)}, status=status.HTTP_400_BAD_REQUEST)
+                raise
+            return Response({"ok": True})
+
+        if action == "assign_subject_teacher":
+            batch = struct_q.get_batch(branch.pk, payload.get("classSectionId"))
+            if batch is None:
+                return Response({"error": "Class section not found."}, status=status.HTTP_404_NOT_FOUND)
+            subject = curr_q.get_subject(branch.pk, payload.get("subjectId"))
+            if subject is None:
+                return Response({"error": "Subject not found."}, status=status.HTTP_404_NOT_FOUND)
+            faculty_id = payload.get("facultyUserId")
+            if not faculty_id:
+                return Response({"error": "facultyUserId is required."}, status=status.HTTP_400_BAD_REQUEST)
+            period = _resolve_period(branch, payload.get("academicPeriodId"))
+            if period is None:
+                return Response(
+                    {"error": "Create a current academic year with at least one term/period first."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            batch_subject = _resolve_batch_subject(branch, batch, subject, period, user)
+            assigned_at = _date(payload.get("assignedAt"))
+            try:
+                assignment = curr_i.upsert_primary_batch_faculty(
+                    branch.tenant.pk,
+                    batch_subject,
+                    faculty_id=faculty_id,
+                    assigned_at=assigned_at,
+                    user=user,
+                )
+            except Exception as exc:
+                from rest_framework.exceptions import ValidationError
+                if isinstance(exc, ValidationError):
+                    detail = exc.detail
+                    msg = detail.get("facultyId", detail) if isinstance(detail, dict) else str(detail)
+                    return Response({"error": str(msg)}, status=status.HTTP_400_BAD_REQUEST)
+                raise
+            assignment = curr_q.get_batch_faculty(branch.pk, assignment.pk)
+            return Response(_subject_teacher_payload(assignment))
+
+        if action == "unassign_subject_teacher":
+            batch = struct_q.get_batch(branch.pk, payload.get("classSectionId"))
+            if batch is None:
+                return Response({"error": "Class section not found."}, status=status.HTTP_404_NOT_FOUND)
+            subject = curr_q.get_subject(branch.pk, payload.get("subjectId"))
+            if subject is None:
+                return Response({"error": "Subject not found."}, status=status.HTTP_404_NOT_FOUND)
+            period = _resolve_period(branch, payload.get("academicPeriodId"))
+            if period is None:
+                return Response(
+                    {"error": "Create a current academic year with at least one term/period first."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            batch_subject = (
+                curr_q.list_batch_subjects(
+                    branch.pk, batch_id=batch.id, academic_period_id=period.id,
+                )
+                .filter(subject_id=subject.id)
+                .first()
+            )
+            if batch_subject is None:
+                return Response({"ok": True})
+            try:
+                curr_i.end_primary_batch_faculty(batch_subject, user=user)
+            except Exception as exc:
+                from rest_framework.exceptions import ValidationError
+                if isinstance(exc, ValidationError):
+                    return Response({"error": str(exc.detail)}, status=status.HTTP_400_BAD_REQUEST)
+                raise
+            return Response({"ok": True})
+
         if action == "save_timetable_slot":
             batch = struct_q.get_batch(branch.pk, payload.get("classSectionId"))
             if batch is None:
@@ -388,11 +537,40 @@ class AdminAcademicsActionView(APIView):
             if entry is None:
                 return Response({"error": "Timetable slot not found."},
                                 status=status.HTTP_404_NOT_FOUND)
+            sub_date = _date(payload.get("date"))
+            if entry.day_of_week != sub_date.weekday():
+                return Response(
+                    {"error": "Selected date does not match this session's weekday."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            substitute_id = payload.get("substituteFacultyUserId")
+            from apps.accounts.models.user import Role, User
+            try:
+                substitute = User.objects.get(
+                    pk=substitute_id,
+                    tenant=branch.tenant,
+                    branch=branch,
+                    role=Role.FACULTY,
+                    is_active=True,
+                )
+            except (User.DoesNotExist, ValueError, TypeError):
+                return Response({"error": "Substitute faculty not found."},
+                                status=status.HTTP_404_NOT_FOUND)
+            if not avail_q.is_faculty_available_for_substitution(
+                branch=branch,
+                faculty_user=substitute,
+                timetable_entry=entry,
+                on_date=sub_date,
+            ):
+                return Response(
+                    {"error": "Selected faculty is not available for this session."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             sub = extra_q.create_substitution(
                 branch=branch, timetable_entry=entry,
                 original_faculty_id=entry.faculty_id,
-                substitute_faculty_id=payload.get("substituteFacultyUserId"),
-                date=_date(payload.get("date")), reason=payload.get("reason", ""), user=user,
+                substitute_faculty_id=substitute_id,
+                date=sub_date, reason=payload.get("reason", ""), user=user,
             )
             return Response({"id": str(sub.id), "status": sub.status},
                             status=status.HTTP_201_CREATED)

@@ -16,7 +16,7 @@ from rest_framework.views import APIView
 from apps.academics.models import Batch
 from apps.academics.queries import timetable as tt_q
 from apps.academics.scoping import resolve_branch
-from apps.attendance.interactors import marking as mark_i
+from apps.attendance.helpers import open_session_with_roster
 from apps.attendance.permissions import IsFacultyOrAdmin
 from apps.attendance.queries import record as record_q
 from apps.attendance.queries import roster as roster_q
@@ -24,39 +24,28 @@ from apps.attendance.queries import session as session_q
 from apps.attendance.views.overview import _record
 
 
-def _fill_absent_placeholders(session, batch_id, user):
-    """Create 'absent' placeholders for any roster student without a record yet.
-    Never overwrites an existing mark."""
-    existing = {r.student_id for r in record_q.list_records_for_session(session.pk)}
-    now = timezone.now()
-    for enrollment in roster_q.students_in_batch(batch_id):
-        if enrollment.pk not in existing:
-            record_q.upsert_record(
-                session=session, student=enrollment, status="absent",
-                marked_at=now, marked_by=None, user=user,
-            )
-
-
 def _ensure_roster_records(branch, entry, user):
     """Session-mode: open-or-get the period session for a timetable entry + placeholders."""
-    session = mark_i.open_session(
-        branch=branch, date=datetime.date.today(),
+    return open_session_with_roster(
+        branch=branch,
+        date=datetime.date.today(),
         batch_subject_id=entry.batch_subject_id,
         period_slot_id=entry.period_slot_id,
-        batch_id=entry.timetable.batch_id, faculty_id=user.pk, user=user,
+        batch_id=entry.timetable.batch_id,
+        faculty_id=user.pk,
+        user=user,
     )
-    _fill_absent_placeholders(session, entry.timetable.batch_id, user)
-    return session
 
 
 def _ensure_day_roster(branch, batch, user):
     """Day-mode: open-or-get the single day session for a batch + placeholders."""
-    session = mark_i.open_session(
-        branch=branch, date=datetime.date.today(),
-        batch_id=batch.pk, faculty_id=user.pk, user=user,
+    return open_session_with_roster(
+        branch=branch,
+        date=datetime.date.today(),
+        batch_id=batch.pk,
+        faculty_id=user.pk,
+        user=user,
     )
-    _fill_absent_placeholders(session, batch.pk, user)
-    return session
 
 
 def _class_teacher_batches(branch_id, faculty_id):

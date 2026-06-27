@@ -93,6 +93,18 @@ def list_periods(year_id):
     return AcademicPeriod.objects.filter(academic_year_id=year_id, is_active=True).order_by("sequence")
 
 
+def resolve_current_period(year_id):
+    """Period containing today, else the first period in the academic year."""
+    periods = list(list_periods(year_id))
+    if not periods:
+        return None
+    today = timezone.now().date()
+    for period in periods:
+        if period.start_date <= today <= period.end_date:
+            return period
+    return periods[0]
+
+
 def get_period(year_id, period_id) -> AcademicPeriod | None:
     try:
         return AcademicPeriod.objects.get(academic_year_id=year_id, pk=period_id, is_active=True)

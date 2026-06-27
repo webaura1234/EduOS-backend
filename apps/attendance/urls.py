@@ -28,6 +28,7 @@ from apps.attendance.views.faculty_attendance import (
 from apps.attendance.views.overview import (
     AdminAttendanceLiveView,
     AdminAttendanceOverviewView,
+    AdminMarkAttendanceView,
 )
 
 app_name = "attendance"
@@ -36,6 +37,7 @@ urlpatterns = [
     # Admin aggregate (AttendanceData shape) + polled live snapshot
     path("admin-overview/", AdminAttendanceOverviewView.as_view(), name="admin-overview"),
     path("admin-overview/live/", AdminAttendanceLiveView.as_view(), name="admin-live"),
+    path("admin-overview/mark/", AdminMarkAttendanceView.as_view(), name="admin-mark"),
 
     # Marking (faculty/admin)
     path("sessions/", SessionOpenView.as_view(), name="session-open"),

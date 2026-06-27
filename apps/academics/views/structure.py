@@ -137,7 +137,22 @@ class BatchListCreateView(APIView):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
 
     def get(self, request) -> Response:
-        branch = resolve_branch(request)
+        from apps.accounts.models.user import Role
+        from apps.organizations.queries.branch import get_branch
+
+        user = request.user
+        if user.role == Role.SUPER_ADMIN:
+            branch_id = request.query_params.get("branchId") or request.query_params.get("branch")
+            if not branch_id or branch_id == "all":
+                return Response(
+                    {"error": "branchId is required for super admin."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            branch = get_branch(user.tenant_id, branch_id)
+            if branch is None:
+                return Response({"error": "Branch not found."}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            branch = resolve_branch(request)
         batches = struct_q.list_batches(
             branch.pk,
             course_id=request.query_params.get("courseId"),

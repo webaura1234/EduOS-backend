@@ -5,10 +5,13 @@ cross-app ORM (architecture rule). Computed live per request (OD-1); the view st
 `X-Cache-Age` / `lastUpdated`.
 """
 
-from apps.accounts.queries.user import count_active_by_role_in_tenant
+import datetime
+
+from apps.accounts.queries.user import count_active_by_role_in_branch, count_active_by_role_in_tenant
 from apps.accounts.models.user import Role
 from apps.admissions.queries.enquiry import funnel_counts
 from apps.attendance.interactors import report as att_report
+from apps.attendance.queries import roster as roster_q
 from apps.fees.interactors.report import GetCollectionDashboardInteractor
 from apps.fees.queries.defaulter import list_defaulters
 from apps.grievances.queries import count_open as count_open_grievances
@@ -50,6 +53,19 @@ def admin_dashboard(branch, tenant) -> dict:
     }
 
 
+def _branch_attendance_percent(branch) -> int:
+    """Average student attendance % for a branch (0 when no enrolled students)."""
+    report = att_report.ranking_report(
+        branch,
+        date_from=datetime.date(1970, 1, 1),
+        date_to=datetime.date(2999, 12, 31),
+    )
+    rows = report.get("rows") or []
+    if not rows:
+        return 0
+    return round(sum(row["percent"] for row in rows) / len(rows))
+
+
 def super_admin_dashboard(tenant) -> dict:
     """F-021/022/025/038/039 — consolidated + per-branch comparison across the tenant."""
     branches = list(list_branches(tenant.pk))
@@ -71,6 +87,9 @@ def super_admin_dashboard(tenant) -> dict:
             "collectedPaise": fees["totalCollectedPaise"],
             "pendingPaise": fees["totalPendingPaise"],
             "lowAttendanceCount": len(shortage["rows"]),
+            "studentCount": roster_q.all_active_students_in_branch(b.pk).count(),
+            "facultyCount": count_active_by_role_in_branch(b.pk, Role.FACULTY),
+            "attendancePercent": _branch_attendance_percent(b),
         })
     return {
         "totals": {

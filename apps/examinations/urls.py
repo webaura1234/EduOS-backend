@@ -9,6 +9,7 @@ from django.urls import path
 from apps.examinations.views.assignment import (
     AssignmentListCreateView,
     AssignmentSubmitView,
+    FacultyTeachingAssignmentsView,
     SubmissionGradeView,
 )
 from apps.examinations.views.hub import (
@@ -187,6 +188,11 @@ urlpatterns = [
     path("me/results/", StudentResultsHubView.as_view(), name="student-results-hub"),
     path("me/performance/", StudentPerformanceHubView.as_view(), name="student-performance-hub"),
     path("me/assignments/", StudentAssignmentsHubView.as_view(), name="student-assignments-hub"),
+    path(
+        "me/teaching/assignments/",
+        FacultyTeachingAssignmentsView.as_view(),
+        name="faculty-teaching-assignments",
+    ),
     path("me/marks/", FacultyMarksView.as_view(), name="faculty-marks"),
     path("me/internal-marks/", FacultyInternalMarkSaveView.as_view(), name="faculty-internal-marks-save"),
     path("me/invigilation/", FacultyInvigilationView.as_view(), name="faculty-invigilation"),

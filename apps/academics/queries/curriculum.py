@@ -2,7 +2,7 @@
 Queries — Subject, BatchSubject, BatchFaculty. Branch-scoped via course hierarchy.
 """
 
-from apps.academics.models import BatchFaculty, BatchSubject, Subject, TimetableEntry, TimetableEntryStatus  # noqa: F401
+from apps.academics.models import BatchFaculty, BatchFacultyRole, BatchSubject, Subject, TimetableEntry, TimetableEntryStatus  # noqa: F401
 
 
 def list_subjects(branch_id, course_id=None, *, archived_only=False):
@@ -154,13 +154,36 @@ def soft_delete_batch_subject(bs: BatchSubject, user=None) -> BatchSubject:
 
 
 # ── BatchFaculty ──────────────────────────────────────────────────────────────
-def list_batch_faculty(branch_id, *, batch_subject_id=None):
+def list_batch_faculty(branch_id, *, batch_subject_id=None, role=None, active_primary=False):
     qs = BatchFaculty.objects.filter(
         batch_subject__batch__course__department__branch_id=branch_id, is_active=True
-    ).select_related("batch_subject", "faculty")
+    ).select_related(
+        "batch_subject",
+        "batch_subject__batch",
+        "batch_subject__subject",
+        "batch_subject__academic_period",
+        "faculty",
+    )
     if batch_subject_id:
         qs = qs.filter(batch_subject_id=batch_subject_id)
+    if role:
+        qs = qs.filter(role=role)
+    if active_primary:
+        qs = qs.filter(role=BatchFacultyRole.PRIMARY, ended_at__isnull=True)
     return qs
+
+
+def get_primary_batch_faculty(batch_subject_id):
+    return (
+        BatchFaculty.objects.filter(
+            batch_subject_id=batch_subject_id,
+            role=BatchFacultyRole.PRIMARY,
+            is_active=True,
+            ended_at__isnull=True,
+        )
+        .select_related("faculty")
+        .first()
+    )
 
 
 def get_batch_faculty(branch_id, assignment_id) -> BatchFaculty | None:

@@ -5,19 +5,25 @@ from django.utils import timezone
 from apps.examinations.enums import AssignmentStatus, SubmissionStatus
 from apps.examinations.models import Assignment, AssignmentSubmission
 
+_ASSIGNMENT_SELECT = (
+    "batch_subject",
+    "batch_subject__batch",
+    "batch_subject__subject",
+    "batch_subject__academic_period",
+    "created_by",
+)
 
-def list_assignments(branch_id, *, batch_id=None, subject_id=None, status=None):
-    qs = (
+
+def _assignment_qs(branch_id):
+    return (
         Assignment.objects.filter(branch_id=branch_id, is_active=True)
-        .select_related(
-            "batch_subject",
-            "batch_subject__batch",
-            "batch_subject__subject",
-            "batch_subject__academic_period",
-            "created_by",
-        )
+        .select_related(*_ASSIGNMENT_SELECT)
         .order_by("-due_at")
     )
+
+
+def list_assignments(branch_id, *, batch_id=None, subject_id=None, status=None):
+    qs = _assignment_qs(branch_id)
     if batch_id:
         qs = qs.filter(batch_subject__batch_id=batch_id)
     if subject_id:
@@ -27,14 +33,26 @@ def list_assignments(branch_id, *, batch_id=None, subject_id=None, status=None):
     return qs
 
 
+def list_assignments_for_batches(branch_id, batch_ids):
+    if not batch_ids:
+        return _assignment_qs(branch_id).none()
+    return _assignment_qs(branch_id).filter(batch_subject__batch_id__in=batch_ids)
+
+
+def list_assignments_created_by_faculty_in_batches(branch_id, faculty_id, batch_ids):
+    if not batch_ids:
+        return _assignment_qs(branch_id).none()
+    return _assignment_qs(branch_id).filter(
+        created_by_id=faculty_id,
+        batch_subject__batch_id__in=batch_ids,
+    )
+
+
 def get_assignment(branch_id, assignment_id) -> Assignment | None:
     try:
-        return Assignment.objects.select_related(
-            "batch_subject",
-            "batch_subject__batch",
-            "batch_subject__subject",
-            "created_by",
-        ).get(branch_id=branch_id, pk=assignment_id, is_active=True)
+        return Assignment.objects.select_related(*_ASSIGNMENT_SELECT).get(
+            branch_id=branch_id, pk=assignment_id, is_active=True,
+        )
     except (Assignment.DoesNotExist, ValueError, TypeError):
         return None
 
@@ -93,6 +111,12 @@ def list_submissions_for_branch(branch_id, *, assignment_id=None):
     return qs
 
 
+def list_submissions_for_assignments(branch_id, assignment_ids):
+    if not assignment_ids:
+        return AssignmentSubmission.objects.none()
+    return list_submissions_for_branch(branch_id).filter(assignment_id__in=assignment_ids)
+
+
 def get_submission(branch_id, submission_id) -> AssignmentSubmission | None:
     try:
         return AssignmentSubmission.objects.select_related(
@@ -112,7 +136,9 @@ def get_submission(branch_id, submission_id) -> AssignmentSubmission | None:
 
 def get_submission_for_student(assignment_id, student_id) -> AssignmentSubmission | None:
     try:
-        return AssignmentSubmission.objects.select_related("assignment", "student", "student__student_profile__user").get(
+        return AssignmentSubmission.objects.select_related(
+            "assignment", "student", "student__student_profile__user",
+        ).get(
             assignment_id=assignment_id,
             student_id=student_id,
             is_active=True,

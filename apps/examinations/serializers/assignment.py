@@ -41,6 +41,18 @@ class CreateAssignmentSerializer(serializers.Serializer):
     academicPeriodId = serializers.UUIDField(required=False, allow_null=True)
 
 
+class FacultyCreateAssignmentSerializer(serializers.Serializer):
+    title = serializers.CharField(max_length=200)
+    description = serializers.CharField(required=False, allow_blank=True, default="")
+    classSectionId = serializers.UUIDField()
+    subjectId = serializers.UUIDField()
+    dueAt = serializers.DateTimeField()
+    maxMarks = serializers.DecimalField(
+        max_digits=6, decimal_places=2, min_value=0, required=False, default=25,
+    )
+    academicPeriodId = serializers.UUIDField(required=False, allow_null=True)
+
+
 class SubmitAssignmentSerializer(serializers.Serializer):
     fileName = serializers.CharField(max_length=255)
     fileContent = serializers.CharField()

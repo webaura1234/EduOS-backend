@@ -42,7 +42,7 @@ def managed_user_dict(user, invite=None) -> dict:
         "linked_user_group_id": (
             str(user.linked_user_group_id) if user.linked_user_group_id else None
         ),
-        "branch": str(user.branch_id) if user.branch_id else None,
+        "branch": user.branch.name if getattr(user, "branch", None) else None,
         "is_active": user.is_active,
         "invite_status": invite_status,
         "password_reset_required": user.must_change_password,
@@ -76,33 +76,33 @@ def _require_user(tenant_id, user_id, *, branch_id=None):
 # ── Actions ──────────────────────────────────────────────────────────────────
 
 @transaction.atomic
-def set_active(*, admin, user_id, is_active: bool) -> dict:
-    user = _require_user(admin.tenant_id, user_id, branch_id=admin.branch_id)
+def set_active(*, admin, user_id, is_active: bool, branch_id=None) -> dict:
+    user = _require_user(admin.tenant_id, user_id, branch_id=branch_id or admin.branch_id)
     uq.set_user_active(user, is_active)
     return managed_user_dict(user)
 
 
 @transaction.atomic
-def send_invite(*, admin, user_id) -> dict:
-    user = _require_user(admin.tenant_id, user_id, branch_id=admin.branch_id)
+def send_invite(*, admin, user_id, branch_id=None) -> dict:
+    user = _require_user(admin.tenant_id, user_id, branch_id=branch_id or admin.branch_id)
     if not user.email and not user.phone:
         raise ValidationError("User has no email or phone to send an invite to.")
     invite = uq.create_invite_token(user, sent_to_phone=user.phone or "")
     return invite_dict(invite)
 
 
-def reset_password(*, admin, user_id) -> dict:
-    user = _require_user(admin.tenant_id, user_id, branch_id=admin.branch_id)
+def reset_password(*, admin, user_id, branch_id=None) -> dict:
+    user = _require_user(admin.tenant_id, user_id, branch_id=branch_id or admin.branch_id)
     temp = admin_reset_password(admin=admin, target_user_id=str(user.id))
     user.refresh_from_db()
     return {"user": managed_user_dict(user), "temporary_password": temp}
 
 
 @transaction.atomic
-def hard_delete_student(*, admin, user_id) -> dict:
+def hard_delete_student(*, admin, user_id, branch_id=None) -> dict:
     from apps.fees.queries.invoice import list_dues_for_student_user
 
-    user = _require_user(admin.tenant_id, user_id, branch_id=admin.branch_id)
+    user = _require_user(admin.tenant_id, user_id, branch_id=branch_id or admin.branch_id)
     if user.role != Role.STUDENT:
         raise ValidationError("Only student accounts can be hard-deleted.")
 
@@ -122,8 +122,8 @@ def hard_delete_student(*, admin, user_id) -> dict:
 
 
 @transaction.atomic
-def promote_student_to_faculty(*, admin, user_id) -> dict:
-    student = _require_user(admin.tenant_id, user_id, branch_id=admin.branch_id)
+def promote_student_to_faculty(*, admin, user_id, branch_id=None) -> dict:
+    student = _require_user(admin.tenant_id, user_id, branch_id=branch_id or admin.branch_id)
     if student.role != Role.STUDENT:
         raise ValidationError("Only student accounts can be promoted.")
 
@@ -154,8 +154,8 @@ def promote_student_to_faculty(*, admin, user_id) -> dict:
 
 
 @transaction.atomic
-def update_user(*, admin, user_id, name=None, email=None, phone=None) -> dict:
-    user = _require_user(admin.tenant_id, user_id, branch_id=admin.branch_id)
+def update_user(*, admin, user_id, name=None, email=None, phone=None, branch_id=None) -> dict:
+    user = _require_user(admin.tenant_id, user_id, branch_id=branch_id or admin.branch_id)
     fields: list[str] = []
     if name is not None and name.strip():
         first, _, last = name.strip().partition(" ")
@@ -211,12 +211,58 @@ def _multi_role_matches(tenant_id, phone, email, role) -> list:
     return [u for u in seen.values() if u.role != role]
 
 
+def _enroll_new_student(*, user, batch, admin) -> None:
+    from apps.accounts.models.profile import StudentProfile
+    from apps.admissions.queries.enrollment import create_enrollment
+
+    branch = batch.course.department.branch
+    profile, created = StudentProfile.objects.get_or_create(
+        user=user,
+        defaults=dict(current_batch=batch),
+    )
+    if not created and profile.current_batch_id != batch.pk:
+        profile.current_batch = batch
+        profile.save(update_fields=["current_batch"])
+
+    year = batch.academic_year
+    enrollment = create_enrollment(
+        branch=branch,
+        student_profile=profile,
+        batch=batch,
+        academic_year=year,
+        user=admin,
+    )
+    profile.current_enrollment = enrollment
+    profile.save(update_fields=["current_enrollment"])
+
+
 @transaction.atomic
-def create_user(*, admin, name, email, phone, role, send_invite=True) -> dict:
+def create_user(
+    *,
+    admin,
+    name,
+    email,
+    phone,
+    role,
+    send_invite=True,
+    branch_id=None,
+    batch_id=None,
+) -> dict:
     tenant_id = admin.tenant_id
+    target_branch_id = branch_id if branch_id is not None else admin.branch_id
 
     if role in {Role.PARENT, Role.ADMIN} and not phone:
         raise ValidationError("Phone number is required for this role.")
+
+    batch = None
+    if role == Role.STUDENT:
+        if not batch_id:
+            raise ValidationError({"batchId": "Class/section is required when creating a student."})
+        from apps.academics.queries.structure import get_batch
+
+        batch = get_batch(target_branch_id, batch_id)
+        if batch is None:
+            raise ValidationError({"batchId": "Class/section not found in this branch."})
 
     first, _, last = name.strip().partition(" ")
 
@@ -243,7 +289,7 @@ def create_user(*, admin, name, email, phone, role, send_invite=True) -> dict:
         last_name=last,
         role=role,
         tenant_id=tenant_id,
-        branch_id=admin.branch_id,
+        branch_id=target_branch_id,
         phone=phone or None,
         custom_login_id=custom_login_id,
         email=email or None,
@@ -252,6 +298,9 @@ def create_user(*, admin, name, email, phone, role, send_invite=True) -> dict:
     if group_id:
         user.linked_user_group_id = group_id
         user.save(update_fields=["linked_user_group_id"])
+
+    if role == Role.STUDENT and batch is not None:
+        _enroll_new_student(user=user, batch=batch, admin=admin)
 
     invite = None
     if send_invite:

@@ -40,7 +40,8 @@ def test_overview_returns_academics_data_shape(env):
     for key in ("institutionType", "hierarchyLabel", "periodKind", "academicYears",
                 "periods", "holidays", "workingDays", "departments", "classSections",
                 "subjects", "rooms", "timetableSlots", "substitutions", "studyMaterials",
-                "faculty", "adminReviewQueue", "calendarChanges", "attendanceFrozenThrough"):
+                "faculty", "classTeachers", "subjectTeachers", "currentPeriodId",
+                "adminReviewQueue", "calendarChanges", "attendanceFrozenThrough"):
         assert key in body, f"missing {key}"
 
 

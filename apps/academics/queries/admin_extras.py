@@ -6,9 +6,13 @@ from django.db.models import Count
 
 from apps.academics.models import (
     AcademicSubstitution,
+    BatchFaculty,
+    BatchFacultyRole,
+    BatchSubject,
     CalendarChange,
     StudyMaterial,
     StudyMaterialFolder,
+    Subject,
     TimetableEntry,
     TimetableEntryStatus,
 )
@@ -237,8 +241,8 @@ def set_working_days(branch, day_numbers: list, user=None):
 
 # ── Admin review queue (derived from timetable state) ─────────────────────────
 
-def review_entries(branch_id):
-    """(tbd_entry_ids, faculty_unassigned_entry_ids) for the admin review queue."""
+def review_entries(branch_id, *, academic_period_id=None):
+    """(tbd_entry_ids, faculty_unassigned_entry_ids, subject_teacher_gaps) for admin review."""
     tbd = list(
         TimetableEntry.objects.filter(
             timetable__batch__course__department__branch_id=branch_id,
@@ -251,4 +255,51 @@ def review_entries(branch_id):
             status=TimetableEntryStatus.ACTIVE, faculty__isnull=True, is_active=True,
         ).values_list("id", flat=True)
     )
-    return [str(i) for i in tbd], [str(i) for i in unassigned]
+    subject_gaps = []
+    if academic_period_id:
+        subject_gaps = unassigned_subject_teacher_gaps(branch_id, academic_period_id)
+    return [str(i) for i in tbd], [str(i) for i in unassigned], subject_gaps
+
+
+def unassigned_subject_teacher_gaps(branch_id, academic_period_id) -> list[dict]:
+    """Course subjects without an active primary teacher for each batch in the period."""
+    batch_subjects = {
+        (bs.batch_id, bs.subject_id): bs.pk
+        for bs in BatchSubject.objects.filter(
+            batch__course__department__branch_id=branch_id,
+            academic_period_id=academic_period_id,
+            is_active=True,
+        ).only("id", "batch_id", "subject_id")
+    }
+    assigned = set(
+        BatchFaculty.objects.filter(
+            batch_subject__batch__course__department__branch_id=branch_id,
+            batch_subject__academic_period_id=academic_period_id,
+            role=BatchFacultyRole.PRIMARY,
+            is_active=True,
+            ended_at__isnull=True,
+        ).values_list("batch_subject__batch_id", "batch_subject__subject_id")
+    )
+    gaps = []
+    subjects_by_course = {}
+    for subject in Subject.objects.filter(
+        course__department__branch_id=branch_id, is_active=True,
+    ).select_related("course"):
+        subjects_by_course.setdefault(subject.course_id, []).append(subject)
+
+    from apps.academics.models import Batch
+
+    batches = Batch.objects.filter(
+        course__department__branch_id=branch_id, is_active=True,
+    ).select_related("course")
+    for batch in batches:
+        for subject in subjects_by_course.get(batch.course_id, []):
+            key = (batch.pk, subject.pk)
+            if key in assigned:
+                continue
+            gaps.append({
+                "classSectionId": str(batch.pk),
+                "subjectId": str(subject.pk),
+                "batchSubjectId": str(batch_subjects[key]) if key in batch_subjects else "",
+            })
+    return gaps

@@ -56,7 +56,7 @@ def _timetable_entry(env):
     )
     tt = Timetable.objects.create(batch=batch, academic_period=period)
     return TimetableEntry.objects.create(
-        timetable=tt, batch_subject=bs, period_slot=slot, day_of_week=1,
+        timetable=tt, batch_subject=bs, period_slot=slot, day_of_week=0,
         faculty=env["faculty"], status="active",
     )
 
@@ -84,9 +84,13 @@ def test_set_working_days(env):
 
 def test_create_and_cancel_substitution(env):
     entry = _timetable_entry(env)
+    substitute = UserFactory(
+        role=Role.FACULTY, tenant=env["tenant"], branch=env["branch"],
+        custom_login_id="FAC-2", must_change_password=False,
+    )
     resp = _post(env, {"action": "create_substitution", "payload": {
         "timetableSlotId": str(entry.id),
-        "substituteFacultyUserId": str(env["faculty"].id),
+        "substituteFacultyUserId": str(substitute.id),
         "date": "2026-06-22", "reason": "On leave",
     }})
     assert resp.status_code == 201, resp.content
@@ -279,3 +283,89 @@ def test_review_queue_flags_unassigned_faculty(env):
     entry.save(update_fields=["faculty"])
     queue = _overview(env)["adminReviewQueue"]
     assert any(item["type"] == "faculty_unassigned" for item in queue)
+
+
+def _staffing_fixture(env):
+    year = AcademicYearFactory(branch=env["branch"], is_current=True)
+    from apps.academics.models.calendar import AcademicPeriod, PeriodType
+    period = AcademicPeriod.objects.create(
+        academic_year=year, period_type=PeriodType.TERM, sequence=1, name="Term 1",
+        start_date=datetime.date(2025, 6, 1), end_date=datetime.date(2026, 6, 1),
+    )
+    dept_resp = _post(env, {"action": "save_department", "payload": {"name": "Primary"}})
+    dept_id = _data(dept_resp)["id"]
+    section_resp = _post(env, {"action": "save_class_section", "payload": {
+        "departmentId": dept_id, "grade": "Class 5", "section": "A",
+    }})
+    section = _data(section_resp)
+    subject_resp = _post(env, {"action": "save_subject", "payload": {
+        "courseId": section["courseId"],
+        "name": "Mathematics",
+        "code": "MATH",
+    }})
+    subject_id = _data(subject_resp)["id"]
+    return section["id"], subject_id, str(period.id)
+
+
+def test_assign_and_unassign_class_teacher(env):
+    batch_id, _, _ = _staffing_fixture(env)
+    resp = _post(env, {"action": "assign_class_teacher", "payload": {
+        "classSectionId": batch_id,
+        "teacherUserId": str(env["faculty"].id),
+    }})
+    assert resp.status_code == 200, resp.content
+    body = _data(resp)
+    assert body["teacherUserId"] == str(env["faculty"].id)
+
+    overview = _overview(env)
+    assert any(ct["classSectionId"] == batch_id for ct in overview["classTeachers"])
+
+    resp = _post(env, {"action": "unassign_class_teacher", "payload": {"classSectionId": batch_id}})
+    assert resp.status_code == 200
+    overview = _overview(env)
+    assert all(ct["classSectionId"] != batch_id for ct in overview["classTeachers"])
+
+
+def test_assign_replace_and_unassign_subject_teacher(env):
+    batch_id, subject_id, period_id = _staffing_fixture(env)
+    substitute = UserFactory(
+        role=Role.FACULTY, tenant=env["tenant"], branch=env["branch"],
+        custom_login_id="FAC-STAFF", must_change_password=False,
+    )
+    resp = _post(env, {"action": "assign_subject_teacher", "payload": {
+        "classSectionId": batch_id,
+        "subjectId": subject_id,
+        "facultyUserId": str(env["faculty"].id),
+        "academicPeriodId": period_id,
+    }})
+    assert resp.status_code == 200, resp.content
+    row = _data(resp)
+    assert row["facultyUserId"] == str(env["faculty"].id)
+
+    resp = _post(env, {"action": "assign_subject_teacher", "payload": {
+        "classSectionId": batch_id,
+        "subjectId": subject_id,
+        "facultyUserId": str(substitute.id),
+        "academicPeriodId": period_id,
+    }})
+    assert resp.status_code == 200, resp.content
+    teachers = _overview(env)["subjectTeachers"]
+    match = [t for t in teachers if t["classSectionId"] == batch_id and t["subjectId"] == subject_id]
+    assert len(match) == 1
+    assert match[0]["facultyUserId"] == str(substitute.id)
+
+    resp = _post(env, {"action": "unassign_subject_teacher", "payload": {
+        "classSectionId": batch_id,
+        "subjectId": subject_id,
+        "academicPeriodId": period_id,
+    }})
+    assert resp.status_code == 200
+    teachers = _overview(env)["subjectTeachers"]
+    assert not any(t["classSectionId"] == batch_id and t["subjectId"] == subject_id for t in teachers)
+
+
+def test_overview_includes_staffing_fields(env):
+    body = _overview(env)
+    assert "classTeachers" in body
+    assert "subjectTeachers" in body
+    assert "currentPeriodId" in body

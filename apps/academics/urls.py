@@ -25,6 +25,7 @@ from apps.academics.views.curriculum import (
 from apps.academics.views.holiday import HolidayDetailView, HolidayListCreateView
 from apps.academics.views.admin_actions import AdminAcademicsActionView
 from apps.academics.views.admin_overview import AdminAcademicsOverviewView
+from apps.academics.views.substitution_availability import SubstitutionAvailableFacultyView
 from apps.academics.views.faculty_materials import FacultyStudyMaterialsView
 from apps.academics.views.faculty_syllabus import FacultySyllabusView
 from apps.academics.views.faculty_timetable import FacultyTimetableView
@@ -68,6 +69,11 @@ urlpatterns = [
     # Admin aggregate (AcademicsData shape) + gap-domain write actions
     path("admin-overview/", AdminAcademicsOverviewView.as_view(), name="admin-overview"),
     path("admin-overview/actions/", AdminAcademicsActionView.as_view(), name="admin-actions"),
+    path(
+        "substitutions/available-faculty/",
+        SubstitutionAvailableFacultyView.as_view(),
+        name="substitution-available-faculty",
+    ),
     path("me/study-materials/", StudentStudyMaterialsView.as_view(), name="student-materials"),
     path("me/timetable/", StudentTimetableView.as_view(), name="student-timetable"),
     path("faculty/study-materials/", FacultyStudyMaterialsView.as_view(), name="faculty-materials"),

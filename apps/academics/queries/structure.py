@@ -152,7 +152,9 @@ def list_batches(branch_id, *, course_id=None, academic_year_id=None):
 
 def get_batch(branch_id, batch_id) -> Batch | None:
     try:
-        return Batch.objects.select_related("course", "course__department", "academic_year").get(
+        return Batch.objects.select_related(
+            "course", "course__department", "academic_year", "class_teacher",
+        ).get(
             course__department__branch_id=branch_id, pk=batch_id, is_active=True
         )
     except (Batch.DoesNotExist, ValueError, TypeError):

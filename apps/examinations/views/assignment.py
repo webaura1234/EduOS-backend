@@ -15,6 +15,7 @@ from apps.examinations.queries import assignment as asg_q
 from apps.examinations.serializers.assignment import (
     AssignmentSerializer,
     CreateAssignmentSerializer,
+    FacultyCreateAssignmentSerializer,
     GradeSubmissionSerializer,
     SubmissionSerializer,
     SubmitAssignmentSerializer,
@@ -53,6 +54,38 @@ class AssignmentListCreateView(APIView):
             subject_id=data["subjectId"],
             due_at_raw=data["dueAt"],
             max_marks=data["maxMarks"],
+            actor=request.user,
+            academic_period_id=data.get("academicPeriodId"),
+        )
+        return Response({"assignment": AssignmentSerializer(assignment).data}, status=status.HTTP_201_CREATED)
+
+
+class FacultyTeachingAssignmentsView(APIView):
+    """Faculty portal — my class vs other classes assignment scoping."""
+    permission_classes = [IsAuthenticated, IsFacultyOrAdmin]
+
+    def get(self, request) -> Response:
+        branch = resolve_branch(request)
+        payload = asg_i.list_faculty_teaching_assignments_data(
+            branch_id=branch.pk,
+            faculty_id=request.user.pk,
+        )
+        return Response(payload)
+
+    def post(self, request) -> Response:
+        branch = resolve_branch(request)
+        serializer = FacultyCreateAssignmentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        assignment = asg_i.create_faculty_teaching_assignment(
+            branch_id=branch.pk,
+            faculty_id=request.user.pk,
+            title=data["title"],
+            description=data.get("description", ""),
+            batch_id=data["classSectionId"],
+            subject_id=data["subjectId"],
+            due_at_raw=data["dueAt"],
+            max_marks=data.get("maxMarks", 25),
             actor=request.user,
             academic_period_id=data.get("academicPeriodId"),
         )

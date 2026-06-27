@@ -2,14 +2,19 @@
 
 import datetime
 
+from rest_framework import status as http
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.academics.helpers import batch_display_label
+from apps.academics.queries import curriculum as curr_q
+from apps.academics.queries import structure as struct_q
+from apps.academics.queries import timetable as tt_q
 from apps.academics.queries.structure import list_batches
 from apps.academics.scoping import resolve_branch
 from apps.accounts.permissions import IsAdminOrSuperAdmin
+from apps.attendance.helpers import open_session_with_roster
 from apps.attendance.interactors import live_board as live_i
 from apps.attendance.interactors import report as report_i
 from apps.attendance.queries import audit as audit_q
@@ -192,6 +197,115 @@ def _resolve_report_range(request) -> tuple[datetime.date, datetime.date, str, d
         "dateTo": date_to.isoformat(),
     }
     return date_from, date_to, month_label, filters
+
+
+def _period_slot(slot) -> dict:
+    return {
+        "id": str(slot.id),
+        "name": slot.name,
+        "startTime": slot.start_time.isoformat(),
+        "endTime": slot.end_time.isoformat(),
+    }
+
+
+def _batch_subjects(branch_id, batch_id) -> list[dict]:
+    return [
+        {"id": str(bs.id), "name": bs.subject.name}
+        for bs in curr_q.list_batch_subjects(branch_id, batch_id=batch_id)
+    ]
+
+
+def _parse_mark_date(request) -> datetime.date:
+    today = datetime.date.today()
+    raw = request.query_params.get("date") or today.isoformat()
+    mark_date = datetime.date.fromisoformat(raw)
+    if mark_date > today:
+        raise ValueError("Future dates are not allowed.")
+    return mark_date
+
+
+class AdminMarkAttendanceView(APIView):
+    """GET → admin mark context: filters metadata and roster records for a class/date."""
+    permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
+
+    def get(self, request) -> Response:
+        branch = resolve_branch(request)
+        try:
+            mark_date = _parse_mark_date(request)
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=http.HTTP_400_BAD_REQUEST)
+
+        mode = roster_q.attendance_mode(branch)
+        holiday_blocked = roster_q.is_student_holiday(branch.pk, mark_date)
+        batches = list(list_batches(branch.pk))
+        period_slots = [_period_slot(s) for s in tt_q.list_period_slots(branch.pk)]
+        batch_id = request.query_params.get("batchId") or None
+
+        base = {
+            "mode": mode,
+            "date": mark_date.isoformat(),
+            "holiday": {"blocked": holiday_blocked, "date": mark_date.isoformat()},
+            "classSections": [_class_section(b) for b in batches],
+            "periodSlots": period_slots,
+            "subjects": [],
+            "records": [],
+        }
+
+        if not batch_id:
+            return Response(base)
+
+        batch = struct_q.get_batch(branch.pk, batch_id)
+        if not batch:
+            return Response({"error": "Batch not found."}, status=http.HTTP_404_NOT_FOUND)
+
+        subjects = _batch_subjects(branch.pk, batch_id)
+        base["subjects"] = subjects
+        base["classLabel"] = batch_display_label(batch)
+
+        if holiday_blocked:
+            return Response(base)
+
+        batch_subject_id = request.query_params.get("batchSubjectId") or None
+        period_slot_id = request.query_params.get("periodSlotId") or None
+
+        if mode == "session" and not (batch_subject_id and period_slot_id):
+            return Response(base)
+
+        try:
+            if mode == "day":
+                session = open_session_with_roster(
+                    branch=branch,
+                    date=mark_date,
+                    batch_id=batch_id,
+                    user=request.user,
+                )
+                subject_name = "Day attendance"
+            else:
+                session = open_session_with_roster(
+                    branch=branch,
+                    date=mark_date,
+                    batch_id=batch_id,
+                    batch_subject_id=batch_subject_id,
+                    period_slot_id=period_slot_id,
+                    user=request.user,
+                )
+                bs = curr_q.get_batch_subject(branch.pk, batch_subject_id)
+                subject_name = bs.subject.name if bs else ""
+        except Exception as exc:
+            from rest_framework.exceptions import ValidationError
+
+            if isinstance(exc, ValidationError):
+                return Response(exc.detail, status=http.HTTP_400_BAD_REQUEST)
+            raise
+
+        records = [_record(r) for r in record_q.list_records_for_session(session.pk)]
+        return Response({
+            **base,
+            "sessionId": str(session.pk),
+            "classLabel": batch_display_label(batch),
+            "subjectName": subject_name,
+            "records": records,
+        })
 
 
 class AdminAttendanceOverviewView(APIView):

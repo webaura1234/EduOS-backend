@@ -11,6 +11,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
+from apps.academics.queries import faculty_teaching as ft_q
 from apps.academics.queries import curriculum as curr_q
 from apps.academics.queries import structure as struct_q
 from apps.admissions.queries import enrollment as enrollment_q
@@ -115,6 +116,65 @@ def list_assignments_data(*, branch_id, batch_id=None, subject_id=None):
         "assignments": [serialize_assignment(a) for a in assignments],
         "submissions": [serialize_submission(s) for s in submissions],
     }
+
+
+@transaction.atomic
+def list_faculty_teaching_assignments_data(*, branch_id, faculty_id):
+    asg_q.close_past_due_assignments(branch_id)
+    homerooms = ft_q.homeroom_batches(branch_id, faculty_id)
+    homeroom_ids = [b.id for b in homerooms]
+    teaching_batch_ids = list(ft_q.subject_teaching_batch_ids(branch_id, faculty_id))
+
+    my_class = list(asg_q.list_assignments_for_batches(branch_id, homeroom_ids))
+    other = list(asg_q.list_assignments_created_by_faculty_in_batches(
+        branch_id, faculty_id, teaching_batch_ids,
+    ))
+    all_ids = {a.id for a in my_class} | {a.id for a in other}
+    submissions = list(asg_q.list_submissions_for_assignments(branch_id, list(all_ids)))
+
+    return {
+        "myClass": {
+            "homerooms": ft_q.homerooms_payload(homerooms),
+            "assignments": [serialize_assignment(a) for a in my_class],
+        },
+        "otherClasses": {
+            "teachingClasses": ft_q.teaching_classes_grouped(branch_id, faculty_id),
+            "assignments": [serialize_assignment(a) for a in other],
+        },
+        "submissions": [serialize_submission(s) for s in submissions],
+        "facultyUserId": str(faculty_id),
+    }
+
+
+@transaction.atomic
+def create_faculty_teaching_assignment(
+    *,
+    branch_id,
+    faculty_id,
+    title,
+    description,
+    batch_id,
+    subject_id,
+    due_at_raw,
+    max_marks,
+    actor,
+    academic_period_id=None,
+) -> dict:
+    if not ft_q.faculty_teaches_batch_subject(branch_id, faculty_id, batch_id, subject_id):
+        raise PermissionDenied(
+            "You can only create assignments for classes and subjects you are assigned to teach."
+        )
+    return create_assignment(
+        branch_id=branch_id,
+        title=title,
+        description=description,
+        batch_id=batch_id,
+        subject_id=subject_id,
+        due_at_raw=due_at_raw,
+        max_marks=max_marks,
+        actor=actor,
+        academic_period_id=academic_period_id,
+    )
 
 
 @transaction.atomic

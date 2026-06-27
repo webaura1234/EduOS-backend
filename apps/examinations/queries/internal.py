@@ -8,14 +8,38 @@ def list_recorded_by(branch_id, faculty_user_id):
         InternalMark.objects.filter(
             branch_id=branch_id, recorded_by_id=faculty_user_id, is_active=True,
         )
-        .select_related("student_profile__user", "subject")
+        .select_related("student_profile__user", "subject", "recorded_by")
+        .order_by("subject__name", "student_profile__user__first_name")
+    )
+
+
+def list_for_batches(branch_id, batch_ids):
+    if not batch_ids:
+        return InternalMark.objects.none()
+    from apps.admissions.models.enrollment import StudentEnrollment
+
+    profile_ids = StudentEnrollment.objects.filter(
+        branch_id=branch_id,
+        batch_id__in=batch_ids,
+        status="active",
+        is_active=True,
+    ).values_list("student_profile_id", flat=True)
+    return (
+        InternalMark.objects.filter(
+            branch_id=branch_id,
+            student_profile_id__in=profile_ids,
+            is_active=True,
+        )
+        .select_related("student_profile__user", "subject", "recorded_by")
         .order_by("subject__name", "student_profile__user__first_name")
     )
 
 
 def get_for_student_subject(branch_id, student_profile_id, subject_id) -> InternalMark | None:
     try:
-        return InternalMark.objects.select_related("student_profile__user", "subject").get(
+        return InternalMark.objects.select_related(
+            "student_profile__user", "subject", "recorded_by",
+        ).get(
             branch_id=branch_id, student_profile_id=student_profile_id,
             subject_id=subject_id, is_active=True,
         )

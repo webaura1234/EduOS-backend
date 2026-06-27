@@ -92,3 +92,50 @@ def parse_week_param(value: str) -> tuple[datetime.date, datetime.date]:
 def parse_month_param(value: str) -> tuple[datetime.date, datetime.date]:
     year_str, month_str = value.split("-", 1)
     return month_bounds(int(year_str), int(month_str))
+
+
+def fill_absent_placeholders(session, batch_id, user):
+    """Create 'absent' placeholders for roster students without a record yet."""
+    from django.utils import timezone
+
+    from apps.attendance.queries import record as record_q
+    from apps.attendance.queries import roster as roster_q
+
+    existing = {r.student_id for r in record_q.list_records_for_session(session.pk)}
+    now = timezone.now()
+    for enrollment in roster_q.students_in_batch(batch_id):
+        if enrollment.pk not in existing:
+            record_q.upsert_record(
+                session=session,
+                student=enrollment,
+                status="absent",
+                marked_at=now,
+                marked_by=None,
+                user=user,
+            )
+
+
+def open_session_with_roster(
+    *,
+    branch,
+    date,
+    user,
+    batch_id=None,
+    batch_subject_id=None,
+    period_slot_id=None,
+    faculty_id=None,
+):
+    """Open or get a session and ensure every roster student has a placeholder record."""
+    from apps.attendance.interactors import marking as mark_i
+
+    session = mark_i.open_session(
+        branch=branch,
+        date=date,
+        batch_id=batch_id,
+        batch_subject_id=batch_subject_id,
+        period_slot_id=period_slot_id,
+        faculty_id=faculty_id,
+        user=user,
+    )
+    fill_absent_placeholders(session, session.batch_id, user)
+    return session

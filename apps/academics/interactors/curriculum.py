@@ -1,9 +1,11 @@
 """Interactors — Subject, BatchSubject, BatchFaculty."""
 
 from django.db import transaction
+from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from apps.academics.helpers import check_version, get_faculty_user, require_credits_for_college
+from apps.academics.models import BatchFaculty, BatchFacultyRole
 from apps.academics.queries import calendar as cal_q
 from apps.academics.queries import curriculum as curr_q
 from apps.academics.queries import structure as struct_q
@@ -107,3 +109,47 @@ def delete_batch_faculty(assignment, user=None):
     if assignment.batch_subject.batch.academic_year.is_frozen:
         raise ValidationError("Cannot modify faculty assignments in a frozen academic year.")
     return curr_q.soft_delete_batch_faculty(assignment, user=user)
+
+
+@transaction.atomic
+def upsert_primary_batch_faculty(tenant_id, batch_subject, *, faculty_id, assigned_at, user=None):
+    """Replace the active primary teacher for a batch-subject."""
+    if batch_subject.batch.academic_year.is_frozen:
+        raise ValidationError("Cannot modify faculty assignments in a frozen academic year.")
+    faculty = get_faculty_user(tenant_id, faculty_id)
+    if not faculty:
+        raise ValidationError({"facultyId": "Faculty not found."})
+    effective_date = assigned_at or timezone.now().date()
+    existing = list(
+        BatchFaculty.objects.filter(
+            batch_subject_id=batch_subject.pk,
+            role=BatchFacultyRole.PRIMARY,
+            is_active=True,
+            ended_at__isnull=True,
+        )
+    )
+    for assignment in existing:
+        if assignment.faculty_id == faculty.pk:
+            return assignment
+        curr_q.update_batch_faculty(assignment, {"ended_at": effective_date}, user=user)
+    return curr_q.create_batch_faculty(
+        batch_subject=batch_subject,
+        faculty=faculty,
+        role=BatchFacultyRole.PRIMARY,
+        assigned_at=effective_date,
+        user=user,
+    )
+
+
+@transaction.atomic
+def end_primary_batch_faculty(batch_subject, *, ended_at=None, user=None):
+    if batch_subject.batch.academic_year.is_frozen:
+        raise ValidationError("Cannot modify faculty assignments in a frozen academic year.")
+    effective_date = ended_at or timezone.now().date()
+    for assignment in BatchFaculty.objects.filter(
+        batch_subject_id=batch_subject.pk,
+        role=BatchFacultyRole.PRIMARY,
+        is_active=True,
+        ended_at__isnull=True,
+    ):
+        curr_q.update_batch_faculty(assignment, {"ended_at": effective_date}, user=user)

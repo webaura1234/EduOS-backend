@@ -16,6 +16,16 @@ def list_guardian_links(branch_id):
     )
 
 
+def list_guardian_links_for_tenant(tenant_id):
+    return (
+        StudentGuardianLink.objects.filter(
+            student__tenant_id=tenant_id, is_active=True,
+        )
+        .select_related("student", "student__student_profile", "guardian")
+        .order_by("student__first_name", "student__last_name")
+    )
+
+
 def get_link(branch_id, link_id) -> StudentGuardianLink | None:
     try:
         return StudentGuardianLink.objects.select_related("student", "guardian").get(

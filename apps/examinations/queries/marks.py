@@ -67,6 +67,22 @@ def list_marks_for_slot_by_exam_subject(exam_id, subject_id, batch_id):
     )
 
 
+def list_exam_slots_for_batches(branch_id, batch_ids):
+    from apps.examinations.models import ExamScheduleSlot
+
+    if not batch_ids:
+        return ExamScheduleSlot.objects.none()
+    return (
+        ExamScheduleSlot.objects.filter(
+            exam__branch_id=branch_id,
+            batch_id__in=batch_ids,
+            is_active=True,
+        )
+        .select_related("exam", "subject", "batch", "batch__course")
+        .order_by("start_at")
+    )
+
+
 def _slot_subject_ids(schedule_slot_id):
     from apps.examinations.models import ExamScheduleSlot
 

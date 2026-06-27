@@ -66,8 +66,10 @@ def _calendar_change(c) -> dict:
     }
 
 
-def _review_queue(branch_id) -> list:
-    tbd_ids, unassigned_ids = extra_q.review_entries(branch_id)
+def _review_queue(branch_id, *, academic_period_id=None) -> list:
+    tbd_ids, unassigned_ids, subject_gaps = extra_q.review_entries(
+        branch_id, academic_period_id=academic_period_id,
+    )
     items = []
     if tbd_ids:
         items.append({
@@ -87,7 +89,43 @@ def _review_queue(branch_id) -> list:
             "createdAt": "",
             "resolved": False,
         })
+    if subject_gaps:
+        items.append({
+            "id": "review-subject-teachers",
+            "type": "subject_teacher_unassigned",
+            "message": f"{len(subject_gaps)} subject teacher assignment(s) are missing.",
+            "slotIds": [],
+            "gaps": subject_gaps,
+            "createdAt": "",
+            "resolved": False,
+        })
     return items
+
+
+def _class_teacher(batch) -> dict | None:
+    if not batch.class_teacher_id:
+        return None
+    return {
+        "classSectionId": str(batch.id),
+        "classLabel": batch_display_label(batch),
+        "teacherUserId": str(batch.class_teacher_id),
+        "teacherName": batch.class_teacher.full_name,
+        "assignedAt": batch.updated_at.isoformat(),
+    }
+
+
+def _subject_teacher(assignment) -> dict:
+    bs = assignment.batch_subject
+    return {
+        "id": str(assignment.id),
+        "classSectionId": str(bs.batch_id),
+        "subjectId": str(bs.subject_id),
+        "facultyUserId": str(assignment.faculty_id),
+        "academicPeriodId": str(bs.academic_period_id),
+        "assignedAt": assignment.assigned_at.isoformat(),
+        "batchSubjectId": str(bs.id),
+        "version": assignment.version,
+    }
 
 
 def _period(p) -> dict:
@@ -179,13 +217,30 @@ class AdminAcademicsOverviewView(APIView):
             ).order_by("first_name", "last_name")
         ]
 
-        batches = list(struct_q.list_batches(branch.pk))
+        batches = list(
+            struct_q.list_batches(branch.pk).select_related("course", "course__department", "class_teacher")
+        )
         batch_ids = [b.pk for b in batches]
         subjects = list(curr_q.list_subjects(branch.pk))
         subject_ids = [s.id for s in subjects]
         units_map = syl_q.units_by_subject(branch.pk, subject_ids)
         batches_map = syl_q.batches_by_subject(branch.pk, subject_ids)
         progress_map = syl_q.progress_for_batches(branch.pk, batch_ids, subject_ids)
+
+        current_period = cal_q.resolve_current_period(current_year.pk) if current_year else None
+        current_period_id = str(current_period.pk) if current_period else None
+
+        class_teachers = []
+        if not is_college:
+            for batch in batches:
+                row = _class_teacher(batch)
+                if row:
+                    class_teachers.append(row)
+
+        subject_teachers = [
+            _subject_teacher(a)
+            for a in curr_q.list_batch_faculty(branch.pk, active_primary=True)
+        ]
 
         return Response({
             "institutionType": tenant.institution_type,
@@ -221,6 +276,9 @@ class AdminAcademicsOverviewView(APIView):
                 _timetable_slot(e) for e in tt_q.list_active_entries_for_branch(branch.pk)
             ],
             "faculty": faculty,
+            "classTeachers": class_teachers,
+            "subjectTeachers": subject_teachers,
+            "currentPeriodId": current_period_id,
             "substitutions": [
                 _substitution(s) for s in extra_q.list_substitutions(branch.pk)
             ],
@@ -230,7 +288,9 @@ class AdminAcademicsOverviewView(APIView):
             "studyMaterials": [
                 _study_material(m) for m in extra_q.list_study_materials(branch.pk)
             ],
-            "adminReviewQueue": _review_queue(branch.pk),
+            "adminReviewQueue": _review_queue(
+                branch.pk, academic_period_id=current_period.pk if current_period else None,
+            ),
             "calendarChanges": [
                 _calendar_change(c) for c in extra_q.list_calendar_changes(branch.pk)
             ],

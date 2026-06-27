@@ -5,6 +5,31 @@ from django.utils import timezone
 from apps.coursework.models import Homework
 
 
+def list_for_batches(branch_id, batch_ids):
+    if not batch_ids:
+        return []
+    return (
+        Homework.objects.filter(branch_id=branch_id, batch_id__in=batch_ids, is_active=True)
+        .select_related("batch", "batch__course", "created_by")
+        .order_by("-date", "-created_at")
+    )
+
+
+def list_for_faculty_in_batches(branch_id, faculty_user_id, batch_ids):
+    if not batch_ids:
+        return []
+    return (
+        Homework.objects.filter(
+            branch_id=branch_id,
+            created_by_id=faculty_user_id,
+            batch_id__in=batch_ids,
+            is_active=True,
+        )
+        .select_related("batch", "batch__course", "created_by")
+        .order_by("-date", "-created_at")
+    )
+
+
 def list_for_faculty(branch_id, faculty_user_id):
     return (
         Homework.objects.filter(branch_id=branch_id, created_by_id=faculty_user_id, is_active=True)

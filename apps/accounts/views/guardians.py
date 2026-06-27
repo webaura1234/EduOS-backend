@@ -5,13 +5,15 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.academics.scoping import resolve_branch
+from apps.academics.helpers import batch_display_label
+from apps.accounts.scoping import resolve_management_scope
 from apps.accounts.models.guardian import CustodyType, default_notification_channels
 from apps.accounts.models.user import Role, User
 from apps.accounts.permissions import IsAdminOrSuperAdmin
 from apps.accounts.queries import guardian as g_q
-from apps.accounts.queries.guardian import list_guardian_links
+from apps.accounts.queries.guardian import list_guardian_links, list_guardian_links_for_tenant
 from apps.attendance.queries import roster as roster_q
+from apps.organizations.queries.branch import list_branches
 
 
 def _student_id(student_user) -> str:
@@ -37,7 +39,7 @@ def _notification_in(payload) -> dict:
     }
 
 
-def _link(link) -> dict:
+def _link(link, *, class_label: str = "", branch_id=None, branch_name: str = "") -> dict:
     return {
         "id": str(link.id),
         "studentId": _student_id(link.student),
@@ -50,52 +52,94 @@ def _link(link) -> dict:
         "canPickup": link.can_pickup,
         "receivesNotifications": _notification_out(link),
         "createdAt": link.created_at.isoformat(),
+        "classLabel": class_label,
+        "branchId": str(branch_id) if branch_id else None,
+        "branchName": branch_name,
     }
 
 
+def _build_roster_context(tenant_id, *, single_branch=None):
+    """Profile-id maps for class label and branch metadata."""
+    class_by_profile: dict[str, str] = {}
+    branch_by_profile: dict[str, tuple[str, str]] = {}
+    branches = [single_branch] if single_branch else list(list_branches(tenant_id))
+    for b in branches:
+        if b is None:
+            continue
+        for e in roster_q.all_active_students_in_branch(b.pk):
+            pid = str(e.student_profile_id)
+            label = batch_display_label(e.current_batch) if e.current_batch_id else ""
+            class_by_profile[pid] = label
+            branch_by_profile[pid] = (str(b.pk), b.name)
+    return class_by_profile, branch_by_profile
+
+
 class AdminGuardianOverviewView(APIView):
-    """GET → { links, students, guardians }."""
+    """GET → { links, students, guardians, branchScope }."""
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
 
     def get(self, request) -> Response:
-        branch = resolve_branch(request)
-        links = list(list_guardian_links(branch.pk))
+        branch, branch_scope = resolve_management_scope(request)
+        tenant_id = request.user.tenant_id
 
-        class_by_profile = {
-            str(e.student_profile_id): (e.current_batch.name if e.current_batch_id else "")
-            for e in roster_q.all_active_students_in_branch(branch.pk)
-        }
-        students = []
-        for u in (
-            User.objects.filter(
-                tenant_id=branch.tenant_id, branch_id=branch.pk,
+        if branch:
+            links = list(list_guardian_links(branch.pk))
+            student_qs = User.objects.filter(
+                tenant_id=tenant_id, branch_id=branch.pk,
                 role=Role.STUDENT, is_active=True,
             )
-            .select_related("student_profile")
-            .order_by("first_name", "last_name")
+            class_by_profile, branch_by_profile = _build_roster_context(
+                tenant_id, single_branch=branch,
+            )
+            guardian_qs = User.objects.filter(
+                tenant_id=tenant_id, branch_id=branch.pk,
+                role=Role.PARENT, is_active=True,
+            )
+        else:
+            links = list(list_guardian_links_for_tenant(tenant_id))
+            student_qs = User.objects.filter(
+                tenant_id=tenant_id, role=Role.STUDENT, is_active=True,
+            )
+            class_by_profile, branch_by_profile = _build_roster_context(tenant_id)
+            guardian_qs = User.objects.filter(
+                tenant_id=tenant_id, role=Role.PARENT, is_active=True,
+            )
+
+        students = []
+        for u in student_qs.select_related("student_profile", "branch").order_by(
+            "first_name", "last_name",
         ):
             profile = getattr(u, "student_profile", None)
             sid = str(profile.id) if profile else str(u.id)
+            bid, bname = branch_by_profile.get(sid, (str(u.branch_id) if u.branch_id else "", u.branch.name if u.branch_id else ""))
             students.append({
                 "studentId": sid,
                 "studentName": u.full_name,
                 "classLabel": class_by_profile.get(sid, ""),
+                "branchId": bid or None,
+                "branchName": bname,
             })
 
-        guardians = {
-            str(u.id): u.full_name
-            for u in User.objects.filter(
-                tenant_id=branch.tenant_id, branch_id=branch.pk,
-                role=Role.PARENT, is_active=True,
-            )
-        }
+        guardians = {str(u.id): u.full_name for u in guardian_qs}
         for link in links:
             guardians.setdefault(str(link.guardian_id), link.guardian.full_name)
 
+        link_rows = []
+        for link in links:
+            sid = _student_id(link.student)
+            bid, bname = branch_by_profile.get(sid, ("", ""))
+            link_rows.append(_link(
+                link,
+                class_label=class_by_profile.get(sid, ""),
+                branch_id=bid or None,
+                branch_name=bname,
+            ))
+
         return Response({
-            "links": [_link(link) for link in links],
+            "links": link_rows,
             "students": students,
             "guardians": [{"userId": uid, "name": name} for uid, name in guardians.items()],
+            "branchScope": branch_scope,
         })
 
 
@@ -104,7 +148,12 @@ class AdminGuardianActionView(APIView):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
 
     def post(self, request) -> Response:
-        branch = resolve_branch(request)
+        branch, _ = resolve_management_scope(request)
+        if branch is None:
+            return Response(
+                {"error": "Select a branch to manage guardian links."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         user = request.user
         action = request.data.get("action")
 

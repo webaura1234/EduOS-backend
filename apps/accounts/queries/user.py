@@ -184,6 +184,11 @@ def count_active_by_role_in_tenant(tenant_id, role: str) -> int:
     return User.objects.filter(tenant_id=tenant_id, role=role, is_active=True).count()
 
 
+def count_active_by_role_in_branch(branch_id, role: str) -> int:
+    """Count active users of a given role assigned to a branch."""
+    return User.objects.filter(branch_id=branch_id, role=role, is_active=True).count()
+
+
 def get_active_user_in_tenant_with_role(tenant_id, user_id, role: str) -> User | None:
     """Fetch a single active user of a given role within a tenant, or None."""
     try:

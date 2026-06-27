@@ -90,6 +90,47 @@ def test_super_admin_dashboard_rolls_up(env):
     assert isinstance(body["branchComparison"], list)
 
 
+def test_super_admin_dashboard_branch_kpis(env):
+    from apps.accounts.models.profile import StudentProfile
+    from apps.academics.tests.factories import AcademicYearFactory, BatchFactory
+    from apps.admissions.tests.factories import StudentEnrollmentFactory
+
+    branch = env["branch"]
+    year = AcademicYearFactory(branch=branch, is_current=True)
+    batch = BatchFactory(course__department__branch=branch, academic_year=year)
+
+    faculty = UserFactory(
+        role=Role.FACULTY,
+        tenant=env["tenant"],
+        branch=branch,
+        must_change_password=False,
+    )
+    students = []
+    for i in range(2):
+        user = UserFactory(
+            role=Role.STUDENT,
+            tenant=env["tenant"],
+            branch=branch,
+            custom_login_id=f"STU-KPI-{i}",
+            must_change_password=False,
+        )
+        profile = StudentProfile.objects.create(user=user, current_batch=batch)
+        StudentEnrollmentFactory(student_profile=profile, branch=branch, batch=batch)
+        students.append(user)
+
+    resp = _client(env["super_admin"]).get(reverse("analytics:dashboard-super-admin"))
+    assert resp.status_code == 200
+    body = _data(resp)
+
+    row = next(r for r in body["branchComparison"] if r["branchId"] == str(branch.pk))
+    assert row["studentCount"] == 2
+    assert row["facultyCount"] == 1
+    assert row["attendancePercent"] == 0
+    assert "pendingPaise" in row
+    assert body["totals"]["students"] >= 2
+    assert body["totals"]["faculty"] >= 1
+
+
 def test_super_admin_dashboard_denied_to_admin(env):
     resp = _client(env["admin"]).get(reverse("analytics:dashboard-super-admin"))
     assert resp.status_code == 403
