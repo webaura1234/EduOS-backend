@@ -13,6 +13,7 @@ from apps.fees.queries.concession import (
     get_concession_rule,
     update_concession_request,
 )
+from apps.fees.helpers.concession import concession_amount_paise
 from apps.fees.queries.structure import list_assignments_for_student, update_assignment
 
 
@@ -63,7 +64,10 @@ class CreateConcessionRequestInteractor:
             if rule is None:
                 raise ValidationError("Concession rule not found.")
         if self.amount_paise <= 0:
-            raise ValidationError("Concession amount must be greater than zero.")
+            if rule and rule.percent:
+                self.amount_paise = 1  # placeholder; resolved at approval from structure totals
+            else:
+                raise ValidationError("Concession amount must be greater than zero.")
 
         return create_concession_request(
             branch=self.branch, student=self.student, rule=rule, amount_paise=self.amount_paise,
@@ -98,11 +102,19 @@ class ApproveConcessionRequestInteractor:
             for assignment in list_assignments_for_student(req.student_id):
                 lines = list(assignment.discount_lines or [])
                 if not any(d.get("request_id") == str(req.id) for d in lines):
-                    lines.append({
-                        "request_id": str(req.id),
-                        "label": req.rule.name if req.rule else "Concession",
-                        "amount_paise": req.amount_paise,
-                    })
-                    update_assignment(assignment, {"discount_lines": lines})
+                    components = assignment.structure_snapshot or []
+                    base_paise = sum(int(c.get("amount_paise", 0)) for c in components)
+                    amount = concession_amount_paise(req, base_paise=base_paise)
+                    if amount <= 0 and req.rule and req.rule.percent:
+                        amount = (base_paise * req.rule.percent) // 100
+                    if amount > 0:
+                        lines.append({
+                            "request_id": str(req.id),
+                            "label": req.rule.name if req.rule else "Concession",
+                            "amount_paise": amount,
+                        })
+                        update_assignment(assignment, {"discount_lines": lines})
+                        if req.amount_paise != amount:
+                            update_concession_request(req, {"amount_paise": amount})
 
         return req

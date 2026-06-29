@@ -2,6 +2,7 @@
 Seed CMR Lalgadi (greenfield school tenant) with 3 branches:
 each branch has 3 admins, 5 faculty (subjects + class teachers Class 1–5 A),
 and 25 students (5 per class). Main Campus keeps rich demo content.
+Also seeds one platform_owner (SaaS operator, no tenant) for the platform app.
 
 Idempotent — safe to run repeatedly. Run with:
 
@@ -43,10 +44,14 @@ from apps.attendance.models.session import AttendanceSession  # noqa: E402
 from apps.communications.models.announcement import Announcement, AnnouncementTargetType  # noqa: E402
 from apps.coursework.models import Homework  # noqa: E402
 from apps.examinations.enums import MarksStatus  # noqa: E402
+from apps.examinations.interactors.registration import bulk_register_exam  # noqa: E402
 from apps.examinations.interactors.result import compute_results, publish_results  # noqa: E402
 from apps.examinations.models import Exam, ExamScheduleSlot, MarksEntry  # noqa: E402
-from apps.fees.models.invoice import FeeInvoice, FeeInvoiceLine  # noqa: E402
+from apps.fees.interactors import generate_invoices_for_batch  # noqa: E402
+from apps.fees.interactors.payment import RecordOfflinePaymentInteractor  # noqa: E402
+from apps.fees.enums import PaymentMethod  # noqa: E402
 from apps.fees.helpers.paise import financial_year_for  # noqa: E402
+from apps.fees.models import FeeStructure  # noqa: E402
 from apps.grievances.models import Grievance, GrievanceRaiserRole, GrievanceStatus  # noqa: E402
 from apps.hr.enums import PayrollRunStatus  # noqa: E402
 from apps.hr.models import Employee, LeaveBalance, Payslip, PayrollRun, StaffAttendance  # noqa: E402
@@ -63,6 +68,10 @@ SUPER_ADMIN_PHONE = "+919876543200"
 ADMIN_PHONE = "+919876543210"
 PARENT_PHONE = "+919876543220"
 PARENT2_PHONE = "+919876543221"
+
+# Platform app (SaaS operator) — no tenant; matches apps/platform login hint.
+PLATFORM_OWNER_PHONE = "+919000000001"
+PLATFORM_OWNER_PASSWORD = "Platform@123"
 
 _PLAN = dict(
     student_limit=500,
@@ -354,6 +363,94 @@ def _seed_branch_core(*, tenant, branch, branch_index: int, code: str):
     )
 
 
+def _seed_branch_fees(*, branch, ctx, multi_installment: bool = False) -> None:
+    """Fee structures + generated invoices with installments (replaces bare FeeInvoice rows)."""
+    admin = ctx["admins"][0]
+    year = ctx["year"]
+    class5_batch = ctx["batches"][5]
+    class5_enrollments = [e for e in ctx["enrollments"] if e.batch_id == class5_batch.pk]
+    if not class5_enrollments:
+        return
+
+    if multi_installment:
+        name = "Class 5-A — 2 terms"
+        components = [
+            {"kind": "tuition", "label": "Tuition Term 1", "amount_paise": 3_000_000, "due_date": "2025-07-10", "installment_no": 1},
+            {"kind": "tuition", "label": "Tuition Term 2", "amount_paise": 2_000_000, "due_date": "2025-10-10", "installment_no": 2},
+            {"kind": "transport", "label": "Transport", "amount_paise": 1_000_000, "due_date": "2025-09-10", "installment_no": 2},
+        ]
+    else:
+        name = "Class 5-A — Term 1"
+        components = [
+            {"kind": "tuition", "label": "Tuition Term 1", "amount_paise": 3_500_000, "due_date": "2025-07-31", "installment_no": 1},
+        ]
+
+    fs, created = FeeStructure.objects.get_or_create(
+        branch=branch,
+        academic_year=year,
+        batch=class5_batch,
+        name=name,
+        defaults=dict(components=components, is_active=True, created_by=admin, updated_by=admin),
+    )
+    if not created:
+        fs.components = components
+        fs.save(update_fields=["components", "updated_at"])
+
+    invoices = generate_invoices_for_batch(
+        branch=branch,
+        batch_id=class5_batch.pk,
+        academic_year=year,
+        fee_structure=fs,
+        user=admin,
+    )
+
+    if multi_installment and invoices:
+        inv = invoices[0]
+        first_inst = inv.installments.order_by("sequence").first()
+        if first_inst and first_inst.amount_paise > 0:
+            partial = first_inst.amount_paise // 2
+            RecordOfflinePaymentInteractor(
+                invoice_id=inv.id,
+                amount_paise=partial,
+                method=PaymentMethod.CASH,
+                payer_user=class5_enrollments[0].user,
+                user=admin,
+            ).execute()
+
+    print(f"  - fee structure + invoices ({name}); generated {len(invoices)} new")
+
+
+def _seed_exam_fees_demo(*, tenant, branch, ctx) -> None:
+    """One paid exam with fee invoices for Class 5-A (student portal exam tab)."""
+    admin = ctx["admins"][0]
+    period = ctx["period"]
+    class5_batch = ctx["batches"][5]
+    exam, _ = Exam.objects.get_or_create(
+        branch=branch,
+        academic_period=period,
+        name="Mid-Term Exam Fee Demo",
+        defaults=dict(
+            exam_type="internal",
+            exam_fee_paise=50_000,
+            is_published=True,
+            marks_deadline=timezone.make_aware(
+                datetime.datetime.combine(datetime.date(2025, 9, 15), datetime.time(17, 0))
+            ),
+        ),
+    )
+    if exam.exam_fee_paise == 0:
+        exam.exam_fee_paise = 50_000
+        exam.save(update_fields=["exam_fee_paise"])
+    bulk_register_exam(
+        exam,
+        branch=branch,
+        batch_id=class5_batch.pk,
+        tenant=tenant,
+        user=admin,
+    )
+    print("  - exam fee registrations for Class 5-A")
+
+
 def _seed_branch_light(*, tenant, branch, ctx) -> None:
     """Light attendance + fees for non-primary branches."""
     admin = ctx["admins"][0]
@@ -362,25 +459,7 @@ def _seed_branch_light(*, tenant, branch, ctx) -> None:
     class5_enrollments = [e for e in ctx["enrollments"] if e.batch_id == class5_batch.pk]
 
     print("\nFees (light):")
-    for enr in class5_enrollments[:2]:
-        amount = 3_500_000
-        invoice, created_inv = FeeInvoice.objects.get_or_create(
-            student=enr,
-            branch=branch,
-            defaults=dict(
-                due_date=datetime.date(2025, 7, 31),
-                total_paise=amount,
-                paid_paise=amount // 2,
-                status="partial",
-            ),
-        )
-        if created_inv:
-            FeeInvoiceLine.objects.create(
-                invoice=invoice,
-                label="Tuition Fee (Term 1)",
-                amount_paise=amount,
-            )
-    print(f"  - {min(2, len(class5_enrollments))} fee invoices")
+    _seed_branch_fees(branch=branch, ctx=ctx, multi_installment=False)
 
     print("\nAttendance (light):")
     d = datetime.date.today()
@@ -408,6 +487,99 @@ def _seed_branch_light(*, tenant, branch, ctx) -> None:
             sessions += 1
         d -= datetime.timedelta(days=1)
     print(f"  - {sessions} attendance sessions (Class 5-A)")
+
+    _seed_branch_exam_results(
+        tenant=tenant,
+        branch=branch,
+        ctx=ctx,
+        exam_plan=[("Unit Test 1", datetime.date(2025, 8, 10), 0)],
+        label="light",
+    )
+
+
+def _seed_branch_exam_results(
+    *,
+    tenant,
+    branch,
+    ctx,
+    exam_plan: list[tuple[str, datetime.date, int]],
+    label: str = "",
+) -> None:
+    """Create exams, marks, and published results for Class 5-A."""
+    admin = ctx["admins"][0]
+    period = ctx["period"]
+    class5_batch = ctx["batches"][5]
+    subjects = ctx["subjects_by_grade"][5]
+    enrollments = ctx["enrollments"]
+    class5_enrollments = [e for e in enrollments if e.batch_id == class5_batch.pk]
+    if not class5_enrollments:
+        return
+
+    prefix = f"Exams + published results{f' ({label})' if label else ''}:"
+    print(f"\n{prefix}")
+    room, _ = Room.objects.get_or_create(
+        branch=branch,
+        name="Room 101",
+        defaults=dict(capacity=40),
+    )
+    base_marks = {"English": 70, "Mathematics": 72, "Science": 66}
+    created_exams = []
+    for exam_name, exam_date, bump in exam_plan:
+        exam, _ = Exam.objects.get_or_create(
+            branch=branch,
+            academic_period=period,
+            name=exam_name,
+            defaults=dict(
+                exam_type="internal",
+                exam_fee_paise=0,
+                is_published=True,
+                marks_deadline=timezone.make_aware(
+                    datetime.datetime.combine(exam_date, datetime.time(17, 0))
+                ),
+            ),
+        )
+        if not exam.is_published:
+            exam.is_published = True
+            exam.save(update_fields=["is_published"])
+        for subj_name in ("English", "Mathematics", "Science"):
+            subj = subjects[subj_name]
+            ExamScheduleSlot.objects.get_or_create(
+                exam=exam,
+                subject=subj,
+                batch=class5_batch,
+                defaults=dict(
+                    room=room,
+                    max_marks=100,
+                    start_at=timezone.make_aware(
+                        datetime.datetime.combine(exam_date, datetime.time(9, 0))
+                    ),
+                    end_at=timezone.make_aware(
+                        datetime.datetime.combine(exam_date, datetime.time(11, 0))
+                    ),
+                ),
+            )
+            for enr in class5_enrollments:
+                login = enr.student_profile.user.custom_login_id or ""
+                extra = 4 if login.endswith("-02") else (-2 if login.endswith("-03") else 0)
+                MarksEntry.objects.get_or_create(
+                    exam=exam,
+                    subject=subj,
+                    student=enr,
+                    defaults=dict(
+                        marks=min(base_marks[subj_name] + bump + extra, 100),
+                        marks_status=MarksStatus.LOCKED,
+                        is_absent=False,
+                    ),
+                )
+        created_exams.append(exam)
+        print(f"  - {exam_name} (marks for {len(class5_enrollments)} students)")
+
+    for exam in created_exams:
+        try:
+            _publish_exam_results(exam, branch=branch, tenant=tenant, admin=admin)
+            print(f"  - Published results: {exam.name}")
+        except Exception as exc:
+            print(f"  - Skipped publish for {exam.name}: {exc}")
 
 
 def _seed_main_campus_rich(*, tenant, branch, ctx) -> None:
@@ -577,25 +749,8 @@ def _seed_main_campus_rich(*, tenant, branch, ctx) -> None:
     print("  - 4 announcements")
 
     print("\nFees:")
-    for enr in class5_enrollments[:3]:
-        amount = 5_000_000
-        invoice, created_inv = FeeInvoice.objects.get_or_create(
-            student=enr,
-            branch=branch,
-            defaults=dict(
-                due_date=datetime.date(2025, 7, 31),
-                total_paise=amount,
-                paid_paise=0,
-                status="due",
-            ),
-        )
-        if created_inv:
-            FeeInvoiceLine.objects.create(
-                invoice=invoice,
-                label="Tuition Fee (Term 1)",
-                amount_paise=amount,
-            )
-    print(f"  - {min(3, len(class5_enrollments))} fee invoices")
+    _seed_branch_fees(branch=branch, ctx=ctx, multi_installment=True)
+    _seed_exam_fees_demo(tenant=tenant, branch=branch, ctx=ctx)
 
     print("\nTimetable + attendance:")
     slot1, _ = PeriodSlot.objects.get_or_create(
@@ -658,74 +813,15 @@ def _seed_main_campus_rich(*, tenant, branch, ctx) -> None:
         d -= datetime.timedelta(days=1)
     print(f"  - {total_sessions} attendance sessions (Class 5-A)")
 
-    print("\nExams + published results:")
-    room, _ = Room.objects.get_or_create(
+    _seed_branch_exam_results(
+        tenant=tenant,
         branch=branch,
-        name="Room 101",
-        defaults=dict(capacity=40),
+        ctx=ctx,
+        exam_plan=[
+            ("Unit Test 1", datetime.date(2025, 8, 10), 0),
+            ("Mid-Term", datetime.date(2025, 11, 5), 6),
+        ],
     )
-    exam_plan = [
-        ("Unit Test 1", datetime.date(2025, 8, 10), 0),
-        ("Mid-Term", datetime.date(2025, 11, 5), 6),
-    ]
-    base_marks = {"English": 70, "Mathematics": 72, "Science": 66}
-    created_exams = []
-    for exam_name, exam_date, bump in exam_plan:
-        exam, _ = Exam.objects.get_or_create(
-            branch=branch,
-            academic_period=period,
-            name=exam_name,
-            defaults=dict(
-                exam_type="internal",
-                exam_fee_paise=0,
-                is_published=True,
-                marks_deadline=timezone.make_aware(
-                    datetime.datetime.combine(exam_date, datetime.time(17, 0))
-                ),
-            ),
-        )
-        if not exam.is_published:
-            exam.is_published = True
-            exam.save(update_fields=["is_published"])
-        for subj_name in ("English", "Mathematics", "Science"):
-            subj = subjects[subj_name]
-            ExamScheduleSlot.objects.get_or_create(
-                exam=exam,
-                subject=subj,
-                batch=class5_batch,
-                defaults=dict(
-                    room=room,
-                    max_marks=100,
-                    start_at=timezone.make_aware(
-                        datetime.datetime.combine(exam_date, datetime.time(9, 0))
-                    ),
-                    end_at=timezone.make_aware(
-                        datetime.datetime.combine(exam_date, datetime.time(11, 0))
-                    ),
-                ),
-            )
-            for enr in class5_enrollments:
-                login = enr.student_profile.user.custom_login_id or ""
-                extra = 4 if login.endswith("-02") else (-2 if login.endswith("-03") else 0)
-                MarksEntry.objects.get_or_create(
-                    exam=exam,
-                    subject=subj,
-                    student=enr,
-                    defaults=dict(
-                        marks=min(base_marks[subj_name] + bump + extra, 100),
-                        marks_status=MarksStatus.LOCKED,
-                        is_absent=False,
-                    ),
-                )
-        created_exams.append(exam)
-        print(f"  - {exam_name} (marks for {len(class5_enrollments)} students)")
-
-    for exam in created_exams:
-        try:
-            _publish_exam_results(exam, branch=branch, tenant=tenant, admin=admin)
-            print(f"  - Published results: {exam.name}")
-        except Exception as exc:
-            print(f"  - Skipped publish for {exam.name}: {exc}")
 
     print("\nGrievances:")
     sample_student = class5_enrollments[2].student_profile.user if len(class5_enrollments) > 2 else None
@@ -759,6 +855,30 @@ def _seed_main_campus_rich(*, tenant, branch, ctx) -> None:
             ),
         )
     print("  - 2 grievances (open + in review)")
+
+
+def _seed_platform_owner() -> User:
+    """SaaS platform owner (tenant-less) for the platform admin app."""
+    po, created = User.objects.get_or_create(
+        role=Role.PLATFORM_OWNER,
+        phone=PLATFORM_OWNER_PHONE,
+        defaults=dict(
+            first_name="Gopal",
+            last_name="Platform Owner",
+            tenant=None,
+            branch=None,
+            must_change_password=False,
+            is_active=True,
+        ),
+    )
+    if not po.has_usable_password() or not po.check_password(PLATFORM_OWNER_PASSWORD):
+        po.set_password(PLATFORM_OWNER_PASSWORD)
+        po.save(update_fields=["password"])
+    print(
+        f"  - platform_owner {PLATFORM_OWNER_PHONE} "
+        f"[{'created' if created else 'exists'}]  (pass: {PLATFORM_OWNER_PASSWORD})"
+    )
+    return po
 
 
 def reset_data():
@@ -839,10 +959,15 @@ def seed():
         else:
             _seed_branch_light(tenant=tenant, branch=branch, ctx=ctx)
 
+    print("\nPlatform owner (platform app — not institution portal):")
+    _seed_platform_owner()
+
     print("\n" + "=" * 52)
     print(f"Done. Login at {SUBDOMAIN}.<your-domain>")
-    print(f"All passwords: {PASSWORD}")
+    print(f"Institution passwords: {PASSWORD}")
     print(f"  Super Admin : {SUPER_ADMIN_PHONE}")
+    print(f"\nPlatform app (pnpm dev:platform):")
+    print(f"  Platform Owner: {PLATFORM_OWNER_PHONE} / {PLATFORM_OWNER_PASSWORD}")
     for branch, spec, ctx in branch_contexts:
         print(f"\n  [{spec['name']} — {spec['code']}]")
         print("    Admins  :", ", ".join(a.phone for a in ctx["admins"]))

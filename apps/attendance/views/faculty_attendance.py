@@ -171,18 +171,27 @@ class FacultyLiveAttendanceView(APIView):
     def get(self, request) -> Response:
         branch = resolve_branch(request)
         today = datetime.date.today()
+
+        batches = list(_class_teacher_batches(branch.pk, request.user.pk))
+        batch_ids = [b.pk for b in batches]
+        # Three bulk queries instead of 3 per batch.
+        roster_counts = roster_q.roster_counts_for_batches(batch_ids)
+        session_by_batch = session_q.day_session_ids_for_batches(batch_ids, today)
+        counts_by_session = record_q.status_counts_for_sessions(list(session_by_batch.values()))
+
         classes = []
         total_present = total_all = 0
-        for batch in _class_teacher_batches(branch.pk, request.user.pk):
-            roster = roster_q.students_in_batch(batch.pk).count()
+        for batch in batches:
+            bid = str(batch.pk)
+            roster = roster_counts.get(bid, 0)
             present = 0
-            day_session = session_q.get_day_session(batch_id=batch.pk, date=today)
-            if day_session:
-                counts = record_q.status_counts_for_session(day_session.pk)
-                present = counts.get("present", 0) + counts.get("late", 0)
+            sid = session_by_batch.get(bid)
+            if sid:
+                c = counts_by_session.get(sid, {})
+                present = c.get("present", 0) + c.get("late", 0)
             label = (f"{batch.course.name} - {batch.name}" if batch.course_id else batch.name)
             classes.append({
-                "classId": str(batch.pk),
+                "classId": bid,
                 "classLabel": label,
                 "present": present,
                 "total": roster,

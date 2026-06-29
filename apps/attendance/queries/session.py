@@ -58,6 +58,17 @@ def list_sessions_for_date(branch_id, date):
     )
 
 
+def day_session_ids_for_batches(batch_ids, date) -> dict[str, str]:
+    """Bulk: { str(batch_id): str(day_session_id) } for the day-mode sessions of
+    the given batches on a date. One query (no per-batch lookups)."""
+    if not batch_ids:
+        return {}
+    rows = AttendanceSession.objects.filter(
+        batch_id__in=batch_ids, date=date, batch_subject__isnull=True, is_active=True,
+    ).values("id", "batch_id")
+    return {str(r["batch_id"]): str(r["id"]) for r in rows}
+
+
 def list_sessions_for_faculty(branch_id, faculty_id, from_date, to_date):
     """Attendance sessions taken by a faculty member in a date range."""
     return (

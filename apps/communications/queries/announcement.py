@@ -29,7 +29,11 @@ def mark_read(user, announcements) -> int:
 
 
 def list_for_branch(branch_id):
-    return Announcement.objects.filter(branch_id=branch_id, is_active=True).order_by("-created_at")
+    return (
+        Announcement.objects.filter(branch_id=branch_id, is_active=True)
+        .select_related("branch")
+        .order_by("-created_at")
+    )
 
 
 def list_for_student(branch_id, batch_id=None):
@@ -40,6 +44,7 @@ def list_for_student(branch_id, batch_id=None):
     return (
         Announcement.objects.filter(branch_id=branch_id, is_active=True)
         .filter(visible)
+        .select_related("branch")
         .order_by("-created_at")
     )
 
@@ -68,6 +73,7 @@ def list_for_faculty(branch_id, faculty_user_id=None):
     return (
         Announcement.objects.filter(branch_id=branch_id, is_active=True)
         .filter(visible)
+        .select_related("branch")
         .order_by("-created_at")
     )
 

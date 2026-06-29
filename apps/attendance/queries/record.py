@@ -29,7 +29,11 @@ def list_flagged(branch_id):
 def list_records_for_session(session_id):
     return (
         AttendanceRecord.objects.filter(session_id=session_id, is_active=True)
-        .select_related("student", "student__student_profile__user")
+        .select_related(
+            "student", "student__student_profile__user",
+            "session__batch__course", "session__batch_subject__subject",
+            "session__period_slot",
+        )
         .order_by("student__student_profile__user__first_name")
     )
 

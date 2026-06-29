@@ -36,7 +36,17 @@ def list_dues_for_student(student_id):
 
 
 def list_dues_for_student_user(student_user_id):
-    return FeeInvoice.objects.filter(student__student_profile__user_id=student_user_id, is_active=True).order_by("due_date")
+    from django.db.models import F, Q
+
+    return (
+        FeeInvoice.objects.filter(
+            student__student_profile__user_id=student_user_id,
+            is_active=True,
+        )
+        .filter(Q(student__is_active=True) | Q(total_paise__gt=F("paid_paise")))
+        .prefetch_related("installments", "lines")
+        .order_by("due_date")
+    )
 
 
 def get_invoice_for_student_user(invoice_id, student_user_id) -> FeeInvoice | None:
@@ -120,6 +130,20 @@ def adjust_invoice_total(invoice: FeeInvoice, delta_paise: int, user=None) -> Fe
     if user:
         invoice.updated_by = user
     invoice.save(update_fields=["total_paise", "status", "updated_by", "updated_at"])
+    return invoice
+
+
+def write_off_invoice(invoice: FeeInvoice, user=None) -> FeeInvoice:
+    """Mark invoice and open installments as written off."""
+    invoice.status = InvoiceStatus.WRITTEN_OFF
+    invoice.paid_paise = invoice.total_paise
+    if user:
+        invoice.updated_by = user
+    invoice.save(update_fields=["status", "paid_paise", "updated_by", "updated_at"])
+    for inst in invoice.installments.exclude(status=InvoiceStatus.PAID):
+        inst.status = InvoiceStatus.WRITTEN_OFF
+        inst.paid_paise = inst.amount_paise
+        inst.save(update_fields=["status", "paid_paise", "updated_at"])
     return invoice
 
 

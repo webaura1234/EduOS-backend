@@ -6,6 +6,7 @@ from django.db import transaction
 from apps.fees.enums import InvoiceStatus
 from apps.fees.models import FeeInvoice
 from apps.fees.queries.concession import list_approved_requests_for_student
+from apps.fees.helpers.concession import discount_line_for_request
 from apps.fees.queries.invoice import (
     create_installment,
     create_invoice,
@@ -33,11 +34,13 @@ def generate_invoices_for_batch(*, branch, batch_id, academic_year, fee_structur
         # 1. Get or create assignment
         assignment = get_assignment_for_student_structure(student.id, fee_structure.id)
         if assignment is None:
+            approved = list(list_approved_requests_for_student(student.id))
+            components = fee_structure.components or []
+            base_paise = sum(int(c.get("amount_paise", 0)) for c in components)
             discount_lines = [
-                {"request_id": str(req.id),
-                 "label": req.rule.name if req.rule else "Concession",
-                 "amount_paise": req.amount_paise}
-                for req in list_approved_requests_for_student(student.id)
+                discount_line_for_request(req, base_paise=base_paise)
+                for req in approved
+                if discount_line_for_request(req, base_paise=base_paise)["amount_paise"] > 0
             ]
             assignment = create_assignment(
                 student=student,

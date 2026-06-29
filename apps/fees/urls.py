@@ -14,6 +14,7 @@ from apps.fees.views import (
     FeeStructureViewSet,
     GenerateInvoicesView,
     ParentPortalChildDuesView,
+    ParentPortalChildFeesView,
     ParentPortalChildPayView,
     RazorpayWebhookView,
     RecordOfflinePaymentView,
@@ -23,6 +24,7 @@ from apps.fees.views import (
     StudentPortalFeesView,
     StudentPortalReceiptsView,
     VerifyPaymentCaptureView,
+    WriteOffInvoiceView,
 )
 
 from apps.fees.views.admin_overview import AdminFeesOverviewView
@@ -50,6 +52,8 @@ urlpatterns = [
     path("assignments/", StudentFeeAssignmentView.as_view(), name="assignments"),
     path("invoices/generate/", GenerateInvoicesView.as_view(), name="invoices-generate"),
     
+    path("invoices/<uuid:invoice_id>/write-off/", WriteOffInvoiceView.as_view(), name="invoice-write-off"),
+    
     # Dashboards & Ops
     path("collection/", CollectionDashboardView.as_view(), name="collection"),
     path("defaulters/", DefaultersListView.as_view(), name="defaulters"),
@@ -67,6 +71,7 @@ urlpatterns = [
     path("me/receipts/", StudentPortalReceiptsView.as_view(), name="student-receipts"),
     
     # Parent Portal
+    path("children/<uuid:student_id>/fees/", ParentPortalChildFeesView.as_view(), name="parent-child-fees"),
     path("children/<uuid:student_id>/dues/", ParentPortalChildDuesView.as_view(), name="parent-child-dues"),
     path("children/<uuid:student_id>/pay/", ParentPortalChildPayView.as_view(), name="parent-child-pay"),
 ]

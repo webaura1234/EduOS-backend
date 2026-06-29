@@ -9,6 +9,7 @@ from .v1.views import (
     FeeStructureViewSet,
     GenerateInvoicesView,
     ParentPortalChildDuesView,
+    ParentPortalChildFeesView,
     ParentPortalChildPayView,
     RazorpayWebhookView,
     RecordOfflinePaymentView,
@@ -18,6 +19,7 @@ from .v1.views import (
     StudentPortalFeesView,
     StudentPortalReceiptsView,
     VerifyPaymentCaptureView,
+    WriteOffInvoiceView,
 )
 
 __all__ = [
@@ -38,6 +40,8 @@ __all__ = [
     "StudentPortalFeesView",
     "StudentPortalReceiptsView",
     "ParentPortalChildDuesView",
+    "ParentPortalChildFeesView",
     "ParentPortalChildPayView",
     "RefundViewSet",
+    "WriteOffInvoiceView",
 ]

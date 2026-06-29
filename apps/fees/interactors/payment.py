@@ -30,8 +30,16 @@ def _issue_receipt(invoice, payment, user=None):
     fy = financial_year_for(timezone.localdate())
     counter = get_receipt_counter(invoice.branch_id, fy)
     number = next_receipt_number(counter)
-    create_receipt(branch=invoice.branch, payment=payment, sequence_number=number,
-                   financial_year=fy, issued_at=timezone.now(), user=user)
+    pdf_key = f"receipts/{invoice.branch_id}/{fy}/{number:06d}.pdf"
+    create_receipt(
+        branch=invoice.branch,
+        payment=payment,
+        sequence_number=number,
+        financial_year=fy,
+        issued_at=timezone.now(),
+        pdf_s3_key=pdf_key,
+        user=user,
+    )
 
 
 def _auto_refund(payment, amount_paise, reason):

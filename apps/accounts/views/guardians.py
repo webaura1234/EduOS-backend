@@ -81,6 +81,7 @@ class AdminGuardianOverviewView(APIView):
     def get(self, request) -> Response:
         branch, branch_scope = resolve_management_scope(request)
         tenant_id = request.user.tenant_id
+        class_param = request.query_params.get("class")
 
         if branch:
             links = list(list_guardian_links(branch.pk))
@@ -105,17 +106,34 @@ class AdminGuardianOverviewView(APIView):
                 tenant_id=tenant_id, role=Role.PARENT, is_active=True,
             )
 
+        class_options = sorted({label for label in class_by_profile.values() if label})
+
+        if class_param == "all":
+            class_scope = "all"
+        elif class_param:
+            class_scope = class_param
+        elif request.user.role == Role.SUPER_ADMIN:
+            class_scope = class_options[0] if class_options else "all"
+        else:
+            class_scope = "all"
+
         students = []
         for u in student_qs.select_related("student_profile", "branch").order_by(
             "first_name", "last_name",
         ):
             profile = getattr(u, "student_profile", None)
             sid = str(profile.id) if profile else str(u.id)
-            bid, bname = branch_by_profile.get(sid, (str(u.branch_id) if u.branch_id else "", u.branch.name if u.branch_id else ""))
+            class_label = class_by_profile.get(sid, "")
+            if class_scope != "all" and class_label != class_scope:
+                continue
+            bid, bname = branch_by_profile.get(
+                sid,
+                (str(u.branch_id) if u.branch_id else "", u.branch.name if u.branch_id else ""),
+            )
             students.append({
                 "studentId": sid,
                 "studentName": u.full_name,
-                "classLabel": class_by_profile.get(sid, ""),
+                "classLabel": class_label,
                 "branchId": bid or None,
                 "branchName": bname,
             })
@@ -127,19 +145,28 @@ class AdminGuardianOverviewView(APIView):
         link_rows = []
         for link in links:
             sid = _student_id(link.student)
+            class_label = class_by_profile.get(sid, "")
+            if class_scope != "all" and class_label != class_scope:
+                continue
             bid, bname = branch_by_profile.get(sid, ("", ""))
             link_rows.append(_link(
                 link,
-                class_label=class_by_profile.get(sid, ""),
+                class_label=class_label,
                 branch_id=bid or None,
                 branch_name=bname,
             ))
+
+        if class_scope != "all":
+            guardian_ids = {row["guardianUserId"] for row in link_rows}
+            guardians = {uid: name for uid, name in guardians.items() if uid in guardian_ids}
 
         return Response({
             "links": link_rows,
             "students": students,
             "guardians": [{"userId": uid, "name": name} for uid, name in guardians.items()],
             "branchScope": branch_scope,
+            "classScope": class_scope,
+            "classOptions": class_options,
         })
 
 

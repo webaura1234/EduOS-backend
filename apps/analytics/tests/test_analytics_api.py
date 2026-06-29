@@ -126,6 +126,8 @@ def test_super_admin_dashboard_branch_kpis(env):
     assert row["studentCount"] == 2
     assert row["facultyCount"] == 1
     assert row["attendancePercent"] == 0
+    assert "facultyAttendancePercent" in row
+    assert row["facultyAttendancePercent"] == 0
     assert "pendingPaise" in row
     assert body["totals"]["students"] >= 2
     assert body["totals"]["faculty"] >= 1
@@ -133,6 +135,62 @@ def test_super_admin_dashboard_branch_kpis(env):
 
 def test_super_admin_dashboard_denied_to_admin(env):
     resp = _client(env["admin"]).get(reverse("analytics:dashboard-super-admin"))
+    assert resp.status_code == 403
+
+
+def test_super_admin_results_comparison(env):
+    from apps.examinations.tests.test_result_api import _setup_env, _setup_exam_with_submitted_marks
+
+    exam_env = _setup_env(institution_type="school")
+    super_admin = UserFactory(
+        role=Role.SUPER_ADMIN,
+        tenant=exam_env["tenant"],
+        branch=exam_env["branch"],
+        phone="+919830000099",
+        custom_login_id=None,
+        must_change_password=False,
+    )
+    exam_id, _ = _setup_exam_with_submitted_marks(exam_env)
+
+    admin = _client(exam_env["admin"])
+    compute = admin.post(
+        reverse("examinations:exam-results-compute", kwargs={"exam_id": exam_id}),
+        format="json",
+    )
+    assert compute.status_code == 200, compute.content
+    token = _data(compute)["confirmation"]["confirmToken"]
+    publish = admin.post(
+        reverse("examinations:exam-results-publish", kwargs={"exam_id": exam_id}),
+        {"confirmToken": token, "note": "Published"},
+        format="json",
+    )
+    assert publish.status_code == 200, publish.content
+
+    resp = _client(super_admin).get(reverse("analytics:super-admin-results-comparison"))
+    assert resp.status_code == 200
+    body = _data(resp)
+    assert len(body["branches"]) == 1
+    row = body["branches"][0]
+    assert row["branchId"] == str(exam_env["branch"].pk)
+    assert row["passPercent"] == 100
+    assert row["appeared"] == 1
+    assert "toppers" not in body
+    assert "filterOptions" in body
+    assert any(opt["examId"] == str(exam_id) for opt in body["filterOptions"]["exams"])
+    assert isinstance(body["scoreBands"], list)
+
+    filtered = _client(super_admin).get(
+        reverse("analytics:super-admin-results-comparison"),
+        {"branchId": str(exam_env["branch"].pk), "examId": str(exam_id)},
+    )
+    assert filtered.status_code == 200
+    filtered_body = _data(filtered)
+    assert len(filtered_body["branches"]) == 1
+    assert filtered_body["selectedExamId"] == str(exam_id)
+
+
+def test_super_admin_results_comparison_denied_to_admin(env):
+    resp = _client(env["admin"]).get(reverse("analytics:super-admin-results-comparison"))
     assert resp.status_code == 403
 
 

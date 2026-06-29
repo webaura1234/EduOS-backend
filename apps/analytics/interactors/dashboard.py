@@ -15,6 +15,8 @@ from apps.attendance.queries import roster as roster_q
 from apps.fees.interactors.report import GetCollectionDashboardInteractor
 from apps.fees.queries.defaulter import list_defaulters
 from apps.grievances.queries import count_open as count_open_grievances
+from apps.hr.queries import employee as emp_q
+from apps.hr.queries import staff_attendance as sa_q
 from apps.hr.queries.leave import count_pending_applications, leave_summary
 from apps.organizations.queries.branch import list_branches
 from django.utils import timezone
@@ -66,6 +68,20 @@ def _branch_attendance_percent(branch) -> int:
     return round(sum(row["percent"] for row in rows) / len(rows))
 
 
+def _branch_faculty_attendance_percent(branch) -> int:
+    """Average faculty staff-attendance % for a branch in the current month."""
+    today = timezone.localdate()
+    user_ids = [e.user_id for e in emp_q.list_employees(branch.pk)]
+    user_ids.extend(u.pk for u in emp_q.list_faculty_without_employee(branch.pk))
+    if not user_ids:
+        return 0
+    percents = [
+        sa_q.month_attendance_summary(uid, branch, today.year, today.month)["attendancePercent"]
+        for uid in user_ids
+    ]
+    return round(sum(percents) / len(percents))
+
+
 def super_admin_dashboard(tenant) -> dict:
     """F-021/022/025/038/039 — consolidated + per-branch comparison across the tenant."""
     branches = list(list_branches(tenant.pk))
@@ -90,6 +106,7 @@ def super_admin_dashboard(tenant) -> dict:
             "studentCount": roster_q.all_active_students_in_branch(b.pk).count(),
             "facultyCount": count_active_by_role_in_branch(b.pk, Role.FACULTY),
             "attendancePercent": _branch_attendance_percent(b),
+            "facultyAttendancePercent": _branch_faculty_attendance_percent(b),
         })
     return {
         "totals": {

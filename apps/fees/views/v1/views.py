@@ -59,6 +59,7 @@ from apps.fees.queries.invoice import (
     list_dues_for_student,
     list_dues_for_student_user,
 )
+from apps.fees.interactors.portal_fees import build_portal_fees_payload
 from apps.fees.queries.portal import guardian_portal_link, list_receipts_for_student
 from apps.fees.queries.refund import list_refunds
 from apps.fees.queries.structure import list_structures
@@ -138,16 +139,15 @@ class StudentFeeAssignmentView(APIView):
         if assignment_exists(student.id, structure.id):
             raise ValidationError({"nonFieldErrors": "Assignment already exists for this student and structure."})
 
-        # Fetch concessions via query layer
+        from apps.fees.helpers.concession import discount_line_for_request
         approved_concessions = list_approved_requests_for_student(student.id)
-        discount_lines = []
-        for req in approved_concessions:
-            label = req.rule.name if req.rule else "Concession"
-            discount_lines.append({
-                "request_id": str(req.id),
-                "label": label,
-                "amount_paise": req.amount_paise,
-            })
+        components = structure.components or []
+        base_paise = sum(int(c.get("amount_paise", 0)) for c in components)
+        discount_lines = [
+            discount_line_for_request(req, base_paise=base_paise)
+            for req in approved_concessions
+            if discount_line_for_request(req, base_paise=base_paise)["amount_paise"] > 0
+        ]
 
         assignment = create_assignment(
             student=student,
@@ -491,55 +491,16 @@ class StudentPortalFeesView(APIView):
     permission_classes = [IsAuthenticated, IsStudent]
 
     def get(self, request):
-        import datetime
-
-        from django.conf import settings as dj_settings
-
         from apps.accounts.models import StudentProfile
         try:
             student = request.user.student_profile
         except StudentProfile.DoesNotExist:
             raise ValidationError("Student profile not found.")
 
-        tenant = request.user.tenant
-        inst = "college" if getattr(tenant, "institution_type", "") == "college" else "school"
-
-        invoices = list(list_dues_for_student_user(student.user_id))
-        total_due = sum(i.total_paise for i in invoices)
-        paid = sum(i.paid_paise for i in invoices)
-        balance = sum(i.balance_paise for i in invoices)
-        today = datetime.date.today()
-        open_due_dates = [i.due_date for i in invoices if i.due_date and i.balance_paise > 0]
-        next_due = min(open_due_dates).isoformat() if open_due_dates else None
-        is_overdue = any(d < today for d in open_due_dates)
-
-        payments = []
-        for r in list_receipts_for_student(student.user_id):
-            p = r.payment
-            payments.append({
-                "id": str(r.id),
-                "paidAt": r.issued_at.isoformat() if r.issued_at else "",
-                "amount": round(p.amount_paise / 100, 2),
-                "method": p.method,
-                "receiptNo": f"{r.financial_year}/{r.sequence_number}",
-                "orderId": p.razorpay_order_id or "",
-                "status": p.status,
-            })
-
-        return Response({
-            "institutionType": inst,
-            "ledger": {
-                "totalDue": round(total_due / 100, 2),
-                "paid": round(paid / 100, 2),
-                "balance": round(balance / 100, 2),
-                "nextDueDate": next_due,
-                "isOverdue": is_overdue,
-            },
-            "payments": payments,
-            "razorpayKeyId": dj_settings.RAZORPAY_KEY_ID,
-            # Exam fees aren't billed separately in the current data model → nothing due.
-            "examFees": {"rows": [], "allPaid": True},
-        })
+        return Response(build_portal_fees_payload(
+            student_user_id=student.user_id,
+            tenant=request.user.tenant,
+        ))
 
 
 class StudentPortalReceiptsView(APIView):
@@ -556,11 +517,25 @@ class StudentPortalReceiptsView(APIView):
         return Response(ReceiptSerializer(receipts, many=True).data)
 
 
+class ParentPortalChildFeesView(APIView):
+    """Composed fees payload for a linked child (same shape as student portal)."""
+    permission_classes = [IsAuthenticated, IsParent]
+
+    def get(self, request, student_id):
+        link = guardian_portal_link(request.user.id, student_id)
+        if not link:
+            raise PermissionDenied("You do not have access to this student's portal.")
+
+        return Response(build_portal_fees_payload(
+            student_user_id=student_id,
+            tenant=request.user.tenant,
+        ))
+
+
 class ParentPortalChildDuesView(APIView):
     permission_classes = [IsAuthenticated, IsParent]
 
     def get(self, request, student_id):
-        # Verify parent links to student via query layer
         link = guardian_portal_link(request.user.id, student_id)
         if not link:
             raise PermissionDenied("You do not have access to this student's portal.")
@@ -573,7 +548,6 @@ class ParentPortalChildPayView(APIView):
     permission_classes = [IsAuthenticated, IsParent]
 
     def post(self, request, student_id):
-        # Verify parent links to student via query layer
         link = guardian_portal_link(request.user.id, student_id)
         if not link:
             raise PermissionDenied("You do not have access to this student's portal.")
@@ -648,6 +622,27 @@ class RefundViewSet(viewsets.ModelViewSet):
             return Response(RefundSerializer(refund).data)
         except DjangoValidationError as exc:
             raise ValidationError(exc.messages)
+
+
+class WriteOffInvoiceView(APIView):
+    """POST — write off an open invoice (admin only)."""
+    permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
+
+    def post(self, request, invoice_id):
+        from apps.fees.queries.invoice import get_invoice, write_off_invoice
+
+        branch = get_request_branch(request)
+        invoice = get_invoice(branch.id, invoice_id)
+        if invoice is None:
+            return Response({"error": "Invoice not found."}, status=status.HTTP_404_NOT_FOUND)
+        if invoice.status == InvoiceStatus.PAID:
+            raise ValidationError("Invoice is already fully paid.")
+        if invoice.status == InvoiceStatus.WRITTEN_OFF:
+            return Response(FeeInvoiceSerializer(invoice).data)
+
+        write_off_invoice(invoice, user=request.user)
+        invoice.refresh_from_db()
+        return Response(FeeInvoiceSerializer(invoice).data)
 
 
 # ── Super-admin branch fee ledger ────────────────────────────────────────────

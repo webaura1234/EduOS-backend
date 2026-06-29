@@ -177,7 +177,10 @@ def list_active_entries_for_branch(branch_id):
         timetable__batch__course__department__branch_id=branch_id,
         status=TimetableEntryStatus.ACTIVE,
         is_active=True,
-    ).select_related("timetable", "batch_subject", "period_slot", "faculty", "room")
+    ).select_related(
+        "timetable__batch__course", "batch_subject__subject", "period_slot",
+        "faculty", "room",
+    )
 
 
 def list_faculty_teaching_slots(branch_id, faculty_id):
