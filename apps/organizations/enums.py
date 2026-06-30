@@ -33,6 +33,13 @@ class BillingStatus(models.TextChoices):
     CANCELLED = "cancelled", "Cancelled"
 
 
+class StudentPlatformSubscriptionStatus(models.TextChoices):
+    PAID = "paid", "Paid"
+    UNPAID = "unpaid", "Unpaid"
+    OVERDUE = "overdue", "Overdue"
+    WAIVED = "waived", "Waived"
+
+
 class QuotaResource(models.TextChoices):
     """Metered resources tracked per tenant (TenantQuota)."""
     STUDENTS = "students", "Students"

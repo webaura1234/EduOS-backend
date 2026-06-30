@@ -44,6 +44,20 @@ def _get_client_ip(request) -> str:
     return request.META.get("REMOTE_ADDR", "")
 
 
+def _revoke_request_access_token(request) -> None:
+    """Blocklist the access token from the current request in Redis."""
+    from django.utils import timezone
+    from apps.accounts.tokens import revoke_access_token_jti
+    payload = getattr(request, "auth", None)  # set by JWTAuthentication
+    if not isinstance(payload, dict):
+        return
+    jti = payload.get("jti")
+    exp = payload.get("exp")
+    if jti and exp:
+        remaining = int(exp - timezone.now().timestamp())
+        revoke_access_token_jti(jti, remaining)
+
+
 class LoginView(APIView):
     """
     POST /api/v1/auth/login/
@@ -126,8 +140,8 @@ class LogoutView(APIView):
     """
     POST /api/v1/auth/logout/
 
-    Revoke the provided refresh token. Idempotent.
-    Requires authentication.
+    Revoke the provided refresh token and blocklist the current access token JTI.
+    Idempotent. Requires authentication.
     """
     permission_classes = [IsAuthenticated]
 
@@ -136,6 +150,9 @@ class LogoutView(APIView):
         serializer.is_valid(raise_exception=True)
 
         logout(refresh_token_str=serializer.validated_data["refresh"])
+
+        # Blocklist the current access token so it cannot be reused after logout.
+        _revoke_request_access_token(request)
 
         return Response(
             MessageDTO(detail="Logged out successfully."), status=status.HTTP_200_OK
@@ -245,6 +262,7 @@ class SwitchLinkedAccountView(APIView):
     fresh token pair for it (F-223).
     """
     permission_classes = [IsAuthenticated]
+    throttle_scope = "auth"  # 10 req/min — prevents brute-force via switch endpoint
 
     def post(self, request) -> Response:
         serializer = SwitchLinkedSerializer(data=request.data)

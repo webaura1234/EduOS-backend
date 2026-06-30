@@ -14,7 +14,7 @@ from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import AuthenticationFailed
 
 from apps.accounts.queries.user import get_user_for_token
-from apps.accounts.tokens import decode_access_token
+from apps.accounts.tokens import decode_access_token, is_access_token_revoked
 
 logger = logging.getLogger("apps.core.authentication")
 
@@ -63,6 +63,11 @@ class JWTAuthentication(BaseAuthentication):
 
         # Decode and verify the access token
         payload = decode_access_token(token)
+
+        # Check JTI blocklist (logout / password-change revocation via Redis)
+        jti = payload.get("jti")
+        if jti and is_access_token_revoked(jti):
+            raise AuthenticationFailed("Token has been revoked. Please log in again.")
 
         # Fetch user from DB (DB access lives in the queries layer)
         user_id = payload.get("sub")

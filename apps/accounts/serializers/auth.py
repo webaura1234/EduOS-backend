@@ -52,6 +52,16 @@ class PlatformLoginSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True, style={"input_type": "password"})
 
 
+class MFAVerifySerializer(serializers.Serializer):
+    """Complete login for admin/super_admin/platform_owner by submitting the email OTP."""
+    mfa_session_token = serializers.CharField()
+    otp = serializers.CharField(
+        min_length=6,
+        max_length=6,
+        help_text="6-digit code sent to the registered email address.",
+    )
+
+
 class BranchAdminSerializer(serializers.Serializer):
     """Branch-admin row for the super-admin admin-management screen."""
     id = serializers.UUIDField(read_only=True)

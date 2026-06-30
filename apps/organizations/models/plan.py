@@ -45,6 +45,17 @@ class PlanSubscription(BaseModel):
 
     valid_until = models.DateField(null=True, blank=True)
 
+    # Trial lifecycle dates (populated for billing_status=TRIAL).
+    trial_started_at = models.DateTimeField(null=True, blank=True)
+    trial_ends_at = models.DateTimeField(null=True, blank=True)
+    grace_ends_at = models.DateTimeField(null=True, blank=True)
+    grace_started_at = models.DateTimeField(null=True, blank=True)
+
+    # Billing snapshot — updated on payment events.
+    last_paid_at = models.DateTimeField(null=True, blank=True)
+    next_due_at = models.DateTimeField(null=True, blank=True)
+    amount_due_inr = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
     class Meta:
         db_table = "organizations_plan_subscription"
         verbose_name = "Plan Subscription"

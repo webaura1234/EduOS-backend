@@ -257,6 +257,11 @@ PAYMENTS_GATEWAY_MODE = os.environ.get("PAYMENTS_GATEWAY_MODE", "sandbox")
 MSG91_AUTH_KEY = os.environ.get("MSG91_AUTH_KEY", "")
 MSG91_SENDER_ID = os.environ.get("MSG91_SENDER_ID", "EDUOS")
 
+# MSG91 Email (for MFA OTP emails — admin / super_admin / platform_owner)
+MSG91_EMAIL_FROM = os.environ.get("MSG91_EMAIL_FROM", "noreply@eduerp.in")
+MSG91_EMAIL_FROM_NAME = os.environ.get("MSG91_EMAIL_FROM_NAME", "EduOS")
+MSG91_EMAIL_DOMAIN = os.environ.get("MSG91_EMAIL_DOMAIN", "eduerp.in")
+
 # ──────────────────────────────────────────────
 # AI (Anthropic)
 # ──────────────────────────────────────────────

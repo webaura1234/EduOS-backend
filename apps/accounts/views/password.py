@@ -46,6 +46,11 @@ class ForceChangePasswordView(APIView):
             new_password=data["new_password"],
         )
 
+        # Blocklist the current access token — all refresh tokens already revoked
+        # by force_change_password; this kills the current session immediately.
+        from apps.accounts.views.auth import _revoke_request_access_token
+        _revoke_request_access_token(request)
+
         return Response(
             MessageDTO(detail="Password changed successfully. Please log in again."),
             status=status.HTTP_200_OK,

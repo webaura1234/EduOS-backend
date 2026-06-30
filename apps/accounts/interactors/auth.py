@@ -12,7 +12,7 @@ from django.contrib.auth import authenticate
 from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
 
 from apps.accounts.phone import normalize_phone as _normalize_phone
-from apps.accounts.dtos import LoginResolutionDTO, LoginResponseDTO, TokenPairDTO
+from apps.accounts.dtos import LoginResolutionDTO, LoginResponseDTO, MFARequiredDTO, TokenPairDTO
 
 from apps.accounts.constants import (
     LOGIN_ATTEMPT_WINDOW_MINUTES,
@@ -159,7 +159,16 @@ def login(
         user=user,
     )
 
-    # 4. Issue tokens
+    # 4. MFA gate — admin/super_admin/platform_owner require email OTP
+    from apps.accounts.interactors.mfa import MFA_REQUIRED_ROLES, issue_mfa_challenge
+    if user.role in MFA_REQUIRED_ROLES:
+        challenge = issue_mfa_challenge(user)
+        if challenge is not None:
+            logger.info("MFA challenge issued: user=%s role=%s", user.id, user.role)
+            return challenge
+        # No email set — fall through to token issuance (graceful degradation)
+
+    # 5. Issue tokens
     logger.info("Login success: user=%s role=%s", user.id, user.role)
     return _issue_login_tokens(user, device_info, ip_address)
 
@@ -277,16 +286,24 @@ def logout(refresh_token_str: str) -> None:
 
 def platform_login(
     identifier: str, password: str, device_info: str = "", ip_address=None,
-) -> LoginResponseDTO:
+):
     """Authenticate a tenant-less PLATFORM_OWNER by phone (separate platform app).
 
     Platform owners have no tenant, so the standard tenant-scoped login can't serve them.
+    Returns LoginResponseDTO normally, or MFARequiredDTO when email MFA is required.
     """
     user = get_active_user_for_login(
         tenant_id=None, role=Role.PLATFORM_OWNER, phone=_normalize_phone(identifier),
     )
     if user is None or not user.check_password(password):
         raise AuthenticationFailed("Invalid credentials.")
+
+    from apps.accounts.interactors.mfa import issue_mfa_challenge
+    challenge = issue_mfa_challenge(user)
+    if challenge is not None:
+        logger.info("MFA challenge issued for platform owner: user=%s", user.id)
+        return challenge
+
     return _issue_login_tokens(user, device_info, ip_address)
 
 

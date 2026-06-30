@@ -912,7 +912,7 @@ def seed():
     )
     PlanSubscription.objects.get_or_create(
         tenant=tenant,
-        defaults=dict(plan="starter", billing_status="trial", **_PLAN),
+        defaults=dict(plan="starter", billing_status="paid", **_PLAN),
     )
     for resource, hard in (
         ("students", _PLAN["student_limit"]),
@@ -961,6 +961,11 @@ def seed():
 
     print("\nPlatform owner (platform app — not institution portal):")
     _seed_platform_owner()
+
+    from apps.organizations.billing.student_subscription import backfill_student_platform_subscriptions
+
+    created_subs = backfill_student_platform_subscriptions(paid_fraction=0.6)
+    print(f"\nStudent platform subscriptions: {created_subs} row(s) created (60% paid demo mix)")
 
     print("\n" + "=" * 52)
     print(f"Done. Login at {SUBDOMAIN}.<your-domain>")

@@ -1,5 +1,5 @@
 """
-Queries — platform-owner tenant management (list / get / create / status).
+Queries — platform-owner tenant management (list / get / create / status / plans).
 
 All DB access for the platform tenant screens lives here. Frontend status
 (active | inactive | pending) is mapped to/from the richer model lifecycle.
@@ -8,7 +8,45 @@ All DB access for the platform tenant screens lives here. Frontend status
 from django.db.models import Q
 from django.utils import timezone
 
+from apps.accounts.models.user import Role
+from apps.accounts.queries.user import count_active_by_role_in_tenant
 from apps.organizations.models import Branch, PlanSubscription, Tenant, TenantSettings
+
+# ── Plan catalog ──────────────────────────────────────────────────────────────
+# Mirrors packages/constants/src/platform-owner.ts PLATFORM_PLAN_LIMITS.
+PLAN_LIMITS: dict[str, dict] = {
+    "starter": {
+        "label": "Starter",
+        "maxBranches": 1,
+        "maxStudents": 500,
+        "includedFeatures": ["Admissions", "Attendance", "Announcements"],
+    },
+    "growth": {
+        "label": "Growth",
+        "maxBranches": 5,
+        "maxStudents": 2500,
+        "includedFeatures": [
+            "Admissions",
+            "Attendance",
+            "Online fees",
+            "Examinations",
+            "Parent portal",
+        ],
+    },
+    "enterprise": {
+        "label": "Enterprise",
+        "maxBranches": 99,
+        "maxStudents": 50000,
+        "includedFeatures": [
+            "All modules",
+            "HR & payroll",
+            "Advanced analytics",
+            "Priority support",
+        ],
+    },
+}
+
+PLAN_ORDER = ["starter", "growth", "enterprise"]
 
 # Map model lifecycle → the 3-state status the platform UI uses.
 _MODEL_TO_UI_STATUS = {
@@ -113,6 +151,160 @@ def create_primary_branch(tenant, name, city, state, user=None) -> Branch:
         created_by=user,
         updated_by=user,
     )
+
+
+def plan_catalog() -> list[dict]:
+    """Return the static plan catalog for the frontend PlatformPlanLimits[] type."""
+    return [
+        {"plan": plan, **limits}
+        for plan, limits in PLAN_LIMITS.items()
+    ]
+
+
+def plan_rows() -> list[dict]:
+    """Return PlatformTenantPlanRow dicts for every tenant."""
+    tenants = Tenant.objects.select_related("subscription").order_by("name")
+    rows = []
+    for tenant in tenants:
+        subscription = getattr(tenant, "subscription", None)
+        current_plan = subscription.plan if subscription else "starter"
+        limits = PLAN_LIMITS.get(current_plan, PLAN_LIMITS["starter"])
+        b_count = branch_count(tenant.id)
+        s_count = count_active_by_role_in_tenant(tenant.id, Role.STUDENT)
+        rows.append({
+            "tenantId": str(tenant.id),
+            "tenantName": tenant.name,
+            "subdomain": tenant.subdomain,
+            "status": to_ui_status(tenant.status),
+            "currentPlan": current_plan,
+            "branchCount": b_count,
+            "studentCount": s_count,
+            "restrictedFeatures": [],
+            "overBranchLimit": b_count > limits["maxBranches"],
+            "overStudentLimit": s_count > limits["maxStudents"],
+        })
+    return rows
+
+
+def validate_plan_limits(tenant_id, new_plan: str) -> dict | None:
+    """
+    Return None if the plan change is allowed.
+    Return a PlatformPlanLimitBlockedResponse-shaped dict if limits would be exceeded.
+    """
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        return None
+
+    limits = PLAN_LIMITS.get(new_plan)
+    if limits is None:
+        return None
+
+    b_count = branch_count(tenant.id)
+    s_count = count_active_by_role_in_tenant(tenant.id, Role.STUDENT)
+    plan_label = limits["label"]
+
+    if b_count > limits["maxBranches"]:
+        return {
+            "limitBlocked": True,
+            "title": f"Cannot downgrade to {plan_label}",
+            "detail": (
+                f"This institution has {b_count} branch(es) but {plan_label} "
+                f"allows at most {limits['maxBranches']}. "
+                "Remove branches before downgrading."
+            ),
+            "violation": {
+                "kind": "branch_limit",
+                "plan": new_plan,
+                "planLabel": plan_label,
+                "message": f"Branch limit exceeded ({b_count} > {limits['maxBranches']})",
+                "maxBranches": limits["maxBranches"],
+                "branchCount": b_count,
+            },
+        }
+
+    if s_count > limits["maxStudents"]:
+        return {
+            "limitBlocked": True,
+            "title": f"Cannot downgrade to {plan_label}",
+            "detail": (
+                f"This institution has {s_count} student(s) but {plan_label} "
+                f"allows at most {limits['maxStudents']:,}. "
+                "The student count must be reduced first."
+            ),
+            "violation": {
+                "kind": "student_limit",
+                "plan": new_plan,
+                "planLabel": plan_label,
+                "message": f"Student limit exceeded ({s_count} > {limits['maxStudents']})",
+                "maxStudents": limits["maxStudents"],
+                "studentCount": s_count,
+            },
+        }
+
+    return None
+
+
+def change_plan(tenant_id, new_plan: str, user=None) -> tuple[dict, str]:
+    """
+    Change a tenant's subscription plan.
+    Returns (PlatformChangePlanResult dict, previous_plan).
+    Raises ValueError if the tenant is not found.
+    Raises PlanLimitViolation (dict) if limits would be exceeded.
+    """
+    from apps.organizations.serializers.platform_tenant import tenant_summary
+
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        raise ValueError("Tenant not found.")
+
+    subscription = getattr(tenant, "subscription", None)
+    if subscription is None:
+        raise ValueError("Tenant has no subscription record.")
+
+    previous_plan = subscription.plan
+    if previous_plan == new_plan:
+        raise ValueError("Tenant is already on this plan.")
+
+    blocked = validate_plan_limits(tenant_id, new_plan)
+    if blocked:
+        raise _PlanLimitViolation(blocked)
+
+    subscription.plan = new_plan
+    if user is not None:
+        subscription.updated_by = user
+    subscription.save(update_fields=["plan", "updated_at", "updated_by"])
+
+    new_limits = PLAN_LIMITS.get(new_plan, {})
+    prev_limits = PLAN_LIMITS.get(previous_plan, {})
+    prev_rank = PLAN_ORDER.index(previous_plan) if previous_plan in PLAN_ORDER else 0
+    new_rank = PLAN_ORDER.index(new_plan) if new_plan in PLAN_ORDER else 0
+    is_downgrade = new_rank < prev_rank
+
+    restricted: list[str] = []
+    if is_downgrade:
+        prev_features = set(prev_limits.get("includedFeatures", []))
+        new_features = set(new_limits.get("includedFeatures", []))
+        restricted = sorted(prev_features - new_features)
+
+    message = f"Plan updated to {new_plan}."
+    if is_downgrade and restricted:
+        message += f" Restricted: {', '.join(restricted)}."
+
+    tenant.refresh_from_db(fields=["subscription"])
+    return {
+        "tenant": tenant_summary(tenant),
+        "previousPlan": previous_plan,
+        "newPlan": new_plan,
+        "restrictedFeatures": restricted,
+        "message": message,
+    }
+
+
+class _PlanLimitViolation(Exception):
+    """Internal exception carrying a PlatformPlanLimitBlockedResponse dict."""
+    def __init__(self, payload: dict):
+        super().__init__("Plan limit violated")
+        self.payload = payload
 
 
 def set_status(tenant: Tenant, *, model_status: str, user=None) -> Tenant:

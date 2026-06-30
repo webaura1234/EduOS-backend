@@ -21,6 +21,11 @@ def default_otp_expiry():
     return timezone.now() + timedelta(minutes=5)
 
 
+def default_mfa_token_expiry():
+    """MFA OTP records expire in 10 minutes."""
+    return timezone.now() + timedelta(minutes=10)
+
+
 def default_invite_expiry():
     """Invite links expire in 48 hours."""
     return timezone.now() + timedelta(hours=48)
@@ -110,6 +115,51 @@ class OTPRecord(BaseModel):
     @property
     def is_valid(self):
         return not self.is_used and not self.is_expired
+
+
+class MFAToken(BaseModel):
+    """
+    Stores email OTPs for the second factor during admin/super_admin/platform_owner login.
+
+    Business rules:
+      - A new MFA token supersedes any previous pending token for the same user.
+      - OTP expires in 10 minutes.
+      - Max 3 verification attempts per token.
+      - OTP is stored as SHA-256 hash, never plain text.
+    """
+
+    MAX_ATTEMPTS = 3
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.CASCADE,
+        related_name="mfa_tokens",
+    )
+    otp_hash = models.CharField(max_length=256)
+    email_sent_to = models.EmailField(max_length=254, blank=True, default="")
+    expires_at = models.DateTimeField(default=default_mfa_token_expiry)
+    is_used = models.BooleanField(default=False, db_index=True)
+    attempt_count = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = "accounts_mfa_token"
+        verbose_name = "MFA Token"
+        verbose_name_plural = "MFA Tokens"
+        indexes = [
+            models.Index(fields=["user", "is_used", "expires_at"]),
+        ]
+
+    def __str__(self):
+        return f"MFAToken(user={self.user_id}, used={self.is_used})"
+
+    @property
+    def is_expired(self):
+        return timezone.now() > self.expires_at
+
+    @property
+    def is_valid(self):
+        return not self.is_used and not self.is_expired and self.attempt_count < self.MAX_ATTEMPTS
 
 
 class InviteToken(BaseModel):

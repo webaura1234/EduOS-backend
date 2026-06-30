@@ -301,6 +301,9 @@ def create_user(
 
     if role == Role.STUDENT and batch is not None:
         _enroll_new_student(user=user, batch=batch, admin=admin)
+        from apps.organizations.billing.student_subscription import upsert_student_platform_subscription
+
+        upsert_student_platform_subscription(student_user=user)
 
     invite = None
     if send_invite:

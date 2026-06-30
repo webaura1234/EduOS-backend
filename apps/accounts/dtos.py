@@ -44,6 +44,26 @@ class LoginResponseDTO:
 
 
 @dataclass
+class MFARequiredDTO:
+    """
+    Returned by interactors.auth.login() and platform_login() when the user's role
+    requires a second factor (admin, super_admin, platform_owner).
+
+    The client must collect the OTP and POST to /api/v1/auth/mfa/verify/ with
+    the mfa_session_token to complete login.
+    """
+    mfa_session_token: str
+    email_hint: str
+
+    def to_dict(self) -> dict:
+        return {
+            "mfa_required": True,
+            "mfa_session_token": self.mfa_session_token,
+            "email_hint": self.email_hint,
+        }
+
+
+@dataclass
 class LoginResolutionDTO:
     """
     Returned by interactors.auth.disambiguate_login().

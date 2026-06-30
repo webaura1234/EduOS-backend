@@ -13,11 +13,30 @@ from datetime import timezone as dt_timezone
 
 import jwt
 from django.conf import settings
+from django.core.cache import cache
 from django.utils import timezone
 from rest_framework.exceptions import AuthenticationFailed
 
 from apps.accounts.models.token import RefreshToken
 from apps.accounts.queries.session import create_refresh_token_record
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Access Token Revocation (JTI blocklist — backed by Redis)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_REVOKED_JTI_PREFIX = "revoked_jti:"
+
+
+def revoke_access_token_jti(jti: str, ttl_seconds: int) -> None:
+    """Blocklist an access token by JTI. Expires automatically after ttl_seconds."""
+    if ttl_seconds > 0:
+        cache.set(f"{_REVOKED_JTI_PREFIX}{jti}", "1", timeout=ttl_seconds)
+
+
+def is_access_token_revoked(jti: str) -> bool:
+    """Return True if this JTI has been explicitly revoked."""
+    return bool(cache.get(f"{_REVOKED_JTI_PREFIX}{jti}"))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -155,5 +174,54 @@ def decode_refresh_token(token: str) -> dict:
 
     if payload.get("token_type") != "refresh":
         raise AuthenticationFailed("Token type must be 'refresh'.")
+
+    return payload
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MFA Session Token  (short-lived, 10 min, used between password-OK and OTP-OK)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_MFA_SESSION_LIFETIME_SECONDS = 10 * 60  # 10 minutes
+
+
+def generate_mfa_session_token(user) -> str:
+    """
+    Issue a short-lived MFA session token after password verification passes.
+
+    This is NOT an access token — it cannot authenticate any API call.
+    It only proves that the password step succeeded for this user.
+    """
+    now = timezone.now()
+    exp = now.timestamp() + _MFA_SESSION_LIFETIME_SECONDS
+    payload = {
+        "sub": str(user.id),
+        "token_type": "mfa_session",
+        "jti": str(uuid.uuid4()),
+        "iat": int(now.timestamp()),
+        "exp": int(exp),
+    }
+    return jwt.encode(payload, _signing_key(), algorithm=_algorithm())
+
+
+def decode_mfa_session_token(token: str) -> dict:
+    """
+    Decode and verify an MFA session token.
+    Raises AuthenticationFailed on any error.
+    """
+    try:
+        payload = jwt.decode(
+            token,
+            _signing_key(),
+            algorithms=[_algorithm()],
+            options={"require": ["sub", "exp", "jti", "token_type"]},
+        )
+    except jwt.ExpiredSignatureError:
+        raise AuthenticationFailed("MFA session has expired. Please log in again.")
+    except jwt.InvalidTokenError as exc:
+        raise AuthenticationFailed(f"Invalid MFA session token: {exc}")
+
+    if payload.get("token_type") != "mfa_session":
+        raise AuthenticationFailed("Invalid token type.")
 
     return payload

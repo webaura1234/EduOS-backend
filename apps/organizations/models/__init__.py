@@ -19,13 +19,25 @@ from apps.organizations.enums import (
     PlanType,
     QuotaPeriod,
     QuotaResource,
+    StudentPlatformSubscriptionStatus,
 )
 
 from .branch import Branch
 from .feature_flag import FeatureFlag
 from .institution import Tenant
 from .plan import PlanSubscription, TenantQuota
+from .platform_ops import (
+    PlatformAuditLog,
+    PlatformGlobalAnnouncement,
+    PlatformMaintenanceSetting,
+    PlatformPlanDefinition,
+    PlatformSupportModeLog,
+    PlatformSupportSession,
+    PlatformSupportTicket,
+    PlatformSupportTicketComment,
+)
 from .settings import TenantSettings
+from .student_platform_subscription import StudentPlatformSubscription
 
 __all__ = [
     # Models
@@ -35,11 +47,21 @@ __all__ = [
     "PlanSubscription",
     "TenantQuota",
     "FeatureFlag",
+    "StudentPlatformSubscription",
+    "PlatformAuditLog",
+    "PlatformSupportSession",
+    "PlatformSupportModeLog",
+    "PlatformGlobalAnnouncement",
+    "PlatformMaintenanceSetting",
+    "PlatformPlanDefinition",
+    "PlatformSupportTicket",
+    "PlatformSupportTicketComment",
     # Enums
     "InstitutionType",
     "InstitutionStatus",
     "PlanType",
     "BillingStatus",
+    "StudentPlatformSubscriptionStatus",
     "QuotaResource",
     "QuotaPeriod",
 ]

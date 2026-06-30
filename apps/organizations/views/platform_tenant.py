@@ -16,6 +16,7 @@ from apps.organizations.queries import platform_tenant as q
 from apps.organizations.serializers.platform_tenant import (
     CreatePlatformTenantSerializer,
     TenantStatusActionSerializer,
+    platform_stats_from_summaries,
     tenant_summary,
 )
 
@@ -36,8 +37,9 @@ class PlatformTenantListCreateView(APIView):
             city=p.get("city", "all"),
             status=p.get("status", "all"),
         )
+        summaries = [tenant_summary(t) for t in tenants]
         return Response({
-            "tenants": [tenant_summary(t) for t in tenants],
+            "tenants": summaries,
             "filterOptions": {
                 "cities": q.distinct_cities(),
                 "plans": ["starter", "growth", "enterprise"],
@@ -45,6 +47,7 @@ class PlatformTenantListCreateView(APIView):
                 "statuses": ["active", "inactive", "pending"],
             },
             "stats": q.status_counts(),
+            "platformStats": platform_stats_from_summaries(summaries),
         })
 
     def post(self, request) -> Response:
