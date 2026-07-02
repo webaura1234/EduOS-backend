@@ -1,13 +1,22 @@
 """Interactors — role dashboards (read aggregates).
 
 Composes the other modules through THEIR query/interactor layers — analytics adds no
-cross-app ORM (architecture rule). Computed live per request (OD-1); the view stamps
-`X-Cache-Age` / `lastUpdated`.
+cross-app ORM (architecture rule).
+
+The consolidated admin / super-admin rollups fan out across every branch (fees,
+attendance, defaulters, staff attendance), which is expensive. They are memoised in
+the shared cache for a short TTL keyed by branch/tenant; the view surfaces the real
+cache age via `X-Cache-Age` / `lastUpdated` so the UI can show "last updated". Per-user
+and single-branch dashboards stay live (no cache).
 """
 
-import datetime
+from django.conf import settings
+from django.core.cache import cache
 
-from apps.accounts.queries.user import count_active_by_role_in_branch, count_active_by_role_in_tenant
+from apps.accounts.queries.user import (
+    count_active_by_role_grouped_by_branch,
+    count_active_by_role_in_tenant,
+)
 from apps.accounts.models.user import Role
 from apps.admissions.queries.enquiry import funnel_counts
 from apps.attendance.interactors import report as att_report
@@ -28,13 +37,45 @@ from apps.academics.queries import timetable as tt_q
 from apps.examinations.interactors.hub import build_exam_hub
 
 
+# Very short memoisation window for the expensive consolidated rollups. Its only job
+# now (after the per-branch fan-out was batched) is to coalesce the burst a single
+# dashboard load produces — the dashboard panel and the alerts banner hit this same
+# tenant/branch computation in parallel — plus rapid back-and-forth navigation. Kept
+# small so the dashboard reflects DB changes near-instantly; the UI still shows the
+# real age via X-Cache-Age. Tunable per environment.
+DASHBOARD_CACHE_TTL = getattr(settings, "DASHBOARD_CACHE_TTL_SECONDS", 10)
+
+
+def _get_or_compute(cache_key: str, compute):
+    """Return ``(data, computed_at)``, memoising ``compute()`` for ``DASHBOARD_CACHE_TTL``.
+
+    ``computed_at`` is the timezone-aware moment the cached payload was produced, so the
+    view can report real cache age instead of a hardcoded zero.
+    """
+    hit = cache.get(cache_key)
+    if hit is not None:
+        data, computed_at = hit
+        return data, computed_at
+    data = compute()
+    computed_at = timezone.now()
+    cache.set(cache_key, (data, computed_at), DASHBOARD_CACHE_TTL)
+    return data, computed_at
+
+
 def collection_dashboard(branch) -> dict:
     """F-138 — real-time fee collection metrics for a branch."""
     return GetCollectionDashboardInteractor(branch.pk).execute()
 
 
-def admin_dashboard(branch, tenant) -> dict:
-    """F-051 / F-053 — admin snapshot + alerts for one branch."""
+def admin_dashboard(branch, tenant):
+    """F-051 / F-053 — admin snapshot + alerts for one branch. Returns ``(data, computed_at)``."""
+    return _get_or_compute(
+        f"dashboard:admin:{branch.pk}",
+        lambda: _compute_admin_dashboard(branch, tenant),
+    )
+
+
+def _compute_admin_dashboard(branch, tenant) -> dict:
     fees = GetCollectionDashboardInteractor(branch.pk).execute()
     shortage = att_report.shortage_report(branch)
     defaulters = list(list_defaulters(branch.pk))
@@ -55,46 +96,71 @@ def admin_dashboard(branch, tenant) -> dict:
     }
 
 
-def _branch_attendance_percent(branch) -> int:
-    """Average student attendance % for a branch (0 when no enrolled students)."""
-    report = att_report.ranking_report(
-        branch,
-        date_from=datetime.date(1970, 1, 1),
-        date_to=datetime.date(2999, 12, 31),
-    )
-    rows = report.get("rows") or []
-    if not rows:
-        return 0
-    return round(sum(row["percent"] for row in rows) / len(rows))
+def _branch_faculty_attendance_percents(branches) -> dict:
+    """Average faculty staff-attendance % (current month) per branch: ``{branch_pk: percent}``.
 
-
-def _branch_faculty_attendance_percent(branch) -> int:
-    """Average faculty staff-attendance % for a branch in the current month."""
+    ONE grouped staff-attendance query for all faculty across every branch (was one per
+    branch). Identical value to averaging each branch's faculty monthly percentages —
+    faculty belong to a single branch, so the per-branch id lists are disjoint.
+    """
+    branches = list(branches)
     today = timezone.localdate()
-    user_ids = [e.user_id for e in emp_q.list_employees(branch.pk)]
-    user_ids.extend(u.pk for u in emp_q.list_faculty_without_employee(branch.pk))
-    if not user_ids:
-        return 0
-    percents = [
-        sa_q.month_attendance_summary(uid, branch, today.year, today.month)["attendancePercent"]
-        for uid in user_ids
-    ]
-    return round(sum(percents) / len(percents))
+    ids_by_branch = {}
+    all_ids = []
+    for b in branches:
+        ids = [e.user_id for e in emp_q.list_employees(b.pk)]
+        ids.extend(u.pk for u in emp_q.list_faculty_without_employee(b.pk))
+        ids_by_branch[b.pk] = ids
+        all_ids.extend(ids)
+
+    percents = (
+        sa_q.month_attendance_percent_by_user(all_ids, today.year, today.month)
+        if all_ids
+        else {}
+    )
+
+    result = {}
+    for b in branches:
+        ids = ids_by_branch[b.pk]
+        if not ids:
+            result[b.pk] = 0
+            continue
+        values = [percents.get(uid, 0) for uid in ids]
+        result[b.pk] = round(sum(values) / len(values))
+    return result
 
 
-def super_admin_dashboard(tenant) -> dict:
-    """F-021/022/025/038/039 — consolidated + per-branch comparison across the tenant."""
+def super_admin_dashboard(tenant):
+    """F-021/022/025/038/039 — consolidated + per-branch comparison. Returns ``(data, computed_at)``."""
+    return _get_or_compute(
+        f"dashboard:super:{tenant.pk}",
+        lambda: _compute_super_admin_dashboard(tenant),
+    )
+
+
+def _compute_super_admin_dashboard(tenant) -> dict:
     branches = list(list_branches(tenant.pk))
+    # Batch the per-branch head-counts into one grouped query each (avoids a
+    # student- and faculty-count round-trip per branch in the loop below).
+    branch_ids = [b.pk for b in branches]
+    student_counts = roster_q.active_student_counts_by_branch(branch_ids)
+    faculty_counts = count_active_by_role_grouped_by_branch(tenant.pk, Role.FACULTY)
+    # Student attendance % AND low-attendance count for every branch from ONE
+    # aggregate scan (was one full-range ranking_report + one full-range
+    # shortage_report per branch — the dashboard's dominant cost).
+    attendance_summary = att_report.branch_attendance_summary(branches)
+    # Faculty staff-attendance % for every branch in one grouped query too.
+    faculty_attendance_percents = _branch_faculty_attendance_percents(branches)
     per_branch = []
     total_collected = total_invoiced = total_low_attendance = 0
     consolidated_defaulters = []
     for b in branches:
         fees = GetCollectionDashboardInteractor(b.pk).execute()
-        shortage = att_report.shortage_report(b)
+        low_attendance_count = attendance_summary.get(b.pk, {}).get("lowAttendanceCount", 0)
         defaulters = list(list_defaulters(b.pk))
         total_collected += fees["totalCollectedPaise"]
         total_invoiced += fees["totalInvoicedPaise"]
-        total_low_attendance += len(shortage["rows"])
+        total_low_attendance += low_attendance_count
         consolidated_defaulters.append({"branchId": str(b.pk), "branchName": b.name,
                                         "defaulterCount": len(defaulters)})
         per_branch.append({
@@ -102,11 +168,11 @@ def super_admin_dashboard(tenant) -> dict:
             "branchName": b.name,
             "collectedPaise": fees["totalCollectedPaise"],
             "pendingPaise": fees["totalPendingPaise"],
-            "lowAttendanceCount": len(shortage["rows"]),
-            "studentCount": roster_q.all_active_students_in_branch(b.pk).count(),
-            "facultyCount": count_active_by_role_in_branch(b.pk, Role.FACULTY),
-            "attendancePercent": _branch_attendance_percent(b),
-            "facultyAttendancePercent": _branch_faculty_attendance_percent(b),
+            "lowAttendanceCount": low_attendance_count,
+            "studentCount": student_counts.get(b.pk, 0),
+            "facultyCount": faculty_counts.get(b.pk, 0),
+            "attendancePercent": attendance_summary.get(b.pk, {}).get("percent", 0),
+            "facultyAttendancePercent": faculty_attendance_percents.get(b.pk, 0),
         })
     return {
         "totals": {

@@ -10,10 +10,18 @@ from apps.accounts.permissions import IsAdminOrSuperAdmin, IsSuperAdmin
 from apps.analytics.interactors import dashboard as dash_i
 
 
-def _with_cache_meta(data: dict) -> Response:
-    """OD-1 — live compute; stamp freshness so the UI can show 'last updated' (EC-CACHE-01)."""
-    resp = Response({**data, "lastUpdated": timezone.now().isoformat()})
-    resp["X-Cache-Age"] = "0"
+def _with_cache_meta(data: dict, computed_at=None) -> Response:
+    """Stamp freshness so the UI can show 'last updated' (EC-CACHE-01).
+
+    ``computed_at`` is when the payload was actually produced. For live (uncached)
+    dashboards it is now, so ``X-Cache-Age`` is 0; for memoised rollups it reflects the
+    true age of the cached data.
+    """
+    now = timezone.now()
+    stamp = computed_at or now
+    age = max(int((now - stamp).total_seconds()), 0)
+    resp = Response({**data, "lastUpdated": stamp.isoformat()})
+    resp["X-Cache-Age"] = str(age)
     return resp
 
 
@@ -22,7 +30,8 @@ class AdminDashboardView(APIView):
 
     def get(self, request):
         branch = resolve_branch(request)
-        return _with_cache_meta(dash_i.admin_dashboard(branch, request.user.tenant))
+        data, computed_at = dash_i.admin_dashboard(branch, request.user.tenant)
+        return _with_cache_meta(data, computed_at)
 
 
 class CollectionDashboardView(APIView):
@@ -37,7 +46,8 @@ class SuperAdminDashboardView(APIView):
     permission_classes = [IsAuthenticated, IsSuperAdmin]
 
     def get(self, request):
-        return _with_cache_meta(dash_i.super_admin_dashboard(request.user.tenant))
+        data, computed_at = dash_i.super_admin_dashboard(request.user.tenant)
+        return _with_cache_meta(data, computed_at)
 
 
 class StudentDashboardView(APIView):

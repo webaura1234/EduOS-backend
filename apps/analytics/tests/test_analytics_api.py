@@ -133,6 +133,44 @@ def test_super_admin_dashboard_branch_kpis(env):
     assert body["totals"]["faculty"] >= 1
 
 
+def test_super_admin_dashboard_faculty_attendance_real_data(env):
+    """Locks the batched faculty staff-attendance rollup: average of per-faculty monthly %.
+
+    Faculty A: 8 present / 2 absent = 80%. Faculty B: 5 present / 5 absent = 50%.
+    Branch facultyAttendancePercent = round((80 + 50) / 2) = 65.
+    """
+    from django.utils import timezone
+    from apps.hr.queries import staff_attendance as sa_q
+
+    branch = env["branch"]
+    today = timezone.localdate()
+
+    def faculty(login_id):
+        return UserFactory(role=Role.FACULTY, tenant=env["tenant"], branch=branch,
+                           custom_login_id=login_id, must_change_password=False)
+
+    fac_a = faculty("FAC-A")
+    fac_b = faculty("FAC-B")
+
+    def mark(user, present_days, absent_days):
+        day = 1
+        for _ in range(present_days):
+            sa_q.check_in(branch, user, on_date=today.replace(day=day), status="present")
+            day += 1
+        for _ in range(absent_days):
+            sa_q.check_in(branch, user, on_date=today.replace(day=day), status="absent")
+            day += 1
+
+    mark(fac_a, present_days=8, absent_days=2)   # 80%
+    mark(fac_b, present_days=5, absent_days=5)   # 50%
+
+    resp = _client(env["super_admin"]).get(reverse("analytics:dashboard-super-admin"))
+    assert resp.status_code == 200
+    row = next(r for r in _data(resp)["branchComparison"] if r["branchId"] == str(branch.pk))
+    assert row["facultyCount"] == 2
+    assert row["facultyAttendancePercent"] == 65
+
+
 def test_super_admin_dashboard_denied_to_admin(env):
     resp = _client(env["admin"]).get(reverse("analytics:dashboard-super-admin"))
     assert resp.status_code == 403

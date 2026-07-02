@@ -31,6 +31,24 @@ def all_active_students_in_branch(branch_id):
     )
 
 
+def active_student_counts_by_branch(branch_ids) -> dict:
+    """Active-enrollment counts per branch: ``{branch_id: count}``.
+
+    One grouped query so the super-admin dashboard doesn't run a per-branch
+    ``.count()``. Each value equals ``all_active_students_in_branch(bid).count()``.
+    """
+    rows = (
+        StudentEnrollment.objects.filter(
+            branch_id__in=branch_ids,
+            status=EnrollmentStatus.ACTIVE,
+            is_active=True,
+        )
+        .values("branch_id")
+        .annotate(n=Count("id"))
+    )
+    return {row["branch_id"]: row["n"] for row in rows}
+
+
 def attendance_config(branch) -> tuple[int, bool]:
     """(threshold_percent, exam_day_counts_toward_attendance) for a branch's tenant."""
     try:

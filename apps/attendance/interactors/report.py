@@ -80,6 +80,73 @@ def _attendance_rows(
     }
 
 
+def branch_attendance_summary(branches, *, date_from=_WIDE_FROM, date_to=_WIDE_TO) -> dict:
+    """Per-branch student-attendance rollup from ONE grouped aggregate scan:
+    ``{branch_pk: {"percent": avg%, "lowAttendanceCount": n_below_threshold}}``.
+
+    Both values derive from the same per-student counts, so the super-admin dashboard
+    needs neither a per-branch ``ranking_report`` NOR a per-branch ``shortage_report``
+    (each of which was its own full-range scan per branch):
+      - ``percent`` == averaging ``ranking_report(branch)["rows"][*]["percent"]`` per branch.
+      - ``lowAttendanceCount`` == ``len(shortage_report(branch)["rows"])`` at the tenant
+        threshold — a student counts when it has records AND is below threshold.
+
+    Exam-day handling and the threshold are tenant-level, so they're read once (all
+    branches in a super-admin rollup share a tenant).
+    """
+    branches = list(branches)
+    if not branches:
+        return {}
+
+    threshold, exam_counts = roster_q.attendance_config(branches[0])
+    exclude_exam = not exam_counts
+
+    students_by_branch = {}
+    all_ids = []
+    for b in branches:
+        students = _students_for_report(b)
+        students_by_branch[b.pk] = students
+        all_ids.extend(sp.pk for sp in students)
+
+    counts = (
+        record_q.aggregate_counts_by_student(
+            all_ids, date_from=date_from, date_to=date_to, exclude_exam_days=exclude_exam
+        )
+        if all_ids
+        else {}
+    )
+
+    result = {}
+    for b in branches:
+        students = students_by_branch[b.pk]
+        if not students:
+            result[b.pk] = {"percent": 0, "lowAttendanceCount": 0}
+            continue
+        percents = []
+        low = 0
+        for sp in students:
+            pct = attendance_percent(*counts.get(sp.pk, (0, 0, 0)))
+            _pl, _ex, total = counts.get(sp.pk, (0, 0, 0))
+            percents.append(pct)
+            if total > 0 and is_below_threshold(pct, threshold):
+                low += 1
+        result[b.pk] = {
+            "percent": round(sum(percents) / len(percents)),
+            "lowAttendanceCount": low,
+        }
+    return result
+
+
+def branch_average_attendance_percents(branches, *, date_from=_WIDE_FROM, date_to=_WIDE_TO) -> dict:
+    """Backwards-compatible ``{branch_pk: percent}`` view over ``branch_attendance_summary``."""
+    return {
+        pk: s["percent"]
+        for pk, s in branch_attendance_summary(
+            branches, date_from=date_from, date_to=date_to
+        ).items()
+    }
+
+
 def student_summary(branch, student, *, date_from=_WIDE_FROM, date_to=_WIDE_TO) -> dict:
     """Overall + subject-wise % for one student (F-111/112)."""
     threshold, exam_counts = roster_q.attendance_config(branch)

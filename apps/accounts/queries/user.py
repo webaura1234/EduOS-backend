@@ -189,6 +189,25 @@ def count_active_by_role_in_branch(branch_id, role: str) -> int:
     return User.objects.filter(branch_id=branch_id, role=role, is_active=True).count()
 
 
+def count_active_by_role_grouped_by_branch(tenant_id, role: str) -> dict:
+    """Active users of a role per branch in a tenant: ``{branch_id: count}``.
+
+    One grouped query for the whole tenant — lets the super-admin dashboard avoid a
+    per-branch count round-trip. Sum of the values equals
+    ``count_active_by_role_in_tenant`` for branch-assigned users.
+    """
+    from django.db.models import Count
+
+    rows = (
+        User.objects.filter(
+            tenant_id=tenant_id, role=role, is_active=True, branch_id__isnull=False
+        )
+        .values("branch_id")
+        .annotate(n=Count("id"))
+    )
+    return {row["branch_id"]: row["n"] for row in rows}
+
+
 def get_active_user_in_tenant_with_role(tenant_id, user_id, role: str) -> User | None:
     """Fetch a single active user of a given role within a tenant, or None."""
     try:

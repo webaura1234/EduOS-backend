@@ -3,6 +3,7 @@
 import calendar
 import datetime
 
+from django.db.models import Count
 from django.utils import timezone
 
 from apps.academics.queries import holiday as holiday_q
@@ -68,6 +69,40 @@ def month_attendance_summary(user_id, branch, year, month) -> dict:
         "leaveDays": leave,
         "attendancePercent": percent,
     }
+
+
+def month_attendance_percent_by_user(user_ids, year, month) -> dict:
+    """{ user_id: attendancePercent } for many users in ONE grouped query (no N+1).
+
+    Mirrors ``month_attendance_summary``'s percent = present / (present + absent + leave).
+    Rows are unique per (user, date) — enforced by ``check_in``'s update_or_create — so a
+    grouped COUNT is equivalent to iterating distinct marked days.
+    """
+    ids = list(user_ids)
+    if not ids:
+        return {}
+    days_in_month = calendar.monthrange(year, month)[1]
+    first = datetime.date(year, month, 1)
+    last = datetime.date(year, month, days_in_month)
+    rows = (
+        StaffAttendance.objects.filter(
+            user_id__in=ids, date__gte=first, date__lte=last,
+            status__in=["present", "absent", "leave"], is_active=True,
+        )
+        .values("user_id", "status")
+        .annotate(n=Count("id"))
+    )
+    tally = {uid: {"present": 0, "absent": 0, "leave": 0} for uid in ids}
+    for r in rows:
+        bucket = tally.get(r["user_id"])
+        if bucket is not None:
+            bucket[r["status"]] = r["n"]
+    out = {}
+    for uid in ids:
+        b = tally[uid]
+        total = b["present"] + b["absent"] + b["leave"]
+        out[uid] = round(b["present"] / total * 100) if total else 0
+    return out
 
 
 def working_days_in_month(branch, year, month) -> int:
