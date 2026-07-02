@@ -112,7 +112,7 @@ def test_super_admin_filters_users_by_branch(multi_branch_env):
     assert resp.status_code == 200
     body = _data(resp)
     assert body["branchScope"] == str(env["branch_b"].pk)
-    assert all(u["branch"] == str(env["branch_b"].pk) for u in body["users"])
+    assert all(u["branch"] == env["branch_b"].name for u in body["users"])
 
 
 def test_branch_admin_still_scoped(multi_branch_env):
@@ -122,4 +122,4 @@ def test_branch_admin_still_scoped(multi_branch_env):
     body = _data(resp)
     assert body["branchId"] == str(env["branch_a"].pk)
     for u in body["users"]:
-        assert u["branch"] == str(env["branch_a"].pk)
+        assert u["branch"] == env["branch_a"].name

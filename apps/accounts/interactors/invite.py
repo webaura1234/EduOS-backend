@@ -31,6 +31,7 @@ from apps.accounts.queries.user import (
     mark_invite_used,
     set_user_password,
 )
+from apps.accounts.audit import log_auth_event
 from apps.accounts.sms import send_sms
 from apps.accounts.tokens import generate_access_token, generate_refresh_token
 from apps.accounts.validators import validate_password_strength
@@ -39,6 +40,23 @@ logger = logging.getLogger("apps.accounts.interactors.invite")
 
 # Roles that can be invited (never invite super_admin via this flow)
 INVITABLE_ROLES = {Role.FACULTY, Role.STUDENT, Role.PARENT, Role.ADMIN}
+
+
+def _get_current_academic_year(branch_id) -> str | None:
+    """Return the current academic year string (e.g. '2025-2026') for a branch, or None."""
+    if not branch_id:
+        return None
+    try:
+        from apps.academics.models import AcademicYear
+        year = AcademicYear.objects.filter(branch_id=branch_id, is_current=True).first()
+        if year:
+            return f"{year.start_date.year}-{year.start_date.year + 1}"
+        # Fall back to calendar year
+        from django.utils import timezone
+        return f"{timezone.now().year}-{timezone.now().year + 1}"
+    except Exception:  # noqa: BLE001
+        from django.utils import timezone
+        return f"{timezone.now().year}-{timezone.now().year + 1}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -82,8 +100,19 @@ def create_and_send_invite(
     # Validate identifier presence
     if role in {Role.PARENT, Role.ADMIN} and not phone:
         raise ValidationError("Phone number is required for this role.")
-    if role in {Role.FACULTY, Role.STUDENT} and not custom_login_id:
-        raise ValidationError("Custom login ID (Employee ID / Roll Number) is required for this role.")
+    if role == Role.FACULTY and not custom_login_id:
+        raise ValidationError("Employee ID is required for faculty.")
+    # Students: auto-generate custom_login_id when not provided (requires branch_id + academic_year)
+    if role == Role.STUDENT and not custom_login_id:
+        academic_year = _get_current_academic_year(branch_id)
+        if academic_year and branch_id:
+            from apps.organizations.models import Branch
+            from apps.accounts.student_id import generate_student_id
+            branch_obj = Branch.objects.filter(pk=branch_id).first()
+            if branch_obj:
+                custom_login_id = generate_student_id(branch_obj, academic_year)
+        if not custom_login_id:
+            raise ValidationError("Student ID (Roll Number / Admission No) is required.")
 
     # EC-AUTH-13: detect an existing account on this phone in the same tenant.
     existing_on_phone = get_users_by_phone_in_tenant(phone, tenant_id) if phone else []
@@ -121,6 +150,8 @@ def create_and_send_invite(
     logger.info(
         "Invite created: user=%s role=%s by=%s", user.id, role, created_by.id
     )
+    log_auth_event(event="invite_sent", user=user,
+                   metadata={"role": role, "invited_by": str(created_by.id)})
 
     return InviteCreatedDTO(
         user_id=user.id,
@@ -199,6 +230,8 @@ def accept_invite(
     )
 
     logger.info("Invite accepted: user=%s role=%s", user.id, user.role)
+    log_auth_event(event="invite_accepted", user=user, ip_address=ip_address,
+                   metadata={"role": user.role})
 
     return InviteAcceptedDTO(
         access=access_token,

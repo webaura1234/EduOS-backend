@@ -43,3 +43,6 @@ channels-redis>=4.2,<5.0
 
 # OpenAPI schema
 drf-spectacular>=0.27,<1.0
+
+# PDF generation (HTML → PDF via Pango/Cairo; requires libpango in production images)
+weasyprint>=62.0,<64.0

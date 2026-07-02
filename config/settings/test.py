@@ -1,5 +1,8 @@
 from .base import *
 
+# Suppress real MSG91 calls — email.py and sms.py skip the network in DEBUG mode.
+DEBUG = True
+
 # Use SQLite in-memory database for fast testing without needing PostgreSQL service
 DATABASES = {
     "default": {

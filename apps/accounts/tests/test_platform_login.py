@@ -18,13 +18,15 @@ def platform_owner():
 
 
 def test_platform_login_succeeds(platform_owner):
+    """Platform owner always gets MFA challenge — never direct tokens."""
     resp = APIClient().post(reverse("accounts:platform-login"),
                             {"identifier": "+919800000777", "password": "Owner123!"},
                             format="json")
     assert resp.status_code == 200, resp.content
     data = resp.json()["data"]
-    assert data["access"] and data["refresh"]
-    assert data["role"] == Role.PLATFORM_OWNER
+    assert data.get("mfa_required") is True
+    assert "mfa_session_token" in data
+    assert "email_hint" in data
 
 
 def test_platform_login_wrong_password(platform_owner):

@@ -159,6 +159,25 @@ class LogoutView(APIView):
         )
 
 
+class LogoutAllView(APIView):
+    """
+    POST /api/v1/auth/logout/all/
+
+    Revoke all refresh tokens for the current user (sign out all devices).
+    Blocklists the current access token as well.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request) -> Response[MessageDTO]:
+        from apps.accounts.queries.session import revoke_all_user_tokens
+        count = revoke_all_user_tokens(request.user)
+        _revoke_request_access_token(request)
+        log_auth_event(event="logout", user=request.user, metadata={"sessions_revoked": count, "logout_all": True})
+        return Response(
+            MessageDTO(detail=f"Signed out from all {count} device(s)."), status=status.HTTP_200_OK
+        )
+
+
 class MeView(APIView):
     """
     GET /api/v1/auth/me/
@@ -172,6 +191,7 @@ class MeView(APIView):
         from apps.organizations.branding import branch_theme, tenant_theme
 
         user = request.user
+        tenant = user.tenant
         dto = UserProfileDTO(
             id=user.id,
             role=user.role,
@@ -182,6 +202,10 @@ class MeView(APIView):
             branch_id=user.branch_id,
             must_change_password=user.must_change_password,
             date_joined=user.date_joined,
+            custom_login_id=user.custom_login_id,
+            linked_user_group_id=user.linked_user_group_id,
+            institution_type=tenant.institution_type if tenant else None,
+            tenant_subdomain=tenant.subdomain if tenant else None,
         )
         # Resolved branding for the user's branch (override → tenant fallback) so the
         # authed app can re-theme per branch without an extra round-trip.

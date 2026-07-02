@@ -18,6 +18,8 @@ def resolve_branch(request, branch_id=None):
     The branch must belong to the caller's tenant.
     """
     bid = branch_id or request.query_params.get("branch") or getattr(request.user, "branch_id", None)
+    if bid in ("", "all"):
+        bid = getattr(request.user, "branch_id", None)
     if not bid:
         raise ValidationError("A branch must be specified (branchId).")
 

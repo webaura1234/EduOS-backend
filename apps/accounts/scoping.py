@@ -16,7 +16,8 @@ def resolve_management_scope(request):
     """
     user = request.user
     if user.role != Role.SUPER_ADMIN:
-        branch = resolve_academic_branch(request)
+        # Frontend sends branch=all by default; branch admins are always scoped to their branch.
+        branch = resolve_academic_branch(request, branch_id=user.branch_id)
         return branch, str(branch.pk)
 
     param = (

@@ -20,7 +20,12 @@ from apps.accounts.constants import (
     MAX_LOGIN_ATTEMPTS,
 )
 from apps.accounts.models.user import PHONE_LOGIN_ROLES, Role
-from apps.accounts.queries.session import revoke_refresh_token
+from apps.accounts.audit import log_auth_event
+from apps.accounts.queries.session import (
+    get_refresh_token_any_state,
+    revoke_refresh_token,
+    revoke_token_family,
+)
 from apps.accounts.queries.user import (
     count_failed_attempts,
     count_failed_attempts_for_user,
@@ -121,6 +126,8 @@ def login(
             failure_reason="locked_out",
             user=candidate,
         )
+        log_auth_event(event="login_locked", user=candidate, ip_address=ip_address,
+                       metadata={"identifier": identifier})
         raise PermissionDenied(
             f"Too many failed attempts. Please try again in "
             f"{LOGIN_LOCKOUT_DURATION_MINUTES} minutes."
@@ -145,6 +152,8 @@ def login(
             failure_reason="wrong_password",
             user=candidate,
         )
+        log_auth_event(event="login_failed", user=candidate, ip_address=ip_address,
+                       metadata={"identifier": identifier, "reason": "wrong_password"})
         raise AuthenticationFailed("Invalid credentials.")
 
     # 3b. Enforce the parent-portal gate before issuing any session (EC-AUTH-26)
@@ -170,6 +179,8 @@ def login(
 
     # 5. Issue tokens
     logger.info("Login success: user=%s role=%s", user.id, user.role)
+    log_auth_event(event="login_success", user=user, ip_address=ip_address,
+                   metadata={"role": user.role})
     return _issue_login_tokens(user, device_info, ip_address)
 
 
@@ -237,35 +248,58 @@ def refresh_tokens(refresh_token_str: str, device_info: str = "", ip_address: st
     """
     Rotate a refresh token and return a new token pair.
 
-    Token rotation: the old refresh token is revoked and a new one is issued.
-    This prevents refresh token replay attacks.
+    Family-based replay detection: every use produces a new token in the same
+    family. If a previously-used (revoked) token is presented, the entire family
+    is immediately revoked (all devices force-logged out) to contain the breach.
 
     Raises AuthenticationFailed if the token is invalid, expired, or revoked.
     """
-    # Verify JWT signature and expiry
-    payload = decode_refresh_token(refresh_token_str)
+    # 1. Verify JWT signature and expiry first (cheap, no DB hit)
+    decode_refresh_token(refresh_token_str)
 
-    # Check DB — token must not be revoked
-    db_token = get_active_refresh_token(refresh_token_str)
+    # 2. Look up the token regardless of revocation state (for replay detection)
+    db_token = get_refresh_token_any_state(refresh_token_str)
+
     if db_token is None:
-        raise AuthenticationFailed("Refresh token is invalid, expired, or has been revoked.")
+        # Token unknown: either purged after expiry or never issued (forged)
+        raise AuthenticationFailed("Refresh token is invalid or has expired.")
+
+    if db_token.is_revoked:
+        # A revoked token was presented — this is a replay attack.
+        # Revoke the entire family to protect the legitimate session.
+        revoke_token_family(db_token.family_id)
+        logger.warning(
+            "Replay attack detected: user=%s family=%s — all family tokens revoked.",
+            db_token.user_id,
+            db_token.family_id,
+        )
+        raise AuthenticationFailed(
+            "This session has already been used from another device. "
+            "For your security, you have been signed out everywhere. Please log in again."
+        )
+
+    from django.utils import timezone as _tz
+    if db_token.expires_at < _tz.now():
+        raise AuthenticationFailed("Refresh token has expired. Please log in again.")
 
     user = db_token.user
     if not user.is_active:
         raise AuthenticationFailed("User account is inactive.")
 
-    # Revoke old token (rotation)
+    # 3. Revoke the consumed token
     revoke_refresh_token(refresh_token_str)
 
-    # Issue new pair
+    # 4. Issue new pair in the same family, next generation
     new_access = generate_access_token(user)
     new_refresh_str, _ = generate_refresh_token(
         user=user,
         device_info=device_info,
         ip_address=ip_address,
+        family_id=db_token.family_id,
+        generation=db_token.generation + 1,
     )
 
-    logger.info("Token rotated: user=%s", user.id)
+    logger.info("Token rotated: user=%s family=%s gen=%d", user.id, db_token.family_id, db_token.generation + 1)
 
     return TokenPairDTO(
         access=new_access,
@@ -282,6 +316,8 @@ def logout(refresh_token_str: str) -> None:
     revoked = revoke_refresh_token(refresh_token_str)
     if not revoked:
         logger.debug("Logout: token not found or already revoked.")
+    else:
+        log_auth_event(event="logout")
 
 
 def platform_login(

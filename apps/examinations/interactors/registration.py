@@ -11,6 +11,7 @@ from apps.examinations.queries import registration as reg_q
 from apps.examinations.services.pdf import (
     generate_hall_ticket_pdf,
     hall_ticket_content_payload,
+    read_hall_ticket_pdf,
     store_hall_ticket_pdf,
 )
 from apps.fees.enums import FeeComponentKind, InvoiceStatus
@@ -98,12 +99,7 @@ def generate_hall_ticket(registration, *, branch, tenant=None, user=None):
 
     existing = reg_q.get_hall_ticket(registration.pk)
     if existing and existing.file_key:
-        pdf_path = existing.file_key
-        from pathlib import Path
-        from django.conf import settings
-
-        full_path = Path(getattr(settings, "MEDIA_ROOT", "media")) / pdf_path
-        pdf_bytes = full_path.read_bytes() if full_path.exists() else b""
+        pdf_bytes = read_hall_ticket_pdf(existing.file_key) or b""
         return existing, pdf_bytes
 
     student = registration.student

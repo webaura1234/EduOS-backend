@@ -33,6 +33,8 @@ class ReportExport(BaseModel):
     snapshot = models.JSONField(default=dict, blank=True)
     file_key = models.CharField(max_length=512, blank=True, default="")
     download_url = models.CharField(max_length=1024, blank=True, default="")
+    format = models.CharField(max_length=10, default="csv")  # "csv" | "pdf"
+    celery_task_id = models.CharField(max_length=255, blank=True, default="")
     requested_by = models.ForeignKey(
         "accounts.User", on_delete=models.SET_NULL, null=True, blank=True,
         related_name="report_requests",

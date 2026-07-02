@@ -10,6 +10,7 @@ from apps.accounts.views.auth import (
     LinkedAccountsView,
     LoginDisambiguateView,
     LoginView,
+    LogoutAllView,
     LogoutView,
     MeView,
     PlatformLoginView,
@@ -28,6 +29,13 @@ from apps.accounts.views.password import (
     ResetAccountsView,
 )
 from apps.accounts.views.user import AdminResetPasswordView
+from apps.accounts.views.session import SessionsView, SessionDetailView
+from apps.accounts.views.identity import (
+    ChangeMobileInitiateView,
+    ChangeMobileConfirmView,
+    ChangeEmailInitiateView,
+    ChangeEmailConfirmView,
+)
 from apps.accounts.views.users_management import (
     CheckMultiRoleView,
     UserManagementActionView,
@@ -53,6 +61,7 @@ urlpatterns = [
     path("login/disambiguate/", LoginDisambiguateView.as_view(), name="login-disambiguate"),
     path("refresh/",            RefreshView.as_view(),           name="refresh"),
     path("logout/",             LogoutView.as_view(),            name="logout"),
+    path("logout/all/",         LogoutAllView.as_view(),         name="logout-all"),
     path("me/",                 MeView.as_view(),                name="me"),
     path("me/dashboard/",       StudentDashboardView.as_view(),  name="student-dashboard"),
     path("me/student-profile/", StudentProfileFormView.as_view(), name="student-profile-form"),
@@ -86,4 +95,14 @@ urlpatterns = [
     # ── Super-admin branch-admin management ───────────────────────────────
     path("admins/",                 SuperAdminAdminsView.as_view(),      name="admins"),
     path("admins/<uuid:admin_id>/", SuperAdminAdminDetailView.as_view(), name="admin-detail"),
+
+    # ── Session management (P5) ───────────────────────────────────────────
+    path("sessions/",                 SessionsView.as_view(),      name="sessions"),
+    path("sessions/<uuid:session_id>/", SessionDetailView.as_view(), name="session-detail"),
+
+    # ── Identity changes (P5) ─────────────────────────────────────────────
+    path("change-phone/initiate/", ChangeMobileInitiateView.as_view(),  name="change-phone-initiate"),
+    path("change-phone/confirm/",  ChangeMobileConfirmView.as_view(),   name="change-phone-confirm"),
+    path("change-email/initiate/", ChangeEmailInitiateView.as_view(),   name="change-email-initiate"),
+    path("change-email/confirm/",  ChangeEmailConfirmView.as_view(),    name="change-email-confirm"),
 ]

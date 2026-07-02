@@ -14,6 +14,7 @@ import secrets
 
 from rest_framework.exceptions import AuthenticationFailed
 
+from apps.accounts.audit import log_auth_event
 from apps.accounts.dtos import MFARequiredDTO
 from apps.accounts.models.token import MFAToken
 from apps.accounts.models.user import Role
@@ -82,6 +83,8 @@ def issue_mfa_challenge(user) -> "MFARequiredDTO | None":
     mfa_session_token = generate_mfa_session_token(user)
     email_hint = _mask_email(user.email)
     logger.info("MFA challenge issued: user=%s email=%s", user.id, email_hint)
+    log_auth_event(event="mfa_otp_sent", user=user,
+                   metadata={"email_hint": email_hint, "role": user.role})
 
     return MFARequiredDTO(mfa_session_token=mfa_session_token, email_hint=email_hint)
 
@@ -128,6 +131,8 @@ def verify_mfa_otp(
         mfa_token.attempt_count += 1
         mfa_token.save(update_fields=["attempt_count"])
         remaining = MFAToken.MAX_ATTEMPTS - mfa_token.attempt_count
+        log_auth_event(event="mfa_failed", user=user,
+                       metadata={"remaining_attempts": remaining})
         if remaining <= 0:
             logger.warning("MFA max attempts exceeded: user=%s", user.id)
             raise AuthenticationFailed("Too many failed attempts. Please log in again.")
@@ -139,4 +144,6 @@ def verify_mfa_otp(
     mfa_token.save(update_fields=["is_used"])
 
     logger.info("MFA verified: user=%s role=%s", user.id, user.role)
+    log_auth_event(event="mfa_verified", user=user, ip_address=ip_address,
+                   metadata={"role": user.role})
     return _issue_login_tokens(user, device_info, ip_address)

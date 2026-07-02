@@ -21,15 +21,45 @@ def create_refresh_token_record(
     expires_at,
     device_info: str = "",
     ip_address: str = None,
+    family_id=None,
+    generation: int = 1,
 ) -> RefreshToken:
     """Persist a refresh token record (enables revocation + replay prevention)."""
+    import uuid as _uuid
     return RefreshToken.objects.create(
         user=user,
         token=token,
         expires_at=expires_at,
         device_info=device_info,
         ip_address=ip_address,
+        family_id=family_id or _uuid.uuid4(),
+        generation=generation,
     )
+
+
+def get_refresh_token_any_state(token_str: str) -> RefreshToken | None:
+    """
+    Return a RefreshToken regardless of revocation status.
+
+    Used for replay detection: if the token exists but is already revoked,
+    that signals a stolen token was reused.
+    """
+    try:
+        return RefreshToken.objects.select_related("user").get(token=token_str)
+    except RefreshToken.DoesNotExist:
+        return None
+
+
+def revoke_token_family(family_id) -> int:
+    """
+    Revoke every token in a rotation family.
+
+    Called when a revoked token is presented again — signals theft.
+    Returns the number of tokens revoked.
+    """
+    count = RefreshToken.objects.filter(family_id=family_id, is_revoked=False).update(is_revoked=True)
+    logger.warning("Token family %s fully revoked (%d token(s)) — possible replay attack", family_id, count)
+    return count
 
 
 def revoke_refresh_token(token_str: str) -> bool:

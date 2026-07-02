@@ -8,4 +8,4 @@ class FeesConfig(AppConfig):
     verbose_name = "Fees & Finance"
 
     def ready(self):
-        pass  # TODO: import apps.fees.signals when created
+        import apps.fees.exports  # noqa: F401 — registers export definitions

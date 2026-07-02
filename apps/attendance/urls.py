@@ -30,6 +30,16 @@ from apps.attendance.views.overview import (
     AdminAttendanceOverviewView,
     AdminMarkAttendanceView,
 )
+from apps.attendance.views.report_export import (
+    AttendanceDetentionExportView,
+    AttendanceMonthlyExportView,
+    AttendanceRankingExportView,
+    AttendanceShortageExportView,
+)
+from apps.attendance.views.self_export import (
+    FacultySubjectAttendanceExportView,
+    StudentAttendanceExportView,
+)
 
 app_name = "attendance"
 
@@ -52,6 +62,15 @@ urlpatterns = [
     path("reports/shortage/", ShortageReportView.as_view(), name="report-shortage"),
     path("reports/detention/", DetentionReportView.as_view(), name="report-detention"),
     path("reports/monthly/", MonthlyReportView.as_view(), name="report-monthly"),
+
+    # Async CSV exports (poll/download via /api/v1/analytics/reports/<id>/)
+    path("exports/monthly/", AttendanceMonthlyExportView.as_view(), name="export-monthly"),
+    path("exports/shortage/", AttendanceShortageExportView.as_view(), name="export-shortage"),
+    path("exports/ranking/", AttendanceRankingExportView.as_view(), name="export-ranking"),
+    path("exports/detention/", AttendanceDetentionExportView.as_view(), name="export-detention"),
+    path("exports/me/subject-attendance/", FacultySubjectAttendanceExportView.as_view(),
+         name="export-my-subject-attendance"),
+    path("exports/me/attendance/", StudentAttendanceExportView.as_view(), name="export-my-attendance"),
 
     # Corrections / audit / flagged
     path("records/<uuid:record_id>/correct/", CorrectRecordView.as_view(), name="record-correct"),

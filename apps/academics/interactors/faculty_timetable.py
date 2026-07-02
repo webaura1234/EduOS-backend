@@ -4,6 +4,7 @@ import calendar
 import datetime
 
 from apps.academics.helpers import batch_display_label
+from apps.academics.models.timetable import DayOfWeek
 from apps.academics.queries import calendar as cal_q
 from apps.academics.queries import holiday as hol_q
 from apps.academics.queries import timetable as tt_q

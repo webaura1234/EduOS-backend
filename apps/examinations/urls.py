@@ -31,10 +31,16 @@ from apps.examinations.views.exam import (
 )
 from apps.examinations.views.logistics import (
     ExamInvigilatorView,
+    ExamSeatingExportView,
     ExamSeatingGenerateView,
     ExamSeatingListView,
     ExamSeatingPreflightView,
     ExamSeatingSessionView,
+    SeatingBulkExportView,
+)
+from apps.examinations.views.self_export import (
+    FacultyClassResultsExportView,
+    StudentExamResultsExportView,
 )
 from apps.examinations.views.marks import (
     MarksEntryDetailView,
@@ -87,6 +93,16 @@ urlpatterns = [
         "exams/<uuid:exam_id>/seating/",
         ExamSeatingListView.as_view(),
         name="exam-seating-list",
+    ),
+    path(
+        "exams/<uuid:exam_id>/seating/export/",
+        ExamSeatingExportView.as_view(),
+        name="exam-seating-export",
+    ),
+    path(
+        "seating/export/",
+        SeatingBulkExportView.as_view(),
+        name="seating-bulk-export",
     ),
     path(
         "exams/<uuid:exam_id>/seating/preflight/",
@@ -194,6 +210,8 @@ urlpatterns = [
         name="faculty-teaching-assignments",
     ),
     path("me/marks/", FacultyMarksView.as_view(), name="faculty-marks"),
+    path("me/exports/class-results/", FacultyClassResultsExportView.as_view(), name="faculty-export-class-results"),
+    path("me/exports/results/", StudentExamResultsExportView.as_view(), name="student-export-results"),
     path("me/internal-marks/", FacultyInternalMarkSaveView.as_view(), name="faculty-internal-marks-save"),
     path("me/invigilation/", FacultyInvigilationView.as_view(), name="faculty-invigilation"),
     path(

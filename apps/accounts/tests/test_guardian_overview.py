@@ -39,7 +39,17 @@ def test_overview_shape(env):
     resp = _client(env["admin"]).get(reverse("accounts:guardians-overview"))
     assert resp.status_code == 200, resp.content
     body = _data(resp)
-    assert set(body) == {"links", "students", "guardians"}
+    assert {"links", "students", "guardians"}.issubset(set(body))
+
+
+def test_overview_ignores_branch_all_for_branch_admin(env):
+    """Frontend always sends ?branch=all; branch admins must not treat it as a UUID."""
+    resp = _client(env["admin"]).get(
+        reverse("accounts:guardians-overview"),
+        {"branch": "all"},
+    )
+    assert resp.status_code == 200, resp.content
+    assert _data(resp)["branchScope"] == str(env["branch"].pk)
 
 
 def test_link_reflected(env):

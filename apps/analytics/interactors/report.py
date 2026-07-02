@@ -5,6 +5,8 @@ that serializes to CSV and uploads to S3 (OD-2). Rows are always resolved at req
 through the owning module's query layer (no cross-app ORM here).
 """
 
+import datetime
+
 from django.utils import timezone
 
 from apps.accounts.models.user import Role
@@ -13,21 +15,28 @@ from apps.admissions.queries.enquiry import funnel_counts
 from apps.analytics.enums import ReportStatus, ReportType
 from apps.analytics.queries import report as report_q
 from apps.attendance.interactors import report as att_report
-from apps.fees.queries.defaulter import list_defaulters
 from apps.hr.queries.leave import leave_summary
 
 DEFAULT_THRESHOLD = 500
 
 
+def _parse_date(value, default):
+    if not value:
+        return default
+    if isinstance(value, datetime.date):
+        return value
+    return datetime.date.fromisoformat(value)
+
+
 def _resolve_rows(report_type, branch, params) -> list[dict]:
-    """Request-time snapshot of the report rows (F-064), via module query layers."""
-    if report_type == ReportType.FEE_DEFAULTERS:
-        return [
-            {"invoiceId": str(inv.pk), "studentProfileId": str(inv.student.student_profile_id),
-             "dueDate": inv.due_date.isoformat() if inv.due_date else None,
-             "balancePaise": inv.total_paise - inv.paid_paise}
-            for inv in list_defaulters(branch.pk)
-        ]
+    """Request-time snapshot of the report rows (F-064), via module query layers.
+
+    Only used for aggregation-style reports (grouped/annotated queries producing
+    pivot-shaped rows, not one row per model instance) — those don't fit the
+    ExportDefinition ABC's get_queryset()/get_row(instance) contract. Report types
+    backed by a plain queryset (e.g. FEE_LEDGER, FEE_DEFAULTERS) are registered in
+    the unified framework instead and never reach this function.
+    """
     if report_type == ReportType.ADMISSION_FUNNEL:
         f = funnel_counts(branch.pk)
         return [{"dimension": k, **{"k": kk, "n": vv}} for k, d in f.items() for kk, vv in d.items()]
@@ -36,14 +45,62 @@ def _resolve_rows(report_type, branch, params) -> list[dict]:
     if report_type == ReportType.ATTENDANCE_MONTHLY:
         year = int(params.get("year", timezone.now().year))
         month = int(params.get("month", timezone.now().month))
-        return att_report.monthly_report(branch, year=year, month=month)["rows"]
+        return att_report.monthly_report(
+            branch, year=year, month=month, batch_id=params.get("batchId"),
+        )["rows"]
+    if report_type == ReportType.ATTENDANCE_SHORTAGE:
+        threshold = params.get("threshold")
+        return att_report.shortage_report(
+            branch,
+            threshold=int(threshold) if threshold else None,
+            batch_id=params.get("batchId"),
+            date_from=_parse_date(params.get("fromDate"), None),
+            date_to=_parse_date(params.get("toDate"), None),
+        )["rows"]
+    if report_type == ReportType.ATTENDANCE_DETENTION:
+        return att_report.detention_report(
+            branch,
+            batch_id=params.get("batchId"),
+            date_from=_parse_date(params.get("fromDate"), None),
+            date_to=_parse_date(params.get("toDate"), None),
+        )["rows"]
+    if report_type == ReportType.ATTENDANCE_RANKING:
+        today = timezone.localdate()
+        date_from = _parse_date(params.get("fromDate"), today.replace(day=1))
+        date_to = _parse_date(params.get("toDate"), today)
+        return att_report.ranking_report(
+            branch, date_from=date_from, date_to=date_to, batch_id=params.get("batchId"),
+        )["rows"]
     return []
+
+
+def _get_registered_definition(report_type):
+    """Return the ExportDefinition for report_type if registered in the unified
+    framework, else None (legacy report types still go through _resolve_rows)."""
+    try:
+        from apps.core.exports.registry import get_definition
+        return get_definition(report_type)
+    except (ImportError, ValueError):
+        return None
 
 
 def generate_report(*, tenant, branch, report_type, params=None, requester=None,
                     threshold=DEFAULT_THRESHOLD):
-    """Create a ReportExport. Small → inline ready; large → queued Celery job."""
+    """Create a ReportExport. Small → inline ready; large → queued Celery job.
+
+    Report types registered in the ExportDefinition framework (apps/core/exports)
+    delegate entirely to request_export(), which counts rows without materializing
+    them and streams large exports instead of building an in-memory JSON snapshot.
+    """
     params = params or {}
+
+    definition = _get_registered_definition(report_type)
+    if definition is not None:
+        from apps.core.exports.runner import request_export
+        return request_export(
+            definition, tenant=tenant, branch=branch, params=params, requested_by=requester,
+        )
+
     export = report_q.create_export(
         tenant=tenant, branch=branch, report_type=report_type, params=params,
         requested_by=requester,

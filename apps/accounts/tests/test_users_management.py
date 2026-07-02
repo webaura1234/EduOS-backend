@@ -57,7 +57,7 @@ def test_managed_user_fields_and_invite_status(env):
     assert stu["custom_login_id"] == "STU-1"
     assert stu["password_reset_required"] is True
     assert stu["invite_status"] == "pending"
-    assert stu["branch"] == str(env["branch"].id)
+    assert stu["branch"] == env["branch"].name
 
     adm = by_id[str(env["admin"].id)]
     assert adm["invite_status"] == "none"
@@ -81,4 +81,4 @@ def test_overview_scoped_to_admin_branch(env):
     body = _data(_client(env["admin"]).get(reverse("accounts:users-management")))
     assert body["branchName"] == env["branch"].name
     assert len(body["users"]) == 2
-    assert all(u["branch"] == str(env["branch"].id) for u in body["users"])
+    assert all(u["branch"] == env["branch"].name for u in body["users"])

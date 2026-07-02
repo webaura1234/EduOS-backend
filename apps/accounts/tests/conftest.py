@@ -1,9 +1,17 @@
 import pytest
 from rest_framework.test import APIClient
+from unittest.mock import patch
 
 from apps.accounts.tests.factories import UserFactory
 from apps.organizations.tests.factories import TenantFactory, BranchFactory
 from apps.accounts.models.user import Role
+
+
+@pytest.fixture(autouse=True)
+def mock_email_send():
+    """Prevent real MSG91 calls in all accounts tests."""
+    with patch("apps.accounts.email.send_email", return_value=None):
+        yield
 
 
 @pytest.fixture

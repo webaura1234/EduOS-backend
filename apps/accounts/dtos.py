@@ -181,6 +181,10 @@ class UserProfileDTO:
     branch_id: uuid.UUID | None
     must_change_password: bool
     date_joined: datetime.datetime
+    custom_login_id: str | None = None
+    linked_user_group_id: uuid.UUID | None = None
+    institution_type: str | None = None
+    tenant_subdomain: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -193,5 +197,9 @@ class UserProfileDTO:
             "branch_id": str(self.branch_id) if self.branch_id else None,
             "must_change_password": self.must_change_password,
             "date_joined": self.date_joined.isoformat() if hasattr(self.date_joined, "isoformat") else str(self.date_joined),
+            "custom_login_id": self.custom_login_id,
+            "linked_user_group_id": str(self.linked_user_group_id) if self.linked_user_group_id else None,
+            "institution_type": self.institution_type,
+            "tenant_subdomain": self.tenant_subdomain,
         }
 

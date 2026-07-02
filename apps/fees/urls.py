@@ -30,6 +30,8 @@ from apps.fees.views import (
 from apps.fees.views.admin_overview import AdminFeesOverviewView
 from apps.fees.views.admin_payment import AdminRecordPaymentByStudentView
 from apps.fees.views.admin_reconciliation import AdminReconcilePaymentsView
+from apps.fees.views.receipt import ReceiptDownloadView
+from apps.fees.views.self_export import StudentFeeStatementExportView
 
 app_name = "fees"
 
@@ -65,11 +67,15 @@ urlpatterns = [
     path("payments/offline/", RecordOfflinePaymentView.as_view(), name="payments-offline"),
     path("webhook/", RazorpayWebhookView.as_view(), name="webhook"),
     
+    # Receipts
+    path("receipts/<uuid:receipt_id>/download/", ReceiptDownloadView.as_view(), name="receipt-download"),
+
     # Student Portal
     path("me/dues/", StudentPortalDuesView.as_view(), name="student-dues"),
     path("me/fees/", StudentPortalFeesView.as_view(), name="student-fees"),
     path("me/receipts/", StudentPortalReceiptsView.as_view(), name="student-receipts"),
-    
+    path("me/exports/fee-statement/", StudentFeeStatementExportView.as_view(), name="student-export-fee-statement"),
+
     # Parent Portal
     path("children/<uuid:student_id>/fees/", ParentPortalChildFeesView.as_view(), name="parent-child-fees"),
     path("children/<uuid:student_id>/dues/", ParentPortalChildDuesView.as_view(), name="parent-child-dues"),

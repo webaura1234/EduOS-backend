@@ -119,12 +119,20 @@ def decode_access_token(token: str) -> dict:
 # Refresh Token
 # ─────────────────────────────────────────────────────────────────────────────
 
-def generate_refresh_token(user, device_info: str = "", ip_address: str = None) -> tuple[str, RefreshToken]:
+def generate_refresh_token(
+    user,
+    device_info: str = "",
+    ip_address: str = None,
+    family_id=None,
+    generation: int = 1,
+) -> tuple[str, RefreshToken]:
     """
     Encode a refresh token and persist it to the DB.
 
+    Pass family_id + generation when rotating (so the new token belongs to the
+    same family as the old one). Omit both for a fresh login session.
+
     Returns (token_string, RefreshToken_instance).
-    The DB record allows revocation and replay prevention.
     """
     cfg = _jwt_settings()
     now = timezone.now()
@@ -141,13 +149,14 @@ def generate_refresh_token(user, device_info: str = "", ip_address: str = None) 
 
     token_str = jwt.encode(payload, _signing_key(), algorithm=_algorithm())
 
-    # Persist to DB for revocation support (DB access lives in queries/)
     db_record = create_refresh_token_record(
         user=user,
         token=token_str,
         expires_at=exp,
         device_info=device_info,
         ip_address=ip_address,
+        family_id=family_id,
+        generation=generation,
     )
 
     return token_str, db_record

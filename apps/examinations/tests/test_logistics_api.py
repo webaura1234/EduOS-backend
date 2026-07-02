@@ -492,3 +492,122 @@ def test_combined_hall_seating(logistics_env):
     body = _data(combined)
     assert len(body["seatingPlans"]) >= 1
     assert Seating.objects.filter(schedule_slot_id__in=slot_ids, is_active=True).count() >= 5
+
+
+def test_seating_bulk_export_csv_spans_multiple_exams(logistics_env):
+    """The admin Seating tab can select slots from different exams at once —
+    the bulk export endpoint must handle that, not just a single exam_id."""
+    client = _client(logistics_env["admin"])
+    exam1_id, slot1_id = _setup_exam_with_slot(logistics_env, client)
+
+    exam2_resp = client.post(
+        reverse("examinations:exam-list"),
+        {
+            "name": "Unit Test 2",
+            "examType": "internal",
+            "academicPeriodId": str(logistics_env["period"].id),
+            "examFeePaise": 0,
+        },
+        format="json",
+    )
+    exam2_id = _data(exam2_resp)["exam"]["id"]
+    slot2_resp = client.post(
+        reverse("examinations:exam-schedule-list", kwargs={"exam_id": exam2_id}),
+        {
+            "classSectionId": str(logistics_env["batch"].id),
+            "subjectId": str(logistics_env["subject"].id),
+            "date": "2024-09-20",
+            "startTime": "09:00",
+            "endTime": "11:00",
+            "roomId": str(logistics_env["room_a"].id),
+            "override": True,
+        },
+        format="json",
+    )
+    slot2_id = _data(slot2_resp)["slot"]["id"]
+    client.post(
+        reverse("examinations:exam-register", kwargs={"exam_id": exam2_id}),
+        {"classSectionId": str(logistics_env["batch"].id)},
+        format="json",
+    )
+
+    client.post(
+        reverse("examinations:exam-seating-generate", kwargs={"exam_id": exam1_id}),
+        {"examSlotId": slot1_id}, format="json",
+    )
+    client.post(
+        reverse("examinations:exam-seating-generate", kwargs={"exam_id": exam2_id}),
+        {"examSlotId": slot2_id}, format="json",
+    )
+
+    resp = client.get(
+        reverse("examinations:seating-bulk-export") + f"?examSlotIds={slot1_id},{slot2_id}",
+    )
+    assert resp.status_code == 200, resp.content
+    csv_text = resp.content.decode("utf-8-sig")
+    lines = csv_text.strip().splitlines()
+    assert lines[0] == "classLabel,subjectName,roomName,seatNo,studentName"
+    # 5 students seated per slot, across 2 slots → 10 data rows + 1 header
+    assert len(lines) == 11
+
+
+def test_seating_bulk_export_requires_slot_ids(logistics_env):
+    client = _client(logistics_env["admin"])
+    resp = client.get(reverse("examinations:seating-bulk-export"))
+    assert resp.status_code == 400
+
+
+def test_seating_bulk_export_ignores_other_branch_slots(logistics_env):
+    """A slot ID from a different branch must be silently skipped, not leaked."""
+    client = _client(logistics_env["admin"])
+    exam_id, slot_id = _setup_exam_with_slot(logistics_env, client)
+    client.post(
+        reverse("examinations:exam-seating-generate", kwargs={"exam_id": exam_id}),
+        {"examSlotId": slot_id}, format="json",
+    )
+
+    other_tenant = TenantFactory(institution_type="school")
+    other_branch = BranchFactory(tenant=other_tenant)
+    other_year = AcademicYear.objects.create(
+        branch=other_branch, name="2024-25", is_current=True,
+        start_date=datetime.date(2024, 6, 1), end_date=datetime.date(2025, 4, 30),
+    )
+    other_period = AcademicPeriod.objects.create(
+        academic_year=other_year, period_type="term", sequence=1, name="Term 1",
+        start_date=datetime.date(2024, 6, 1), end_date=datetime.date(2024, 10, 31),
+    )
+    other_dept = Department.objects.create(branch=other_branch, name="Arts", department_type="stream")
+    other_course = Course.objects.create(department=other_dept, name="Grade 10")
+    other_batch = Batch.objects.create(course=other_course, academic_year=other_year, name="B")
+    other_subject = Subject.objects.create(course=other_course, name="History", code="HIS10", max_marks=100)
+    other_room = Room.objects.create(branch=other_branch, name="Hall X", capacity=40)
+    other_admin = UserFactory(
+        role=Role.ADMIN, tenant=other_tenant, branch=other_branch,
+        phone="+919800000099", custom_login_id=None, must_change_password=False,
+    )
+    other_client = _client(other_admin)
+    other_exam_resp = other_client.post(
+        reverse("examinations:exam-list"),
+        {"name": "Other Exam", "examType": "final", "academicPeriodId": str(other_period.id), "examFeePaise": 0},
+        format="json",
+    )
+    other_exam_id = _data(other_exam_resp)["exam"]["id"]
+    other_slot_resp = other_client.post(
+        reverse("examinations:exam-schedule-list", kwargs={"exam_id": other_exam_id}),
+        {
+            "classSectionId": str(other_batch.id), "subjectId": str(other_subject.id),
+            "date": "2024-09-15", "startTime": "09:00", "endTime": "11:00",
+            "roomId": str(other_room.id), "override": True,
+        },
+        format="json",
+    )
+    other_slot_id = _data(other_slot_resp)["slot"]["id"]
+
+    resp = client.get(
+        reverse("examinations:seating-bulk-export") + f"?examSlotIds={slot_id},{other_slot_id}",
+    )
+    assert resp.status_code == 200, resp.content
+    csv_text = resp.content.decode("utf-8-sig")
+    lines = csv_text.strip().splitlines()
+    # Only slot_id's 5 students — other_slot_id belongs to a different branch and is skipped.
+    assert len(lines) == 6

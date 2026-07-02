@@ -38,6 +38,7 @@ from apps.accounts.queries.user import (
     set_temp_password,
     set_user_password,
 )
+from apps.accounts.audit import log_auth_event
 from apps.accounts.sms import send_sms
 from apps.accounts.validators import validate_password_strength
 from datetime import timedelta
@@ -84,6 +85,7 @@ def force_change_password(user, current_password: str, new_password: str) -> Non
     logger.info(
         "Password changed: user=%s revoked_tokens=%d", user.id, revoked_count
     )
+    log_auth_event(event="password_changed", user=user)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -188,6 +190,8 @@ def request_otp_reset(phone: str, tenant_id: str, account_id: str | None = None)
 
     expiry = timezone.now() + timedelta(minutes=OTP_EXPIRY_MINUTES)
     create_otp_record(user=user, otp_hash=_hash_otp(otp), phone=phone, expires_at=expiry)
+    log_auth_event(event="password_reset_requested", user=user,
+                   metadata={"phone_last4": phone[-4:] if phone else ""})
 
 
 def _generate_temp_password() -> str:
@@ -279,3 +283,4 @@ def verify_otp_and_reset(phone: str, otp: str, new_password: str, tenant_id: str
     revoke_all_user_tokens(user)
 
     logger.info("Password reset via OTP: user=%s", user.id)
+    log_auth_event(event="password_reset_used", user=user)

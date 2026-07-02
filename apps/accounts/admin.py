@@ -3,6 +3,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from apps.accounts.models import (
+    AuthAuditLog,
     FacultyProfile,
     GuardianProfile,
     InviteToken,
@@ -10,6 +11,7 @@ from apps.accounts.models import (
     OTPRecord,
     RefreshToken,
     StudentGuardianLink,
+    StudentIDCounter,
     StudentProfile,
     User,
 )
@@ -201,3 +203,26 @@ class StudentGuardianLinkAdmin(admin.ModelAdmin):
     list_display = ("student", "guardian", "relationship", "is_primary_contact")
     list_filter = ("relationship", "is_primary_contact")
     raw_id_fields = ("student", "guardian")
+
+
+@admin.register(AuthAuditLog)
+class AuthAuditLogAdmin(admin.ModelAdmin):
+    list_display = ("event", "user", "tenant", "ip_address", "created_at")
+    list_filter = ("event", "created_at")
+    search_fields = ("user__email", "user__phone", "ip_address")
+    readonly_fields = ("id", "user", "tenant", "event", "ip_address", "metadata", "created_at", "updated_at")
+    ordering = ("-created_at",)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(StudentIDCounter)
+class StudentIDCounterAdmin(admin.ModelAdmin):
+    list_display = ("branch", "academic_year", "last_sequence", "created_at")
+    list_filter = ("academic_year",)
+    search_fields = ("branch__name", "academic_year")
+    readonly_fields = ("id", "created_at", "updated_at")

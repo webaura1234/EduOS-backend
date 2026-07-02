@@ -1,5 +1,9 @@
 """Views — seating generation and invigilator assignment."""
 
+import csv
+import io
+
+from django.http import HttpResponse
 from rest_framework import status
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -35,6 +39,87 @@ class ExamSeatingListView(APIView):
             return Response({"error": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         plans = seat_i.list_plans_for_exam(exam.pk)
         return Response({"seatingPlans": SeatingPlanSerializer(plans, many=True).data})
+
+
+class ExamSeatingExportView(APIView):
+    """GET → CSV of the saved seating plan (one row per student), generated server-side.
+
+    Seating plans are bounded by room capacity for a single exam (hundreds of rows,
+    not lakhs), so this is a direct synchronous CSV response rather than an async job.
+    """
+
+    permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
+
+    def get(self, request, exam_id) -> HttpResponse | Response:
+        branch = resolve_branch(request)
+        exam = exam_q.get_exam(branch.pk, exam_id)
+        if not exam:
+            return Response({"error": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        plans = seat_i.list_plans_for_exam(exam.pk)
+        buf = io.StringIO()
+        writer = csv.DictWriter(
+            buf,
+            fieldnames=["examSlotId", "roomName", "seatNo", "studentName", "studentId"],
+        )
+        writer.writeheader()
+        for plan in plans:
+            for allocation in plan.get("allocations", []):
+                for seat in allocation.get("seats", []):
+                    writer.writerow({
+                        "examSlotId": plan["examSlotId"],
+                        "roomName": allocation["roomName"],
+                        "seatNo": seat["seatNo"],
+                        "studentName": seat["studentName"],
+                        "studentId": seat["studentId"],
+                    })
+        content = buf.getvalue().encode("utf-8-sig")
+        response = HttpResponse(content, content_type="text/csv")
+        response["Content-Disposition"] = f'attachment; filename="seating-plan-{exam_id}.csv"'
+        return response
+
+
+class SeatingBulkExportView(APIView):
+    """GET → CSV for an explicit list of exam slot IDs, spanning any exams in the branch.
+
+    The admin Seating tab lets staff filter by date/subject/grade across every exam at
+    once, so "Export CSV" there operates on an arbitrary slot selection — not a single
+    exam. This view accepts that selection directly instead of requiring one exam_id.
+    """
+
+    permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
+
+    def get(self, request) -> HttpResponse | Response:
+        branch = resolve_branch(request)
+        raw_ids = request.query_params.get("examSlotIds", "")
+        slot_ids = [s for s in raw_ids.split(",") if s]
+        if not slot_ids:
+            return Response({"error": "examSlotIds is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=["classLabel", "subjectName", "roomName", "seatNo", "studentName"])
+        writer.writeheader()
+        for slot_id in slot_ids:
+            slot = exam_q.get_schedule_slot_in_branch(branch.pk, slot_id)
+            if not slot:
+                continue
+            plan = seat_i.build_plan_from_db(slot)
+            if not plan:
+                continue
+            for allocation in plan.get("allocations", []):
+                for seat in allocation.get("seats", []):
+                    writer.writerow({
+                        "classLabel": slot.batch.name,
+                        "subjectName": slot.subject.name,
+                        "roomName": allocation["roomName"],
+                        "seatNo": seat["seatNo"],
+                        "studentName": seat["studentName"],
+                    })
+
+        content = buf.getvalue().encode("utf-8-sig")
+        response = HttpResponse(content, content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="seating-plans.csv"'
+        return response
 
 
 class ExamSeatingPreflightView(APIView):

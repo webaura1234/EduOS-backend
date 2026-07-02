@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>{{ title }} — {{ student_name }}</title>
+  <style>
+    @page { size: A4; margin: 20mm 15mm; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; font-size: 12px; color: #222; }
+    .header { text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 14px; }
+    .header h1 { font-size: 18px; font-weight: bold; }
+    .header h2 { font-size: 13px; font-weight: normal; color: #555; margin-top: 4px; letter-spacing: 0.05em; }
+    .meta { display: flex; justify-content: space-between; margin-bottom: 14px; }
+    .meta p { margin: 2px 0; }
+    .meta strong { color: #555; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+    table th { background: #f2f2f2; border: 1px solid #ccc; padding: 6px 8px; text-align: left; font-size: 11px; }
+    table td { border: 1px solid #ccc; padding: 6px 8px; }
+    .summary { display: flex; justify-content: space-between; margin-top: 16px; padding: 10px 14px; background: #fafafa; border: 1px solid #eee; border-radius: 4px; }
+    .summary .item { text-align: center; }
+    .summary .item .num { font-size: 18px; font-weight: bold; }
+    .summary .item .lbl { font-size: 10px; color: #777; text-transform: uppercase; letter-spacing: 0.03em; }
+    .footer { margin-top: 30px; display: flex; justify-content: space-between; font-size: 11px; color: #666; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>{{ institution_name }}</h1>
+    <h2>{{ title|upper }}</h2>
+  </div>
+
+  <div class="meta">
+    <div>
+      <p><strong>Student:</strong> {{ student_name }}</p>
+      {% if class_label %}<p><strong>Class:</strong> {{ class_label }}</p>{% endif %}
+    </div>
+    <div>
+      <p><strong>Examination:</strong> {{ exam_name }}</p>
+    </div>
+  </div>
+
+  {% if subjects %}
+  <table>
+    <thead>
+      <tr>
+        <th>Subject</th>
+        <th style="text-align:right;">Marks</th>
+        <th style="text-align:right;">Max</th>
+        <th style="text-align:right;">%</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in subjects %}
+      <tr>
+        <td>{{ row.subjectName }}</td>
+        {% if row.remark == "AB" or row.marks == None %}
+        <td colspan="3" style="text-align:center;color:#c62828;">Absent</td>
+        {% else %}
+        <td style="text-align:right;">{{ row.marks }}</td>
+        <td style="text-align:right;">{{ row.maxMarks }}</td>
+        <td style="text-align:right;">{% if row.percent != None %}{{ row.percent }}%{% endif %}</td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <div class="summary">
+    <div class="item">
+      <div class="num">{{ grade }}</div>
+      <div class="lbl">Grade</div>
+    </div>
+    <div class="item">
+      <div class="num">{{ percentage }}%</div>
+      <div class="lbl">Percentage</div>
+    </div>
+    {% if gpa %}
+    <div class="item">
+      <div class="num">{{ gpa }}</div>
+      <div class="lbl">SGPA</div>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="footer">
+    <div><p style="color:#999;">This is a computer-generated document.</p></div>
+    <div style="text-align:center;">
+      <p>Controller of Examinations</p>
+      <p style="margin-top:20px;">____________________</p>
+    </div>
+  </div>
+</body>
+</html>

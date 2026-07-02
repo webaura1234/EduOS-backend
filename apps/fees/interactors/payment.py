@@ -25,13 +25,33 @@ from apps.fees.queries.refund import create_refund
 from apps.integrations.adapters.payments import get_gateway
 
 
+def _generate_receipt_pdf(receipt, payment) -> str:
+    """Render receipt HTML → PDF bytes, upload to S3, return the S3 key."""
+    from django.template.loader import render_to_string
+    from apps.core.exports.pdf import render_pdf
+    from apps.integrations.adapters.s3 import get_s3_adapter
+    try:
+        tenant = payment.invoice.branch.tenant
+    except Exception:  # noqa: BLE001
+        tenant = None
+    html = render_to_string("pdf/receipt.html", {
+        "receipt": receipt,
+        "payment": payment,
+        "tenant": tenant,
+    })
+    pdf_bytes = render_pdf(html)
+    key = receipt.pdf_s3_key  # already set to the canonical path
+    get_s3_adapter().upload(key=key, content=pdf_bytes, content_type="application/pdf")
+    return key
+
+
 def _issue_receipt(invoice, payment, user=None):
-    """Allocate a gap-free receipt number (locked counter) and create the receipt."""
+    """Allocate a gap-free receipt number (locked counter), create the receipt, and generate the PDF."""
     fy = financial_year_for(timezone.localdate())
     counter = get_receipt_counter(invoice.branch_id, fy)
     number = next_receipt_number(counter)
     pdf_key = f"receipts/{invoice.branch_id}/{fy}/{number:06d}.pdf"
-    create_receipt(
+    receipt = create_receipt(
         branch=invoice.branch,
         payment=payment,
         sequence_number=number,
@@ -40,6 +60,10 @@ def _issue_receipt(invoice, payment, user=None):
         pdf_s3_key=pdf_key,
         user=user,
     )
+    try:
+        _generate_receipt_pdf(receipt, payment)
+    except Exception:  # noqa: BLE001 — PDF failure must not block payment confirmation
+        pass
 
 
 def _auto_refund(payment, amount_paise, reason):

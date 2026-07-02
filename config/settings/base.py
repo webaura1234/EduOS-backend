@@ -221,6 +221,12 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+CELERY_BEAT_SCHEDULE = {
+    "purge-expired-exports": {
+        "task": "apps.analytics.tasks.purge_expired_exports",
+        "schedule": 86400,  # 24 h; crontab(hour=2, minute=0) when django-celery-beat DB scheduler is seeded
+    },
+}
 
 # ──────────────────────────────────────────────
 # Redis / Cache

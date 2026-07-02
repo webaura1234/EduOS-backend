@@ -38,10 +38,12 @@ def default_refresh_expiry():
 
 class RefreshToken(BaseModel):
     """
-    Tracks issued JWT refresh tokens.
+    Tracks issued JWT refresh tokens with family-based replay detection.
 
-    Allows logout (token revocation) and prevents replay attacks.
-    When a user logs out, their token is deleted from this table.
+    Token rotation: every use produces a new token in the same family. If a
+    previously-used (revoked) token is ever presented again, that signals theft
+    — the entire family is immediately revoked and the user is forced to re-login
+    on all devices.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -51,6 +53,16 @@ class RefreshToken(BaseModel):
         related_name="refresh_tokens",
     )
     token = models.CharField(max_length=512, unique=True, db_index=True)
+    family_id = models.UUIDField(
+        default=uuid.uuid4,
+        db_index=True,
+        help_text="Shared by all rotations of one login session. "
+                  "Re-use of any revoked family member revokes the entire family.",
+    )
+    generation = models.PositiveIntegerField(
+        default=1,
+        help_text="Increments on each rotation. Useful for debugging token chains.",
+    )
     expires_at = models.DateTimeField(default=default_refresh_expiry)
     device_info = models.CharField(max_length=255, blank=True, default="")
     ip_address = models.GenericIPAddressField(null=True, blank=True)

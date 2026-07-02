@@ -8,4 +8,4 @@ class AttendanceConfig(AppConfig):
     verbose_name = "Attendance"
 
     def ready(self):
-        pass  # TODO: import apps.attendance.signals when created
+        import apps.attendance.exports  # noqa: F401 — registers export definitions
