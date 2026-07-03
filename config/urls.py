@@ -24,6 +24,7 @@ urlpatterns = [
     path("api/v1/coursework/", include("apps.coursework.urls", namespace="coursework")),
     path("api/v1/analytics/", include("apps.analytics.urls", namespace="analytics")),
     path("api/v1/integrations/", include("apps.integrations.urls", namespace="integrations")),
+    path("api/student-analysis/", include("apps.student_analysis.urls", namespace="student_analysis")),
     # ── Health checks ────────────────────────────
     path("health/", include("apps.core.urls", namespace="core")),
 ]
