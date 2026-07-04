@@ -71,6 +71,7 @@ LOCAL_APPS = [
     "apps.grievances",
     "apps.coursework",
     "apps.analytics",
+    "apps.student_analysis",
     "apps.integrations",
 ]
 
