@@ -76,6 +76,32 @@ def upsert_record(*, session, student, status, marked_at, marked_by=None,
     return record, created
 
 
+def idempotency_keys_for_session(session_id) -> dict[str, object]:
+    """Existing ``idempotency_key -> pk`` pairs for a session, in one query — lets a
+    bulk mark pre-assign the right pk to each in-memory record (new vs re-mark)
+    before writing, instead of a per-record existence check."""
+    return dict(
+        AttendanceRecord.objects.filter(session_id=session_id).values_list("idempotency_key", "pk")
+    )
+
+
+def bulk_upsert_records(records: list[AttendanceRecord]) -> None:
+    """Insert-or-update a whole session's marks in one query (EC-ATT-06 idempotent on
+    ``idempotency_key``), instead of one ``update_or_create`` per student — the hot
+    path for daily marking, called once per class per day per tenant."""
+    if not records:
+        return
+    AttendanceRecord.objects.bulk_create(
+        records,
+        update_conflicts=True,
+        unique_fields=["idempotency_key"],
+        update_fields=[
+            "session", "student", "status", "marked_at", "marked_by",
+            "geo_lat", "geo_lng", "late_mark", "updated_by", "is_active", "updated_at",
+        ],
+    )
+
+
 def set_absent_records_to_leave(student_id, date_from, date_to, user=None) -> int:
     """When leave is approved, convert already-marked absences in the range to leave."""
     return AttendanceRecord.objects.filter(

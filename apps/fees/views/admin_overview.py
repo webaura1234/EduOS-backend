@@ -1,8 +1,12 @@
 """Admin Fees overview — the FeesData aggregate the admin screen consumes.
 
-Real data for structures, concession rules/requests, payments, credit notes, refunds,
+Real data for structures, concession rules/requests, credit notes, refunds,
 webhooks, ledger and collection. Domains not yet modelled (credit-note *requests*,
 exam-fee invoices, reconciliation) return empty.
+
+Payments are deliberately NOT part of this aggregate (they used to be, unbounded —
+see admin_payments_list.py) since a branch's payment history is unbounded and gets
+its own paginated/filterable endpoint instead.
 """
 
 import datetime
@@ -13,54 +17,18 @@ from rest_framework.views import APIView
 
 from apps.academics.scoping import resolve_branch
 from apps.accounts.permissions import IsAdminOrSuperAdmin
+from apps.fees.helpers.payment_dict import batch_label as _batch_label
+from apps.fees.helpers.payment_dict import class_label as _class_label
+from apps.fees.helpers.payment_dict import rupees as _rupees
+from apps.fees.helpers.payment_dict import student_name as _student_name
 from apps.fees.queries import concession as conc_q
 from apps.fees.queries import invoice as inv_q
 from apps.fees.queries import payment as pay_q
 from apps.fees.queries import refund as ref_q
 from apps.fees.queries import structure as struct_q
 
-_PAY_METHOD = {
-    "razorpay": "upi",
-    "bank_transfer": "upi",
-    "cheque": "cash",
-    "cash": "cash",
-    "upi": "upi",
-    "card": "card",
-    "netbanking": "netbanking",
-}
-_PAY_STATUS = {"captured": "captured", "failed": "failed", "refunded": "refunded",
-               "created": "pending", "authorized": "pending", "pending": "pending"}
 _REFUND_STATUS = {"requested": "pending", "approved": "approved", "rejected": "rejected",
                   "processed": "processed", "completed": "processed"}
-
-
-def _rupees(paise) -> float:
-    return round((paise or 0) / 100, 2)
-
-
-def _student_name(enrollment) -> str:
-    try:
-        return enrollment.user.full_name
-    except Exception:
-        return ""
-
-
-def _class_label(enrollment) -> str:
-    if not enrollment or not enrollment.current_batch_id:
-        return ""
-    batch = enrollment.current_batch
-    return _batch_label(batch)
-
-
-def _batch_label(batch) -> str:
-    if batch is None:
-        return ""
-    course = getattr(batch, "course", None)
-    course_name = course.name if course else ""
-    section = batch.name or ""
-    if course_name and section:
-        return f"{course_name} - {section}"
-    return course_name or section
 
 
 def _derive_installments_from_components(components: list) -> list:
@@ -137,28 +105,6 @@ def _concession_request(req) -> dict:
         "status": req.status if req.status in ("pending", "approved", "rejected") else "pending",
         "reviewedAt": req.decided_at.isoformat() if req.decided_at else None,
         "reviewNote": req.note or None,
-    }
-
-
-def _payment(p) -> dict:
-    inv = p.invoice
-    enrollment = inv.student if inv else None
-    receipt = getattr(p, "receipt", None)
-    return {
-        "id": str(p.id),
-        "studentId": str(enrollment.student_profile_id) if enrollment else "",
-        "studentName": _student_name(enrollment),
-        "classLabel": _class_label(enrollment),
-        "paidAt": p.captured_at.isoformat() if p.captured_at else p.created_at.isoformat(),
-        "amount": _rupees(p.amount_paise),
-        "amountPaise": p.amount_paise,
-        "method": _PAY_METHOD.get(p.method, "cash"),
-        "reference": p.razorpay_payment_id or "",
-        "receiptNo": str(receipt.sequence_number) if receipt else "",
-        "orderId": p.razorpay_order_id or "",
-        "status": _PAY_STATUS.get(p.status, "pending"),
-        "source": "gateway" if p.method == "razorpay" else "manual",
-        "invoiceId": str(p.invoice_id) if p.invoice_id else "",
     }
 
 
@@ -296,17 +242,11 @@ def _ledger_and_collection(branch):
             overdue_count += 1
         ledger.append(row)
 
-    # Collection snapshot from captured payments.
+    # Collection snapshot from captured payments (DB-aggregated — no per-row cap).
     month_start = today.replace(day=1)
-    collected_today = collected_month = 0
-    for p in pay_q.list_payments_for_branch(branch.pk, limit=1000):
-        if p.status != "captured":
-            continue
-        when = (p.captured_at or p.created_at).date()
-        if when == today:
-            collected_today += p.amount_paise
-        if when >= month_start:
-            collected_month += p.amount_paise
+    collected_today, collected_month = pay_q.collection_snapshot_for_branch(
+        branch.pk, today=today, month_start=month_start,
+    )
 
     collection = {
         "collectedToday": _rupees(collected_today),
@@ -341,7 +281,6 @@ class AdminFeesOverviewView(APIView):
             "concessionRequests": [
                 _concession_request(r) for r in conc_q.list_concession_requests(branch.pk)
             ],
-            "payments": [_payment(p) for p in pay_q.list_payments_for_branch(branch.pk)],
             "creditNotes": [_credit_note(c) for c in conc_q.list_credit_notes(branch.pk)],
             "refunds": [_refund(r) for r in ref_q.list_refunds(branch.pk)],
             "webhooks": [_webhook(w) for w in conc_q.list_webhooks()],

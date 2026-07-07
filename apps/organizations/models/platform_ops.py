@@ -24,6 +24,7 @@ AUDIT_CATEGORY_CHOICES = [
     ("announcement", "Announcement"),
     ("settings", "Settings"),
     ("billing", "Billing"),
+    ("licensing", "Licensing"),
 ]
 
 ANNOUNCEMENT_SEVERITY_CHOICES = [
@@ -222,10 +223,19 @@ class PlatformPlanDefinition(BaseModel):
 
     plan = models.CharField(max_length=20, unique=True, db_index=True)
     label = models.CharField(max_length=50)
-    max_branches = models.PositiveSmallIntegerField()
-    max_students = models.PositiveIntegerField()
+    max_branches = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="0 = unlimited (core ERP is not branch-gated).",
+    )
+    max_students = models.PositiveIntegerField(
+        default=0,
+        help_text="0 = unlimited (core ERP is not student-gated).",
+    )
     included_features = models.JSONField(default=list)
     description = models.TextField(blank=True, default="")
+    price_per_student_inr = models.PositiveIntegerField(default=299)
+    included_ai_credits_per_student = models.PositiveIntegerField(default=0)
+    includes_ai = models.BooleanField(default=False)
 
     class Meta:
         db_table = "platform_plan_definition"

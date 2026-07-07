@@ -13,6 +13,12 @@ def create_audit(*, record, audit_type, actor=None, original_status=None,
     )
 
 
+def bulk_create_audits(audits: list[AttendanceAudit]) -> None:
+    """Write geo-fence/late-mark audit rows for a whole bulk mark in one query."""
+    if audits:
+        AttendanceAudit.objects.bulk_create(audits)
+
+
 def list_audits(branch_id, *, audit_type=None):
     qs = (
         AttendanceAudit.objects.filter(

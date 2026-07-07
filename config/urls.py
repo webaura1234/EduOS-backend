@@ -20,6 +20,7 @@ urlpatterns = [
     path("api/v1/fees/", include("apps.fees.urls", namespace="fees")),
     path("api/v1/hr/", include("apps.hr.urls", namespace="hr")),
     path("api/v1/communications/", include("apps.communications.urls", namespace="communications")),
+    path("api/v1/gallery/", include("apps.gallery.urls", namespace="gallery")),
     path("api/v1/grievances/", include("apps.grievances.urls", namespace="grievances")),
     path("api/v1/coursework/", include("apps.coursework.urls", namespace="coursework")),
     path("api/v1/analytics/", include("apps.analytics.urls", namespace="analytics")),

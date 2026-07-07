@@ -100,9 +100,9 @@ def test_super_admin_lists_all_users(multi_branch_env):
     assert resp.status_code == 200
     body = _data(resp)
     assert body["branchScope"] == "all"
-    roles = {u["role"] for u in body["users"]}
+    roles = {u["role"] for u in body["users"]["results"]}
     assert "faculty" in roles
-    assert len(body["users"]) >= 3
+    assert body["users"]["count"] >= 3
 
 
 def test_super_admin_filters_users_by_branch(multi_branch_env):
@@ -112,7 +112,7 @@ def test_super_admin_filters_users_by_branch(multi_branch_env):
     assert resp.status_code == 200
     body = _data(resp)
     assert body["branchScope"] == str(env["branch_b"].pk)
-    assert all(u["branch"] == env["branch_b"].name for u in body["users"])
+    assert all(u["branch"] == env["branch_b"].name for u in body["users"]["results"])
 
 
 def test_branch_admin_still_scoped(multi_branch_env):
@@ -121,5 +121,5 @@ def test_branch_admin_still_scoped(multi_branch_env):
     assert resp.status_code == 200
     body = _data(resp)
     assert body["branchId"] == str(env["branch_a"].pk)
-    for u in body["users"]:
+    for u in body["users"]["results"]:
         assert u["branch"] == env["branch_a"].name

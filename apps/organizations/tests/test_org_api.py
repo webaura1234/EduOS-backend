@@ -179,12 +179,12 @@ def test_type_immutable_after_go_live(client):
 
 # ── Plan ──────────────────────────────────────────────────────────────────────
 def test_plan_get(client, tenant):
-    PlanSubscriptionFactory(tenant=tenant, plan="growth", student_limit=1500)
+    PlanSubscriptionFactory(tenant=tenant, plan="ai", student_limit=0)
     resp = client.get(reverse("organizations:plan"))
     assert resp.status_code == 200
     body = resp.json().get("data", resp.json())
-    assert body["current"]["tier"] == "growth"
-    assert body["current"]["limits"]["students"] == 1500
+    assert body["current"]["tier"] == "ai"
+    assert body["current"]["limits"]["students"] is None
 
 
 # ── Subdomain check ───────────────────────────────────────────────────────────

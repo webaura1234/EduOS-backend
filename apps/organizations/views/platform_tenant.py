@@ -42,7 +42,7 @@ class PlatformTenantListCreateView(APIView):
             "tenants": summaries,
             "filterOptions": {
                 "cities": q.distinct_cities(),
-                "plans": ["starter", "growth", "enterprise"],
+                "plans": ["standard", "ai"],
                 "institutionTypes": ["school", "college"],
                 "statuses": ["active", "inactive", "pending"],
             },

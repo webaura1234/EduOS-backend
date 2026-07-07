@@ -21,6 +21,16 @@ def list_duties_for_exam(exam_id):
     )
 
 
+def list_duties_for_exams(exam_ids):
+    """Batch variant of ``list_duties_for_exam`` for many exams in one query —
+    the admin overview screen needs every exam's duties at once."""
+    return (
+        InvigilatorDuty.objects.filter(schedule_slot__exam_id__in=exam_ids, is_active=True)
+        .select_related("schedule_slot", "faculty")
+        .order_by("schedule_slot__start_at")
+    )
+
+
 def list_duties_for_slot(schedule_slot_id):
     return (
         InvigilatorDuty.objects.filter(schedule_slot_id=schedule_slot_id, is_active=True)

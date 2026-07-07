@@ -28,7 +28,7 @@ class PlanSubscription(BaseModel):
     plan = models.CharField(
         max_length=20,
         choices=PlanType.choices,
-        default=PlanType.STARTER,
+        default=PlanType.STANDARD,
     )
     billing_status = models.CharField(
         max_length=20,

@@ -14,12 +14,14 @@ def get_enquiry(branch_id, enquiry_id) -> Enquiry | None:
         return None
 
 
-def list_enquiries(branch_id, *, status=None, source=None):
+def list_enquiries(branch_id, *, status=None, source=None, created_after=None):
     qs = Enquiry.objects.filter(branch_id=branch_id, is_active=True).select_related("course")
     if status:
         qs = qs.filter(status=status)
     if source:
         qs = qs.filter(source=source)
+    if created_after:
+        qs = qs.filter(created_at__gte=created_after)
     return qs.order_by("-created_at")
 
 

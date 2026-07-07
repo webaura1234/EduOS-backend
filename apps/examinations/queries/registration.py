@@ -14,6 +14,17 @@ def list_registrations(exam_id, *, batch_id=None):
     return qs
 
 
+def list_registrations_for_exams(exam_ids):
+    """Batch variant of ``list_registrations`` for many exams in one query —
+    the admin overview screen needs every exam's registrations at once,
+    instead of one round trip per (exam, class-section) pair."""
+    return (
+        ExamRegistration.objects.filter(exam_id__in=exam_ids, is_active=True)
+        .select_related("student", "student__student_profile__user", "student__batch", "fee_invoice")
+        .order_by("student__student_profile__user__first_name", "student__student_profile__user__last_name")
+    )
+
+
 def get_registration(branch_id, registration_id) -> ExamRegistration | None:
     try:
         return ExamRegistration.objects.select_related(

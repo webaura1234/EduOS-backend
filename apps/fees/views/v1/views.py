@@ -43,7 +43,6 @@ from apps.fees.interactors import (
 from apps.fees.queries import (
     get_structure,
     get_student_in_branch,
-    get_student_profile,
     list_defaulters,
     list_invoices,
     list_receipts,
@@ -55,6 +54,7 @@ from apps.fees.queries.concession import (
     list_credit_notes,
 )
 from apps.fees.queries.invoice import (
+    get_invoice,
     get_invoice_for_student_user,
     list_dues_for_student,
     list_dues_for_student_user,
@@ -338,7 +338,9 @@ class DefaultersListView(APIView):
 
 # ── Payments, Checkout, Webhooks ─────────────────────────────────────────────
 class CreateOrderView(APIView):
-    permission_classes = [IsAuthenticated]
+    """Student pays their own invoice. Parents use ParentPortalChildPayView instead."""
+
+    permission_classes = [IsAuthenticated, IsStudent]
 
     def post(self, request):
         invoice_id = request.data.get("invoiceId")
@@ -349,9 +351,16 @@ class CreateOrderView(APIView):
         if not invoice_id or not amount_paise or not idempotency_key:
             raise ValidationError("invoiceId, amountPaise, and idempotencyKey are required.")
 
+        # Scope the invoice to the requesting student before touching it — otherwise
+        # any authenticated student could initiate a payment order against any
+        # invoice UUID, including one belonging to a different tenant.
+        invoice = get_invoice_for_student_user(invoice_id, request.user.id)
+        if not invoice:
+            raise ValidationError({"invoiceId": "Invoice not found."})
+
         try:
             interactor = CreatePaymentOrderInteractor(
-                invoice_id=invoice_id,
+                invoice_id=invoice.id,
                 amount_paise=amount_paise,
                 method=method,
                 payer_user=request.user,
@@ -381,6 +390,7 @@ class VerifyPaymentCaptureView(APIView):
                 razorpay_payment_id=razorpay_payment_id,
                 razorpay_order_id=razorpay_order_id,
                 signature=signature,
+                requesting_user=request.user,
             )
             payment = interactor.execute()
             return Response(PaymentSerializer(payment).data)
@@ -401,13 +411,24 @@ class RecordOfflinePaymentView(APIView):
         if not invoice_id or not amount_paise or not method or not student_id:
             raise ValidationError("invoiceId, amountPaise, method, and studentId are required.")
 
-        student = get_student_profile(student_id)
+        # Scope both the student and the invoice to the admin's own branch — and
+        # to each other — before recording anything. Previously these were
+        # resolved by primary key alone, so an admin could record a payment
+        # against a student/invoice pair from a completely different tenant.
+        branch = get_request_branch(request)
+        student = get_student_in_branch(branch.id, student_id)
         if not student:
             raise ValidationError({"studentId": "Student profile not found."})
 
+        invoice = get_invoice(branch.id, invoice_id)
+        if not invoice:
+            raise ValidationError({"invoiceId": "Invoice not found."})
+        if invoice.student_id != student.pk:
+            raise ValidationError({"invoiceId": "Invoice does not belong to the given student."})
+
         try:
             interactor = RecordOfflinePaymentInteractor(
-                invoice_id=invoice_id,
+                invoice_id=invoice.id,
                 amount_paise=amount_paise,
                 method=method,
                 payer_user=student.user,

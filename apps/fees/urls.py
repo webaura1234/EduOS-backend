@@ -29,6 +29,7 @@ from apps.fees.views import (
 
 from apps.fees.views.admin_overview import AdminFeesOverviewView
 from apps.fees.views.admin_payment import AdminRecordPaymentByStudentView
+from apps.fees.views.admin_payments_list import AdminPaymentsListView, AdminPaymentsSummaryView
 from apps.fees.views.admin_reconciliation import AdminReconcilePaymentsView
 from apps.fees.views.receipt import ReceiptDownloadView
 from apps.fees.views.self_export import StudentFeeStatementExportView
@@ -47,6 +48,8 @@ urlpatterns = [
 
     # Admin aggregate (FeesData shape) + record-payment-by-student
     path("admin-overview/", AdminFeesOverviewView.as_view(), name="admin-overview"),
+    path("admin-payments/", AdminPaymentsListView.as_view(), name="admin-payments-list"),
+    path("admin-payments/summary/", AdminPaymentsSummaryView.as_view(), name="admin-payments-summary"),
     path("payments/offline-by-student/", AdminRecordPaymentByStudentView.as_view(), name="offline-by-student"),
     path("reconciliation/run/", AdminReconcilePaymentsView.as_view(), name="reconciliation-run"),
 

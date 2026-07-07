@@ -92,6 +92,13 @@ class CreatePaymentOrderInteractor:
         if invoice is None:
             raise ValidationError("Invoice not found.")
 
+        # Defense-in-depth: a payer must always belong to the same tenant as the
+        # invoice, regardless of the specific ownership rule the calling view
+        # enforces (self-pay, parent-pays-child, admin-records-offline). This
+        # closes the gap even if a future/careless caller skips its own check.
+        if invoice.branch.tenant_id != self.payer_user.tenant_id:
+            raise ValidationError("Invoice not found.")
+
         if invoice.status == InvoiceStatus.PAID and self.amount_paise > 0:
             raise ValidationError("This invoice has already been fully paid.")
 
@@ -127,13 +134,22 @@ class CreatePaymentOrderInteractor:
 
 
 class VerifyPaymentCaptureInteractor:
-    """Verifies and processes a captured payment from Razorpay (called by webhook or client verify)."""
+    """Verifies and processes a captured payment from Razorpay (called by webhook or client verify).
 
-    def __init__(self, payment_id=None, razorpay_payment_id=None, razorpay_order_id=None, signature=None):
+    `requesting_user` is only supplied by the authenticated client-verify path
+    (`VerifyPaymentCaptureView`) — the webhook path has no user context and relies
+    on the Razorpay webhook signature instead. When present, it must belong to the
+    same tenant as the payment's invoice, closing the same class of cross-tenant
+    IDOR gap fixed on `CreatePaymentOrderInteractor`.
+    """
+
+    def __init__(self, payment_id=None, razorpay_payment_id=None, razorpay_order_id=None, signature=None,
+                 requesting_user=None):
         self.payment_id = payment_id
         self.razorpay_payment_id = razorpay_payment_id
         self.razorpay_order_id = razorpay_order_id
         self.signature = signature
+        self.requesting_user = requesting_user
 
     @transaction.atomic
     def execute(self) -> Payment:
@@ -145,6 +161,10 @@ class VerifyPaymentCaptureInteractor:
             payment = get_payment_by_order_for_update(self.razorpay_order_id)
 
         if not payment:
+            raise ValidationError("Payment record not found.")
+
+        if (self.requesting_user is not None
+                and payment.invoice.branch.tenant_id != self.requesting_user.tenant_id):
             raise ValidationError("Payment record not found.")
 
         # Deduplicate: if already captured, return immediately (EC-FEE-02).
@@ -201,6 +221,14 @@ class RecordOfflinePaymentInteractor:
 
         invoice = get_invoice_for_update(self.invoice_id)
         if invoice is None:
+            raise ValidationError("Invoice not found.")
+
+        # Defense-in-depth: the recording admin and the student being paid for
+        # must both belong to the invoice's tenant (see CreatePaymentOrderInteractor
+        # for the same pattern).
+        if invoice.branch.tenant_id != self.payer_user.tenant_id:
+            raise ValidationError("Invoice not found.")
+        if self.user is not None and invoice.branch.tenant_id != self.user.tenant_id:
             raise ValidationError("Invoice not found.")
 
         if invoice.status == InvoiceStatus.PAID:

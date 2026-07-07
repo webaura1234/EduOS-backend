@@ -27,3 +27,8 @@ CACHES = {
         "LOCATION": "unique-snowflake",
     }
 }
+
+# Never let tests hit real S3/R2, regardless of what the local .env has configured
+# for live development — tests must be hermetic.
+S3_MODE = "sandbox"
+R2_PUBLIC_BASE_URL = ""

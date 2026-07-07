@@ -43,13 +43,14 @@ DEFAULT_PASSWORD = "Password123!"
 PLATFORM_OWNER_PHONE = "+919000000001"
 PLATFORM_OWNER_PASSWORD = "Platform@123"
 
-# Per-plan subscription limits.
-_PLAN_LIMITS = {
-    "starter": dict(student_limit=500, storage_limit_gb=10, sms_quota_per_month=1000,
-                    ai_token_quota_per_month=10000, api_rpm_limit=100),
-    "growth": dict(student_limit=1500, storage_limit_gb=50, sms_quota_per_month=5000,
-                   ai_token_quota_per_month=50000, api_rpm_limit=300),
-}
+# Per-plan subscription limits — uncapped for core ERP.
+_UNCAPPED_LIMITS = dict(
+    student_limit=0,
+    storage_limit_gb=0,
+    sms_quota_per_month=0,
+    ai_token_quota_per_month=0,
+    api_rpm_limit=0,
+)
 
 
 def _ensure_password(user: User) -> None:
@@ -111,17 +112,23 @@ def seed_tenant(*, subdomain, name, institution_type, plan, city, state,
         tenant=tenant,
         defaults=dict(student_id_label=student_id_label, faculty_id_label=faculty_id_label),
     )
-    limits = _PLAN_LIMITS[plan]
-    PlanSubscription.objects.get_or_create(
+    limits = _UNCAPPED_LIMITS
+    sub, created = PlanSubscription.objects.get_or_create(
         tenant=tenant,
         defaults=dict(plan=plan, billing_status="trial", **limits),
     )
-    _seed_quota(tenant, "students", soft_cap=int(limits["student_limit"] * 0.9),
-                hard_cap=limits["student_limit"])
-    _seed_quota(tenant, "sms_count", soft_cap=int(limits["sms_quota_per_month"] * 0.9),
-                hard_cap=limits["sms_quota_per_month"])
-    _seed_quota(tenant, "ai_tokens", soft_cap=int(limits["ai_token_quota_per_month"] * 0.9),
-                hard_cap=limits["ai_token_quota_per_month"])
+    if not created and sub.plan != plan:
+        sub.plan = plan
+        sub.save(update_fields=["plan", "updated_at"])
+    if limits["student_limit"] > 0:
+        _seed_quota(tenant, "students", soft_cap=int(limits["student_limit"] * 0.9),
+                    hard_cap=limits["student_limit"])
+    if limits["sms_quota_per_month"] > 0:
+        _seed_quota(tenant, "sms_count", soft_cap=int(limits["sms_quota_per_month"] * 0.9),
+                    hard_cap=limits["sms_quota_per_month"])
+    if limits["ai_token_quota_per_month"] > 0:
+        _seed_quota(tenant, "ai_tokens", soft_cap=int(limits["ai_token_quota_per_month"] * 0.9),
+                    hard_cap=limits["ai_token_quota_per_month"])
 
     _seed_user(role=Role.SUPER_ADMIN, tenant=tenant, branch=None,
                first_name=name.split()[0], last_name="SuperAdmin", phone=f"{phone_prefix}00")
@@ -305,13 +312,13 @@ def seed():
 
     seed_tenant(
         subdomain="greenfield", name="Greenfield Academy", institution_type="school",
-        plan="starter", city="Pune", state="Maharashtra",
+        plan="standard", city="Pune", state="Maharashtra",
         student_id_label="Roll Number", faculty_id_label="Employee ID",
         parent_access_enabled=True, phone_prefix="+9198765432",
     )
     seed_tenant(
         subdomain="horizon", name="Horizon Engineering College", institution_type="college",
-        plan="growth", city="Bengaluru", state="Karnataka",
+        plan="ai", city="Bengaluru", state="Karnataka",
         student_id_label="Admission Number", faculty_id_label="Staff Code",
         parent_access_enabled=False, phone_prefix="+9197654321",
     )

@@ -19,6 +19,16 @@ def list_seatings_for_exam(exam_id):
     )
 
 
+def list_seatings_for_exams(exam_ids):
+    """Batch variant of ``list_seatings_for_exam`` for many exams in one query —
+    the admin overview screen needs every exam's seating at once."""
+    return (
+        Seating.objects.filter(schedule_slot__exam_id__in=exam_ids, is_active=True)
+        .select_related("schedule_slot", "student", "student__student_profile__user", "room")
+        .order_by("schedule_slot__start_at", "room_id", "seat_number")
+    )
+
+
 def clear_seatings_for_slot(schedule_slot_id):
     """Hard-delete prior seating so unique constraints allow regeneration."""
     return Seating.objects.filter(schedule_slot_id=schedule_slot_id).delete()[0]

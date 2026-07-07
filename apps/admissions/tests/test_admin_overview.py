@@ -69,3 +69,33 @@ def test_requires_admin(env):
                           custom_login_id="STU-1", must_change_password=False)
     resp = _client(student).get(reverse("admissions:admin-overview"))
     assert resp.status_code == 403
+
+
+def test_old_admission_cycles_excluded_from_live_pipeline(env):
+    """The live Kanban pipeline must not show enquiries/applications from
+    admission cycles closed years ago — only the current cycle's rolling
+    window (bounds the board's payload for a long-running school)."""
+    import datetime
+    from apps.academics.models import AcademicYear
+
+    AcademicYear.objects.create(
+        branch=env["branch"], name="2026-27", is_current=True,
+        start_date=datetime.date(2026, 6, 1), end_date=datetime.date(2027, 4, 30),
+    )
+
+    old_enq = enq_q.create_enquiry(
+        branch=env["branch"], source="walk_in", applicant_name="Old Applicant",
+        phone="+919800000001",
+    )
+    old_enq.created_at = datetime.datetime(2023, 1, 1, tzinfo=datetime.timezone.utc)
+    type(old_enq).objects.filter(pk=old_enq.pk).update(created_at=old_enq.created_at)
+
+    current_enq = enq_q.create_enquiry(
+        branch=env["branch"], source="walk_in", applicant_name="Current Applicant",
+        phone="+919800000002",
+    )
+
+    body = _data(_client(env["admin"]).get(reverse("admissions:admin-overview")))
+    names = {e["applicantName"] for e in body["enquiries"]}
+    assert "Current Applicant" in names
+    assert "Old Applicant" not in names

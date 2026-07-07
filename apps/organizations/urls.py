@@ -12,7 +12,15 @@ from apps.organizations.views.institution import (
     InstitutionSettingsView,
     SubdomainCheckView,
 )
+from apps.organizations.views.licensing import LicensingStudentsView, LicensingSummaryView
 from apps.organizations.views.plan import PlanView
+from apps.organizations.views.platform_licensing import (
+    PlatformLicensingInvoicesView,
+    PlatformLicensingOverviewView,
+    PlatformLicensingPaymentsView,
+    PlatformLicensingPeriodView,
+    PlatformLicensingTenantDetailView,
+)
 from apps.organizations.views.platform_student_subscription import (
     PlatformStudentSubscriptionActionsView,
     PlatformStudentSubscriptionListView,
@@ -58,6 +66,10 @@ urlpatterns = [
     # Super-admin — plan
     path("plan/", PlanView.as_view(), name="plan"),
 
+    # Tenant-scoped licensing (Super Admin + Branch Admin, read-only)
+    path("licensing/summary/", LicensingSummaryView.as_view(), name="licensing-summary"),
+    path("licensing/students/", LicensingStudentsView.as_view(), name="licensing-students"),
+
     # Onboarding helper
     path("subdomain-check/", SubdomainCheckView.as_view(), name="subdomain-check"),
 
@@ -74,6 +86,33 @@ urlpatterns = [
         "platform/student-subscriptions/actions/",
         PlatformStudentSubscriptionActionsView.as_view(),
         name="platform-student-subscription-actions",
+    ),
+
+    # Platform-owner — licensing
+    path(
+        "platform/licensing/overview/",
+        PlatformLicensingOverviewView.as_view(),
+        name="platform-licensing-overview",
+    ),
+    path(
+        "platform/licensing/tenants/<uuid:tenant_id>/",
+        PlatformLicensingTenantDetailView.as_view(),
+        name="platform-licensing-tenant-detail",
+    ),
+    path(
+        "platform/licensing/payments/",
+        PlatformLicensingPaymentsView.as_view(),
+        name="platform-licensing-payments",
+    ),
+    path(
+        "platform/licensing/invoices/",
+        PlatformLicensingInvoicesView.as_view(),
+        name="platform-licensing-invoices",
+    ),
+    path(
+        "platform/licensing/periods/<uuid:period_id>/",
+        PlatformLicensingPeriodView.as_view(),
+        name="platform-licensing-period",
     ),
 
     # Platform-owner — plan management

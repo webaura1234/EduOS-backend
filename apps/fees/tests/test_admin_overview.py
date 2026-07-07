@@ -41,10 +41,11 @@ def test_overview_shape(env):
     assert resp.status_code == 200, resp.content
     body = _data(resp)
     for key in ("institutionType", "structures", "concessionRules", "concessionRequests",
-                "payments", "creditNotes", "creditNoteRequests", "examFeeInvoices",
+                "creditNotes", "creditNoteRequests", "examFeeInvoices",
                 "ledger", "collection", "refunds", "webhooks", "reconciliation",
                 "installmentSchedulesByStudent", "batches", "currentAcademicYearId"):
         assert key in body, f"missing {key}"
+    assert "payments" not in body  # payments moved to a dedicated paginated endpoint
     assert set(body["collection"]) == {
         "collectedToday", "collectedThisMonth", "outstandingTotal", "overdueCount", "updatedAt",
     }

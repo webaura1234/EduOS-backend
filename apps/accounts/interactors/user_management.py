@@ -55,6 +55,7 @@ def invite_dict(invite) -> dict:
     return {
         "id": str(invite.id),
         "user_id": str(invite.user_id),
+        "name": invite.user.full_name,
         "email": invite.user.email or "",
         "token": str(invite.token),
         "invite_url": f"/invite/accept?token={invite.token}",
@@ -117,6 +118,18 @@ def hard_delete_student(*, admin, user_id, branch_id=None) -> dict:
         })
 
     result = {"id": str(user.id), "name": user.full_name}
+
+    # Record the deletion in the license ledger BEFORE the user row goes away.
+    # A consumed license stays consumed (Case 4); only an unlicensed student's
+    # pending amount is reduced.
+    from apps.organizations.billing.license_allocator import on_student_lifecycle_event
+    from apps.organizations.enums import LicenseEventType
+
+    on_student_lifecycle_event(
+        user, LicenseEventType.STUDENT_DELETED,
+        detail="Student hard-deleted by admin.", user=admin,
+    )
+
     uq.hard_delete_user(user)
     return result
 
@@ -303,6 +316,7 @@ def create_user(
         _enroll_new_student(user=user, batch=batch, admin=admin)
         from apps.organizations.billing.student_subscription import upsert_student_platform_subscription
 
+        # Delegates to the license allocator internally (FIFO auto-license).
         upsert_student_platform_subscription(student_user=user)
 
     invite = None

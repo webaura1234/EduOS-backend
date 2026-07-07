@@ -106,6 +106,54 @@ def get_student_profile_in_branch(branch_id, student_id):
     return enrollment_q.resolve_enrollment_for_profile(profile)
 
 
+def resolve_students_for_marking(branch_id, student_ids: list) -> dict:
+    """Bulk equivalent of ``get_student_profile_in_branch`` for a whole mark-session
+    payload — ~2 queries total instead of one ``get_student_profile_in_branch`` call
+    (itself 2 queries) per student, the dominant cost of marking a large class.
+
+    Returns ``{studentId (str): StudentEnrollment | None}``; ``None`` means no active
+    profile was found for that id in this branch. Profiles with no existing
+    enrollment fall back to the same auto-create path ``get_student_profile_in_branch``
+    uses, one at a time — a rare edge case (a profile with zero enrollments yet), so
+    falling back per-id there doesn't reintroduce the N+1 for the common case.
+    """
+    if not student_ids:
+        return {}
+
+    profiles = list(
+        StudentProfile.objects.select_related("user", "current_batch").filter(
+            pk__in=student_ids,
+            current_batch__course__department__branch_id=branch_id,
+            is_active=True,
+        )
+    )
+    profile_by_id = {str(p.pk): p for p in profiles}
+
+    enrollments = (
+        StudentEnrollment.objects.filter(
+            student_profile_id__in=[p.pk for p in profiles], is_active=True,
+        )
+        .select_related("student_profile__user", "batch", "academic_year")
+        .order_by("student_profile_id", "-created_at")
+    )
+    enrollment_by_profile_id = {}
+    for e in enrollments:
+        key = str(e.student_profile_id)
+        enrollment_by_profile_id.setdefault(key, e)  # first per id = most recent
+
+    result: dict = {}
+    for sid in student_ids:
+        profile = profile_by_id.get(str(sid))
+        if profile is None:
+            result[str(sid)] = None
+            continue
+        enrollment = enrollment_by_profile_id.get(str(profile.pk))
+        if enrollment is None:
+            enrollment = enrollment_q.resolve_enrollment_for_profile(profile)
+        result[str(sid)] = enrollment
+    return result
+
+
 def student_for_guardian(guardian_user_id, student_profile_id):
     """Return the student's active enrollment only if this parent is linked (F-112)."""
     from apps.accounts.models.guardian import StudentGuardianLink

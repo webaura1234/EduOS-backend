@@ -31,7 +31,7 @@ def client(platform_owner):
 
 CREATE_PAYLOAD = {
     "overview": {"institutionName": "New School", "subdomain": "newschool",
-                 "institutionType": "school", "plan": "growth"},
+                 "institutionType": "school", "plan": "ai"},
     "invite": {"superAdminName": "Asha Rao", "superAdminPhone": "+919812345678"},
     "address": {"city": "Pune", "state": "MH", "addressLine1": "1 MG Rd", "pincode": "411001"},
     "branches": {"hqCity": "Pune", "hqState": "MH", "entries": [{"name": "Main Campus", "assignees": []}]},
@@ -50,14 +50,14 @@ def test_create_tenant_provisions_everything(client, platform_owner):
     summary = _data(resp)["tenant"]
     assert summary["subdomain"] == "newschool"
     assert summary["status"] == "pending"          # trial → pending
-    assert summary["plan"] == "growth"
+    assert summary["plan"] == "ai"
     assert summary["superAdminName"] == "Asha Rao"
     assert summary["branchCount"] == 1
 
     tenant = Tenant.objects.get(subdomain="newschool")
     assert tenant.created_by_id == platform_owner.id
     assert tenant.updated_by_id == platform_owner.id
-    assert hasattr(tenant, "subscription") and tenant.subscription.plan == "growth"
+    assert hasattr(tenant, "subscription") and tenant.subscription.plan == "ai"
     assert tenant.tenant_settings is not None
     assert tenant.branches.count() == 1
     # Super-admin invite user created

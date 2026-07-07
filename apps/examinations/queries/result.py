@@ -139,6 +139,16 @@ def list_publications_for_exam(exam_id):
     )
 
 
+def list_publications_for_exams(exam_ids):
+    """Batch variant of ``list_publications_for_exam`` for many exams in one
+    query — the admin overview screen needs every exam's publications at once."""
+    return (
+        ResultPublication.objects.filter(exam_id__in=exam_ids, is_active=True)
+        .select_related("published_by")
+        .order_by("exam_id", "-revision_no")
+    )
+
+
 def get_publication_note(publication_id) -> str:
     row = (
         ResultRevisionHistory.objects.filter(publication_id=publication_id, is_active=True)
@@ -146,6 +156,21 @@ def get_publication_note(publication_id) -> str:
         .first()
     )
     return row.change_summary if row else ""
+
+
+def latest_notes_for_publications(publication_ids) -> dict:
+    """``{publication_id: change_summary}`` for the newest revision-history row
+    per publication, in one query — avoids the per-publication
+    ``get_publication_note`` N+1 that even the single-exam results-status view
+    has (it calls that once per publication in a Python loop)."""
+    notes: dict = {}
+    rows = (
+        ResultRevisionHistory.objects.filter(publication_id__in=publication_ids, is_active=True)
+        .order_by("publication_id", "-created_at")
+    )
+    for row in rows:
+        notes.setdefault(row.publication_id, row.change_summary)
+    return notes
 
 
 def create_publication(

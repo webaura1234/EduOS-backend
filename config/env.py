@@ -1,6 +1,7 @@
 """Load `.env` from the project root into os.environ (without overwriting existing vars)."""
 
 import os
+import re
 from pathlib import Path
 
 _ENV_LOADED = False
@@ -22,7 +23,12 @@ def load_env() -> None:
             continue
         key, _, value = line.partition("=")
         key = key.strip()
-        value = value.strip().strip('"').strip("'")
+        value = value.strip()
+        # Strip a trailing inline comment (e.g. `value   # note`) unless the value
+        # is quoted, in which case `#` is taken literally.
+        if not (value.startswith('"') or value.startswith("'")):
+            value = re.split(r"\s+#", value, maxsplit=1)[0].strip()
+        value = value.strip('"').strip("'")
         os.environ.setdefault(key, value)
 
     _ENV_LOADED = True

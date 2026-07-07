@@ -17,16 +17,30 @@ from apps.accounts.queries.session import (
     revoke_tokens_for_tenant,
 )
 from apps.accounts.queries.user import create_invited_user
+from apps.organizations.plan_catalog import normalize_plan
 from apps.organizations.queries import institution as inst_q
 from apps.organizations.queries import platform_tenant as q
 
 logger = logging.getLogger("apps.organizations.interactors.platform_tenant")
 
-# Per-tier subscription limits applied at onboarding.
-_PLAN_LIMITS = {
-    "starter": {"student_limit": 500, "storage_limit_gb": 10, "sms_quota_per_month": 1000},
-    "growth": {"student_limit": 1500, "storage_limit_gb": 50, "sms_quota_per_month": 5000},
-    "enterprise": {"student_limit": 100000, "storage_limit_gb": 500, "sms_quota_per_month": 100000},
+
+def _parse_iso_date(value):
+    if not value:
+        return None
+    import datetime
+
+    try:
+        return datetime.date.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+# Per-tier subscription limits applied at onboarding — uncapped for core ERP.
+_UNCAPPED_LIMITS = {
+    "student_limit": 0,
+    "storage_limit_gb": 0,
+    "sms_quota_per_month": 0,
+    "ai_token_quota_per_month": 0,
+    "api_rpm_limit": 0,
 }
 
 
@@ -49,7 +63,7 @@ def create_tenant(payload: dict, user=None):
     if inst_q.subdomain_taken(subdomain):
         raise ValidationError("Subdomain is already taken.")
 
-    plan = overview["plan"]
+    plan = normalize_plan(overview["plan"])
     institution_type = overview["institutionType"]
     city = address.get("city") or branches.get("hqCity", "")
     state = address.get("state") or branches.get("hqState", "")
@@ -74,7 +88,18 @@ def create_tenant(payload: dict, user=None):
 
     q.create_settings(tenant, user=user)
     q.create_subscription(
-        tenant, plan=plan, limits=_PLAN_LIMITS.get(plan, _PLAN_LIMITS["starter"]), user=user
+        tenant, plan=plan, limits=_UNCAPPED_LIMITS, user=user
+    )
+
+    # Seed the first licensing period (default Apr 1 – Mar 31, overridable so a
+    # school can run e.g. Jul–Jun from day one).
+    from apps.organizations.billing.license_allocator import ensure_period
+
+    ensure_period(
+        tenant,
+        start=_parse_iso_date(overview.get("subscriptionStart")),
+        end=_parse_iso_date(overview.get("subscriptionEnd")),
+        user=user,
     )
 
     # Primary branch (use first wizard entry name if provided, else "Main Campus").

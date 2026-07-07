@@ -10,30 +10,43 @@ from apps.accounts.interactors import user_management as um
 from apps.accounts.permissions import IsAdminOrSuperAdmin
 from apps.accounts.queries.user import list_managed_users, list_pending_invites
 from apps.accounts.models.user import Role
+from apps.core.pagination import paginate_queryset
 from apps.organizations.queries.branch import get_branch
 
 
 class UserManagementView(APIView):
-    """GET → { users, pending_invites, multi_role_policy, branchId, branchName, branchScope }."""
+    """GET → { users: {count, next, previous, results}, pending_invites, multi_role_policy,
+    branchId, branchName, branchScope }.
+
+    `users` is server-side paginated/filtered/searched (`?page=&page_size=&role=&search=`)
+    — the full tenant roster is never materialized in Python for this endpoint.
+    """
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
 
     def get(self, request) -> Response:
         branch, branch_scope = resolve_management_scope(request)
         tenant_id = request.user.tenant_id
         branch_id = branch.pk if branch else None
-        invites = list(list_pending_invites(tenant_id, branch_id=branch_id))
+        role = request.query_params.get("role") or None
+        search = request.query_params.get("search") or None
 
+        users_qs = list_managed_users(tenant_id, branch_id=branch_id, role=role, search=search)
+
+        # Pending invites map by user id — only needed for the users on the current
+        # page, but the invites table itself is small/bounded (unused tokens only)
+        # so listing it in full and looking up by id is cheap.
+        invites = list(list_pending_invites(tenant_id, branch_id=branch_id))
         invite_by_user: dict[str, object] = {}
         for inv in invites:
             invite_by_user.setdefault(str(inv.user_id), inv)
 
-        users = [
-            um.managed_user_dict(u, invite_by_user.get(str(u.id)))
-            for u in list_managed_users(tenant_id, branch_id=branch_id)
-        ]
+        users_page = paginate_queryset(
+            request, users_qs,
+            lambda u: um.managed_user_dict(u, invite_by_user.get(str(u.id))),
+        )
 
         return Response({
-            "users": users,
+            "users": users_page,
             "pending_invites": [um.invite_dict(inv) for inv in invites],
             "multi_role_policy": um.MULTI_ROLE_POLICY,
             "branchScope": branch_scope,

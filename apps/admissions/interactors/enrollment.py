@@ -28,15 +28,6 @@ class LinkedAccountWarning(ValidationError):
         })
 
 
-def _check_quota(tenant):
-    hard_cap = prov_q.student_hard_cap(tenant.pk)
-    if hard_cap is None:
-        return
-    if prov_q.active_student_count(tenant.pk) >= hard_cap:
-        raise ValidationError({"code": "limit_reached",
-                               "message": "Student plan limit reached. Upgrade the plan to enroll more."})
-
-
 class ProvisionEnrollmentInteractor:
     """Create student User + StudentProfile + StudentEnrollment, link parent, snapshot fee."""
 
@@ -94,15 +85,16 @@ class ProvisionEnrollmentInteractor:
         if matches and not self.confirm_duplicate:
             raise DuplicateStudentError(matches)
 
-        # 3. Plan quota (EC-TEN-06).
-        _check_quota(self.tenant)
-
-        # 4. Student account + profile.
+        # 3. Student account + profile. Admissions are never blocked by
+        # licensing: over-capacity students simply become unlicensed.
         student_user = prov_q.create_student_user(
             tenant=self.tenant, branch=self.branch, first_name=self.first_name,
             last_name=self.last_name, custom_login_id=self.admission_number,
             phone=self.student_phone, email=self.student_email, user=self.user,
         )
+        from apps.organizations.billing.license_allocator import on_student_enrolled
+
+        on_student_enrolled(student_user, user=self.user)
         profile = prov_q.create_student_profile(
             student_user=student_user, batch=self.batch, date_of_birth=self.date_of_birth,
             gender=self.gender, guardian_phone=self.parent_phone, user=self.user,

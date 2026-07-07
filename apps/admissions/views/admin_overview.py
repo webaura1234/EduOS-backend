@@ -4,6 +4,8 @@ Real data for enquiries, applications, funnel, courses, intakes, institution nam
 notificationLog and eligibilityRules are not yet modelled → returned empty.
 """
 
+import datetime
+
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -14,6 +16,21 @@ from apps.admissions.queries import application as app_q
 from apps.admissions.queries import enquiry as enq_q
 from apps.academics.scoping import resolve_branch
 from apps.accounts.permissions import IsAdminOrSuperAdmin
+
+
+def _current_cycle_start(years: list) -> datetime.datetime | None:
+    """Start of the current admission cycle's rolling window: one year before
+    the current academic year begins, so applicants who apply ahead of the
+    year's start date still show on the live pipeline. Falls back to the most
+    recent academic year if none is explicitly marked current; returns None
+    (no scoping) if the branch has no academic year configured yet."""
+    if not years:
+        return None
+    current_year = next((y for y in years if y.is_current), years[0])
+    return datetime.datetime.combine(
+        current_year.start_date - datetime.timedelta(days=365),
+        datetime.time.min, tzinfo=datetime.timezone.utc,
+    )
 
 # Backend ApplicationStatus → frontend PipelineStage.
 # "submitted" means "wizard started / in progress", not "documents collected",
@@ -141,15 +158,26 @@ def _application(a) -> dict:
 
 
 class AdminAdmissionsOverviewView(APIView):
-    """GET → AdmissionsData (full admissions aggregate for the admin screen)."""
+    """GET → AdmissionsData (full admissions aggregate for the admin screen).
+
+    ``enquiries``/``applications`` here feed the live Kanban pipeline, which
+    needs its whole working set in one shot (a board can't page). Since neither
+    model has an explicit admission-cycle field, both are scoped to a rolling
+    window starting a year before the current academic year begins (covering
+    early applicants) instead of every enquiry/application ever filed — a
+    school running for years would otherwise load its entire admissions
+    history into one board.
+    """
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
 
     def get(self, request) -> Response:
         branch = resolve_branch(request)
         tenant = branch.tenant
 
-        enquiries = list(enq_q.list_enquiries(branch.pk))
-        applications = list(app_q.list_applications(branch.pk))
+        years = list(cal_q.list_years(branch.pk))
+        cycle_start = _current_cycle_start(years)
+        enquiries = list(enq_q.list_enquiries(branch.pk, created_after=cycle_start))
+        applications = list(app_q.list_applications(branch.pk, created_after=cycle_start))
 
         # Funnel — counts per pipeline stage + per enquiry source.
         by_stage = {s: 0 for s in _PIPELINE_STAGES}
@@ -169,7 +197,7 @@ class AdminAdmissionsOverviewView(APIView):
 
         courses = [c.name for c in struct_q.list_courses(branch.pk)]
         course_rows = list(struct_q.list_courses(branch.pk))
-        intakes = [y.name for y in cal_q.list_years(branch.pk)]
+        intakes = [y.name for y in years]
 
         return Response({
             "enquiries": [_enquiry(e) for e in enquiries],

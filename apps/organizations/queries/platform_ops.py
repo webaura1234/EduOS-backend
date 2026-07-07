@@ -20,59 +20,39 @@ from apps.organizations.models import (
     PlatformSupportTicketComment,
     Tenant,
 )
-from apps.organizations.queries.platform_tenant import (
+from apps.organizations.plan_catalog import (
     PLAN_LIMITS,
     PLAN_ORDER,
-    branch_count,
-    to_ui_status,
+    PLAN_PRICE_PER_STUDENT_INR,
+    normalize_plan,
 )
+from apps.organizations.queries.platform_tenant import branch_count, to_ui_status
 
 # Seeded plan constants
 PLAN_TRIAL_DAYS = 30
 PLAN_GRACE_DAYS = 15
 
+# Legacy flat MRR estimates (INR/month) — retained for dashboard trend charts.
 PLAN_MRR_INR = {
-    "starter": 5000,
-    "growth": 12000,
-    "enterprise": 35000,
+    "standard": 15_000,
+    "ai": 25_000,
 }
 
-PLAN_ANNUAL_PER_STUDENT_INR = {
-    "starter": 100,
-    "growth": 200,
-    "enterprise": 500,
-}
+PLAN_ANNUAL_PER_STUDENT_INR = PLAN_PRICE_PER_STUDENT_INR
 
+# AI-only feature flags — core ERP modules are never gated by plan tier.
 FEATURE_LABELS = {
-    "parentPortal": "Parent portal",
-    "onlineFees": "Online fees",
-    "admissions": "Admissions",
-    "hrPayroll": "HR & payroll",
-    "examinations": "Examinations",
+    "aiAssistant": "AI assistant",
+    "aiInsights": "AI insights",
+    "aiReports": "AI reports",
+    "aiAnalytics": "AI analytics",
+    "aiAutomation": "AI automation",
+    "predictiveAnalytics": "Predictive analytics",
 }
 
 DEFAULT_PLAN_FEATURES = {
-    "starter": {
-        "parentPortal": False,
-        "onlineFees": False,
-        "admissions": True,
-        "hrPayroll": False,
-        "examinations": False,
-    },
-    "growth": {
-        "parentPortal": True,
-        "onlineFees": True,
-        "admissions": True,
-        "hrPayroll": False,
-        "examinations": True,
-    },
-    "enterprise": {
-        "parentPortal": True,
-        "onlineFees": True,
-        "admissions": True,
-        "hrPayroll": True,
-        "examinations": True,
-    },
+    "standard": {k: False for k in FEATURE_LABELS},
+    "ai": {k: True for k in FEATURE_LABELS},
 }
 
 
@@ -81,7 +61,7 @@ DEFAULT_PLAN_FEATURES = {
 def _actor_name(user=None) -> str:
     if user is None:
         return "Platform Owner"
-    return user.get_full_name() or user.email or "Platform Owner"
+    return user.full_name or user.email or "Platform Owner"
 
 
 def _announcement_to_dict(ann: PlatformGlobalAnnouncement) -> dict:
@@ -249,50 +229,45 @@ def update_maintenance(*, enabled: bool, message: str | None = None,
 
 # ── Plan definitions ──────────────────────────────────────────────────────────
 
-def _ensure_plan_definitions() -> list[PlatformPlanDefinition]:
-    existing = {p.plan: p for p in PlatformPlanDefinition.objects.all()}
-    for plan_key, limits in PLAN_LIMITS.items():
-        if plan_key not in existing:
-            PlatformPlanDefinition.objects.create(
-                plan=plan_key,
-                label=limits["label"],
-                max_branches=limits["maxBranches"],
-                max_students=limits["maxStudents"],
-                included_features=limits["includedFeatures"],
-                description=f"{limits['label']} tier for schools and colleges.",
-            )
-    return list(PlatformPlanDefinition.objects.order_by(
-        [plan for plan in PLAN_ORDER].index if False else "plan"
-    ))
+def _plan_definition_defaults(plan_key: str, limits: dict) -> dict:
+    return {
+        "plan": plan_key,
+        "label": limits["label"],
+        "max_branches": 0,
+        "max_students": 0,
+        "included_features": [],
+        "description": limits.get("description", f"{limits['label']} tier."),
+        "price_per_student_inr": limits.get("pricePerStudentInr", 0),
+        "included_ai_credits_per_student": limits.get("includedAiCreditsPerStudent", 0),
+        "includes_ai": limits.get("includesAi", False),
+    }
+
+
+def _plan_definition_to_dict(p: PlatformPlanDefinition) -> dict:
+    return {
+        "plan": normalize_plan(p.plan),
+        "label": p.label,
+        "maxBranches": p.max_branches,
+        "maxStudents": p.max_students,
+        "includedFeatures": p.included_features or [],
+        "description": p.description,
+        "pricePerStudentInr": p.price_per_student_inr,
+        "includedAiCreditsPerStudent": p.included_ai_credits_per_student,
+        "includesAi": p.includes_ai,
+    }
 
 
 def get_plan_definitions() -> list[dict]:
-    defs = {p.plan: p for p in PlatformPlanDefinition.objects.all()}
-    # Seed any missing plans
+    defs = {normalize_plan(p.plan): p for p in PlatformPlanDefinition.objects.all()}
     for plan_key, limits in PLAN_LIMITS.items():
         if plan_key not in defs:
-            obj = PlatformPlanDefinition.objects.create(
-                plan=plan_key,
-                label=limits["label"],
-                max_branches=limits["maxBranches"],
-                max_students=limits["maxStudents"],
-                included_features=limits["includedFeatures"],
-                description=f"{limits['label']} tier.",
-            )
+            obj = PlatformPlanDefinition.objects.create(**_plan_definition_defaults(plan_key, limits))
             defs[plan_key] = obj
 
     result = []
     for plan_key in PLAN_ORDER:
         if plan_key in defs:
-            p = defs[plan_key]
-            result.append({
-                "plan": p.plan,
-                "label": p.label,
-                "maxBranches": p.max_branches,
-                "maxStudents": p.max_students,
-                "includedFeatures": p.included_features or [],
-                "description": p.description,
-            })
+            result.append(_plan_definition_to_dict(defs[plan_key]))
     return result
 
 
@@ -304,8 +279,12 @@ def update_plan_definition(
     max_students: int | None = None,
     included_features: list | None = None,
     description: str | None = None,
+    price_per_student_inr: int | None = None,
+    included_ai_credits_per_student: int | None = None,
+    includes_ai: bool | None = None,
     user=None,
 ) -> dict:
+    plan = normalize_plan(plan)
     try:
         p = PlatformPlanDefinition.objects.get(plan=plan)
     except PlatformPlanDefinition.DoesNotExist:
@@ -320,6 +299,12 @@ def update_plan_definition(
         p.included_features = [f.strip() for f in included_features if f.strip()]
     if description is not None:
         p.description = description.strip()
+    if price_per_student_inr is not None:
+        p.price_per_student_inr = price_per_student_inr
+    if included_ai_credits_per_student is not None:
+        p.included_ai_credits_per_student = included_ai_credits_per_student
+    if includes_ai is not None:
+        p.includes_ai = includes_ai
     p.save()
     log_audit(
         category="settings",
@@ -327,14 +312,7 @@ def update_plan_definition(
         detail=f"Updated {plan} plan definition",
         user=user,
     )
-    return {
-        "plan": p.plan,
-        "label": p.label,
-        "maxBranches": p.max_branches,
-        "maxStudents": p.max_students,
-        "includedFeatures": p.included_features or [],
-        "description": p.description,
-    }
+    return _plan_definition_to_dict(p)
 
 
 # ── Announcements ─────────────────────────────────────────────────────────────
@@ -408,14 +386,7 @@ def get_plan_feature_matrix() -> dict:
     rows = []
     for plan_key in PLAN_ORDER:
         p = defs.get(plan_key, {})
-        included = set(p.get("includedFeatures", []))
-        flags = {
-            k: FEATURE_LABELS[k] in included
-            for k in FEATURE_LABELS
-        }
-        # Use the stored flags if there's no perfect match; fall back to defaults
-        if not any(flags.values()):
-            flags = dict(DEFAULT_PLAN_FEATURES.get(plan_key, {}))
+        flags = dict(DEFAULT_PLAN_FEATURES.get(plan_key, {}))
         rows.append({
             "plan": plan_key,
             "label": p.get("label", plan_key.title()),
@@ -428,10 +399,12 @@ def get_plan_feature_matrix() -> dict:
 
 
 def update_plan_feature_matrix(*, plan: str, flags: dict, user=None) -> dict:
+    plan = normalize_plan(plan)
     enabled_labels = [FEATURE_LABELS[k] for k, v in flags.items() if v and k in FEATURE_LABELS]
     update_plan_definition(
         plan=plan,
         included_features=enabled_labels,
+        includes_ai=any(flags.values()),
         user=user,
     )
     log_audit(
@@ -669,6 +642,14 @@ def convert_to_paid(*, tenant_id: str, user=None) -> None:
     sub.last_paid_at = now
     sub.next_due_at = now + timedelta(days=30)
     sub.save()
+
+    # Ensure a licensing period exists and align valid_until / next_due_at to
+    # its end date.
+    from apps.organizations.billing.license_allocator import ensure_period, sync_plan_valid_until
+
+    period = ensure_period(sub.tenant, user=user)
+    sync_plan_valid_until(period)
+
     if sub.tenant.status == "trial":
         sub.tenant.status = "active"
         sub.tenant.save(update_fields=["status", "updated_at"])

@@ -28,7 +28,7 @@ def tenant_summary(tenant) -> dict:
     """Present a Tenant as the camelCase `PlatformTenantSummary` the frontend expects."""
     subscription = getattr(tenant, "subscription", None)
     super_admin = get_first_user_by_role_in_tenant(tenant.id, Role.SUPER_ADMIN)
-    plan = subscription.plan if subscription else "starter"
+    plan = normalize_plan(subscription.plan if subscription else "standard")
     student_count = count_active_by_role_in_tenant(tenant.id, Role.STUDENT)
     billing_status = subscription.billing_status if subscription else "trial"
     annual_inr = annual_subscription_inr(plan=plan, student_count=student_count)
@@ -112,7 +112,7 @@ class _OverviewSerializer(serializers.Serializer):
     institutionName = serializers.CharField(max_length=255)
     subdomain = serializers.CharField(max_length=63)
     institutionType = serializers.ChoiceField(choices=["school", "college"])
-    plan = serializers.ChoiceField(choices=["starter", "growth", "enterprise"])
+    plan = serializers.ChoiceField(choices=["standard", "ai"])
 
 
 class _InviteSerializer(serializers.Serializer):

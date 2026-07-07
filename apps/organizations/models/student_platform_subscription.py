@@ -25,7 +25,7 @@ class StudentPlatformSubscription(BaseModel):
         related_name="platform_subscriptions",
     )
     academic_year = models.CharField(max_length=9, db_index=True)
-    plan = models.CharField(max_length=20, choices=PlanType.choices, default=PlanType.STARTER)
+    plan = models.CharField(max_length=20, choices=PlanType.choices, default=PlanType.STANDARD)
     annual_fee_inr = models.PositiveIntegerField(default=0)
     status = models.CharField(
         max_length=20,

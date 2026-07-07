@@ -65,10 +65,12 @@ from apps.examinations.views.internal import (
     FacultyMarksView,
 )
 from apps.examinations.views.invigilation import FacultyInvigilationView
+from apps.examinations.views.admin_overview import AdminExaminationsOverviewView
 
 app_name = "examinations"
 
 urlpatterns = [
+    path("admin-overview/", AdminExaminationsOverviewView.as_view(), name="admin-overview"),
     path("grade-scales/", GradeScaleListCreateView.as_view(), name="grade-scale-list"),
     path("grade-scales/<uuid:scale_id>/", GradeScaleDetailView.as_view(), name="grade-scale-detail"),
     path("exams/", ExamListCreateView.as_view(), name="exam-list"),

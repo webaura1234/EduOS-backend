@@ -51,6 +51,10 @@ class PlatformTrialActionsView(APIView):
 
         if action == "run_pipeline":
             pipeline = ops.run_trial_pipeline(user=request.user)
+            # Licensing periods share the same daily cadence.
+            from apps.organizations.billing.license_allocator import run_expiry_pipeline
+
+            pipeline["licensing"] = run_expiry_pipeline(user=request.user)
             trials = ops.get_trials()
             msg = (
                 f"Pipeline complete: {pipeline['deactivated']} tenant(s) deactivated."
@@ -201,6 +205,9 @@ class PlatformSettingsView(APIView):
                 max_students=body.get("maxStudents"),
                 included_features=body.get("includedFeatures"),
                 description=body.get("description"),
+                price_per_student_inr=body.get("pricePerStudentInr"),
+                included_ai_credits_per_student=body.get("includedAiCreditsPerStudent"),
+                includes_ai=body.get("includesAi"),
                 user=request.user,
             )
             return Response({"plan": result})

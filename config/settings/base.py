@@ -68,6 +68,7 @@ LOCAL_APPS = [
     "apps.fees",
     "apps.hr",
     "apps.communications",
+    "apps.gallery",
     "apps.grievances",
     "apps.coursework",
     "apps.analytics",
@@ -248,6 +249,25 @@ AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
 AWS_STORAGE_BUCKET_NAME = os.environ.get("AWS_STORAGE_BUCKET_NAME", "eduos-uploads")
 AWS_S3_REGION_NAME = os.environ.get("AWS_S3_REGION_NAME", "ap-south-1")
 AWS_S3_PRESIGNED_URL_EXPIRY = 86400  # 24 hours
+# "sandbox" = in-memory adapter; "live" = boto3 (S3 or R2).
+S3_MODE = os.environ.get("S3_MODE", "sandbox")
+
+# ──────────────────────────────────────────────
+# Cloudflare R2 (gallery + optional primary storage)
+# ──────────────────────────────────────────────
+R2_ACCOUNT_ID = os.environ.get("R2_ACCOUNT_ID", "")
+R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID", "")
+R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY", "")
+R2_BUCKET_NAME = os.environ.get("R2_BUCKET_NAME", "eduos-gallery")
+R2_ENDPOINT_URL = os.environ.get("R2_ENDPOINT_URL", "")
+R2_PUBLIC_BASE_URL = os.environ.get("R2_PUBLIC_BASE_URL", "")
+
+# Gallery image processing
+GALLERY_MAX_UPLOAD_BYTES = int(os.environ.get("GALLERY_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
+GALLERY_MAX_DIMENSION_PX = int(os.environ.get("GALLERY_MAX_DIMENSION_PX", "4096"))
+GALLERY_THUMBNAIL_MAX_PX = int(os.environ.get("GALLERY_THUMBNAIL_MAX_PX", "400"))
+GALLERY_WEBP_QUALITY = int(os.environ.get("GALLERY_WEBP_QUALITY", "82"))
+GALLERY_STAGING_TTL_HOURS = int(os.environ.get("GALLERY_STAGING_TTL_HOURS", "24"))
 
 # ──────────────────────────────────────────────
 # Razorpay

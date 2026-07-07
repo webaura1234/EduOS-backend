@@ -218,6 +218,29 @@ class MeView(APIView):
         return Response({**dto.to_dict(), "theme": theme}, status=status.HTTP_200_OK)
 
 
+class MeAccessView(APIView):
+    """
+    GET /api/v1/auth/me/access/
+
+    Licensing-driven access policy for the current user. Students get their
+    license status and the modules blocked while unlicensed / expired;
+    other roles always get full access.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request) -> Response:
+        from apps.accounts.models.user import Role
+        from apps.organizations.policies.student_access import get_student_access
+
+        if request.user.role != Role.STUDENT:
+            return Response({
+                "licenseStatus": None,
+                "subscriptionStatus": None,
+                "blockedModules": [],
+            })
+        return Response(get_student_access(request.user))
+
+
 def _auth_user_payload(user) -> dict:
     """AuthUser-shaped dict the frontend consumes directly (F-223 account switch)."""
     tenant = user.tenant

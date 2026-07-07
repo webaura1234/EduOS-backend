@@ -9,7 +9,8 @@ from django.utils import timezone
 
 from apps.accounts.models.user import Role, User
 from apps.fees.helpers.paise import financial_year_for
-from apps.organizations.billing.platform_pricing import ANNUAL_PER_STUDENT_INR
+from apps.organizations.enums import PlanType
+from apps.organizations.plan_catalog import normalize_plan
 from apps.organizations.enums import BillingStatus, StudentPlatformSubscriptionStatus
 from apps.organizations.models import PlanSubscription, StudentPlatformSubscription
 
@@ -29,7 +30,10 @@ def _default_status_for_tenant(tenant_id) -> str:
 
 
 def annual_fee_for_plan(plan: str) -> int:
-    return ANNUAL_PER_STUDENT_INR.get(plan, ANNUAL_PER_STUDENT_INR["starter"])
+    from apps.organizations.billing.platform_pricing import ANNUAL_PER_STUDENT_INR
+
+    plan = normalize_plan(plan)
+    return ANNUAL_PER_STUDENT_INR.get(plan, ANNUAL_PER_STUDENT_INR[PlanType.STANDARD])
 
 
 def upsert_student_platform_subscription(
@@ -47,9 +51,9 @@ def upsert_student_platform_subscription(
     year = academic_year or current_academic_year()
     try:
         plan_sub = PlanSubscription.objects.get(tenant_id=student_user.tenant_id)
-        plan = plan_sub.plan
+        plan = normalize_plan(plan_sub.plan)
     except PlanSubscription.DoesNotExist:
-        plan = "starter"
+        plan = PlanType.STANDARD
 
     fee = annual_fee_for_plan(plan)
     resolved_status = status or _default_status_for_tenant(student_user.tenant_id)
@@ -78,6 +82,11 @@ def upsert_student_platform_subscription(
             updates.extend(["plan", "annual_fee_inr"])
         if updates:
             row.save(update_fields=updates + ["updated_at"])
+
+    # New licensing system — ensure a StudentLicense row exists (idempotent).
+    from apps.organizations.billing.license_allocator import on_student_enrolled
+
+    on_student_enrolled(student_user)
     return row
 
 

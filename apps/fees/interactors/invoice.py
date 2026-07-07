@@ -3,22 +3,38 @@
 import datetime
 from django.db import transaction
 
-from apps.fees.enums import InvoiceStatus
-from apps.fees.models import FeeInvoice
-from apps.fees.queries.concession import list_approved_requests_for_student
+from apps.accounts.models.guardian import StudentGuardianLink
+from apps.fees.enums import ConcessionStatus, InvoiceStatus
+from apps.fees.models import (
+    ConcessionRequest,
+    FeeInvoice,
+    FeeInvoiceLine,
+    Installment,
+    StudentFeeAssignment,
+)
 from apps.fees.helpers.concession import discount_line_for_request
-from apps.fees.queries.invoice import (
-    create_installment,
-    create_invoice,
-    create_invoice_line,
-    invoice_exists_for_assignment,
-)
-from apps.fees.queries.structure import (
-    billing_guardian_for_student,
-    create_assignment,
-    get_assignment_for_student_structure,
-    students_in_batch,
-)
+from apps.fees.queries.structure import students_in_batch
+
+
+def _billing_guardian_map(students) -> dict:
+    """student.user_id -> GuardianProfile, for every student's primary portal
+    guardian, in one query instead of one per student (mirrors
+    ``billing_guardian_for_student``'s "first portal-access link" semantics)."""
+    user_ids = [s.user_id for s in students]
+    guardian_by_user_id: dict = {}
+    links = StudentGuardianLink.objects.filter(
+        student_id__in=user_ids, has_portal_access=True, is_active=True,
+    ).select_related("guardian__guardian_profile")
+    for link in links:
+        guardian_by_user_id.setdefault(link.student_id, link)
+
+    result = {}
+    for sid, link in guardian_by_user_id.items():
+        try:
+            result[sid] = link.guardian.guardian_profile
+        except AttributeError:
+            result[sid] = None
+    return result
 
 
 @transaction.atomic
@@ -26,101 +42,128 @@ def generate_invoices_for_batch(*, branch, batch_id, academic_year, fee_structur
     """
     Generates invoices and installments for all active students in a batch who have assignments.
     If a student doesn't have an assignment, we create one using the structure snapshot.
+
+    Batched to a fixed number of queries regardless of batch size (assignment
+    lookup/creation, invoice-exists check, billing guardian, and all invoice
+    lines/installments are each one bulk query) instead of ~6+ queries per
+    student plus one INSERT per line/installment — this runs for every batch,
+    every term, every tenant, and batches can run into the thousands of students.
     """
-    students = students_in_batch(batch_id)
-    invoices_created = []
+    students = list(students_in_batch(batch_id))
+    if not students:
+        return []
+    student_ids = [s.id for s in students]
+    student_by_id = {s.id: s for s in students}
+
+    # 1. Existing (student, structure) assignments, in one query.
+    assignment_by_student: dict = {
+        a.student_id: a
+        for a in StudentFeeAssignment.objects.filter(
+            student_id__in=student_ids, fee_structure_id=fee_structure.id, is_active=True,
+        )
+    }
+
+    # 2. Approved concession requests, only for students who still need a new
+    # assignment — in one query instead of one per missing student.
+    missing_ids = [sid for sid in student_ids if sid not in assignment_by_student]
+    approved_by_student: dict = {}
+    if missing_ids:
+        for req in ConcessionRequest.objects.filter(
+            student_id__in=missing_ids, status=ConcessionStatus.APPROVED, is_active=True,
+        ).select_related("rule"):
+            approved_by_student.setdefault(req.student_id, []).append(req)
+
+    # 3. Bulk-create the missing assignments.
+    components = fee_structure.components or []
+    base_paise = sum(int(c.get("amount_paise", 0)) for c in components)
+    new_assignments = []
+    for sid in missing_ids:
+        approved = approved_by_student.get(sid, [])
+        discount_lines = [
+            discount_line_for_request(req, base_paise=base_paise)
+            for req in approved
+            if discount_line_for_request(req, base_paise=base_paise)["amount_paise"] > 0
+        ]
+        new_assignments.append(StudentFeeAssignment(
+            student=student_by_id[sid], fee_structure=fee_structure,
+            structure_snapshot=fee_structure.components or [], discount_lines=discount_lines,
+            created_by=user, updated_by=user,
+        ))
+    if new_assignments:
+        StudentFeeAssignment.objects.bulk_create(new_assignments)
+        for a in new_assignments:
+            assignment_by_student[a.student_id] = a
+
+    # 4. Which assignments already have an invoice, in one query.
+    assignment_ids = [a.id for a in assignment_by_student.values()]
+    already_invoiced = set(
+        FeeInvoice.objects.filter(assignment_id__in=assignment_ids, is_active=True)
+        .values_list("assignment_id", flat=True)
+    )
+
+    guardian_by_user_id = _billing_guardian_map(students)
+
+    invoices_to_create: list[FeeInvoice] = []
+    lines_to_create: list[FeeInvoiceLine] = []
+    installments_to_create: list[Installment] = []
 
     for student in students:
-        # 1. Get or create assignment
-        assignment = get_assignment_for_student_structure(student.id, fee_structure.id)
-        if assignment is None:
-            approved = list(list_approved_requests_for_student(student.id))
-            components = fee_structure.components or []
-            base_paise = sum(int(c.get("amount_paise", 0)) for c in components)
-            discount_lines = [
-                discount_line_for_request(req, base_paise=base_paise)
-                for req in approved
-                if discount_line_for_request(req, base_paise=base_paise)["amount_paise"] > 0
-            ]
-            assignment = create_assignment(
-                student=student,
-                fee_structure=fee_structure,
-                structure_snapshot=fee_structure.components or [],
-                discount_lines=discount_lines,
-                user=user,
-            )
-
-        # Skip if an invoice already exists for this assignment
-        if invoice_exists_for_assignment(assignment.id):
+        assignment = assignment_by_student.get(student.id)
+        if assignment is None or assignment.id in already_invoiced:
             continue
 
-        # 2. Calculate invoice amounts
         components = assignment.structure_snapshot or []
         discount_lines = assignment.discount_lines or []
         total_components_paise = sum(int(c.get("amount_paise", 0)) for c in components)
         total_discount_paise = sum(int(d.get("amount_paise", 0)) for d in discount_lines)
         total_invoice_paise = max(total_components_paise - total_discount_paise, 0)
 
-        # 3. Create the invoice — find billing guardian if the student has one.
-        billing_guardian = billing_guardian_for_student(student)
+        billing_guardian = guardian_by_user_id.get(student.user_id)
 
-        # Determine due date (use the latest due date among components, or today)
-        due_dates = []
-        for c in components:
-            due_str = c.get("due_date")
-            if due_str:
-                due_dates.append(datetime.date.fromisoformat(due_str))
-        
+        due_dates = [
+            datetime.date.fromisoformat(c["due_date"]) for c in components if c.get("due_date")
+        ]
         due_date = max(due_dates) if due_dates else datetime.date.today()
 
-        invoice = create_invoice(
-            branch=branch,
-            student=student,
-            assignment=assignment,
-            billing_guardian=billing_guardian,
-            due_date=due_date,
-            total_paise=total_invoice_paise,
+        invoice = FeeInvoice(
+            branch=branch, student=student, assignment=assignment,
+            billing_guardian=billing_guardian, due_date=due_date,
+            total_paise=total_invoice_paise, paid_paise=0,
             status=InvoiceStatus.PAID if total_invoice_paise == 0 else InvoiceStatus.DUE,
-            user=user,
+            created_by=user, updated_by=user,
         )
+        invoices_to_create.append(invoice)
 
-        # 4. Create Invoice Lines
         for c in components:
-            create_invoice_line(
-                invoice=invoice,
-                kind=c.get("kind", "other"),
-                label=c.get("label", "Fee Component"),
+            lines_to_create.append(FeeInvoiceLine(
+                invoice=invoice, kind=c.get("kind", "other"), label=c.get("label", "Fee Component"),
                 amount_paise=int(c.get("amount_paise", 0)),
-                user=user,
-            )
+                created_by=user, updated_by=user,
+            ))
 
-        # 5. Create Installments
-        # Group components by installment_no
-        installment_groups = {}
+        installment_groups: dict = {}
         for c in components:
             inst_no = int(c.get("installment_no", 1))
             installment_groups.setdefault(inst_no, []).append(c)
 
-        # Calculate installment components totals
         installment_totals = {}
         installment_due_dates = {}
         for inst_no, inst_components in installment_groups.items():
             installment_totals[inst_no] = sum(int(c.get("amount_paise", 0)) for c in inst_components)
-            # Due date for installment is the max of its components due dates
-            inst_due_dates = [datetime.date.fromisoformat(c.get("due_date")) for c in inst_components if c.get("due_date")]
+            inst_due_dates = [
+                datetime.date.fromisoformat(c.get("due_date"))
+                for c in inst_components if c.get("due_date")
+            ]
             installment_due_dates[inst_no] = max(inst_due_dates) if inst_due_dates else due_date
 
-        # Distribute discount across installments proportionally
-        # Formula: inst_discount = total_discount * (inst_total / total_components)
+        # Distribute discount across installments proportionally.
         remaining_discount = total_discount_paise
         inst_nos = sorted(installment_totals.keys())
-        
         for idx, inst_no in enumerate(inst_nos):
             inst_components_total = installment_totals[inst_no]
             if total_components_paise > 0:
                 if idx == len(inst_nos) - 1:
-                    # Last one gets the remainder to avoid rounding loss
-                    inst_discount = remaining_discount
+                    inst_discount = remaining_discount  # last one gets the remainder
                 else:
                     inst_discount = (total_discount_paise * inst_components_total) // total_components_paise
                     remaining_discount -= inst_discount
@@ -128,16 +171,18 @@ def generate_invoices_for_batch(*, branch, batch_id, academic_year, fee_structur
                 inst_discount = 0
 
             inst_amount = max(inst_components_total - inst_discount, 0)
-            
-            create_installment(
-                invoice=invoice,
-                sequence=inst_no,
-                amount_paise=inst_amount,
+            installments_to_create.append(Installment(
+                invoice=invoice, sequence=inst_no, amount_paise=inst_amount, paid_paise=0,
                 due_date=installment_due_dates[inst_no],
                 status=InvoiceStatus.PAID if inst_amount == 0 else InvoiceStatus.DUE,
-                user=user,
-            )
+                created_by=user, updated_by=user,
+            ))
 
-        invoices_created.append(invoice)
+    if invoices_to_create:
+        FeeInvoice.objects.bulk_create(invoices_to_create)
+    if lines_to_create:
+        FeeInvoiceLine.objects.bulk_create(lines_to_create)
+    if installments_to_create:
+        Installment.objects.bulk_create(installments_to_create)
 
-    return invoices_created
+    return invoices_to_create

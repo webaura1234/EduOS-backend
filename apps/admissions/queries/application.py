@@ -14,7 +14,7 @@ def get_application(branch_id, application_id) -> Application | None:
         return None
 
 
-def list_applications(branch_id, *, status=None, course_id=None):
+def list_applications(branch_id, *, status=None, course_id=None, created_after=None):
     qs = (
         Application.objects.filter(branch_id=branch_id, is_active=True)
         .select_related("enquiry", "course", "waitlist_entry")
@@ -35,6 +35,8 @@ def list_applications(branch_id, *, status=None, course_id=None):
         qs = qs.filter(status=status)
     if course_id:
         qs = qs.filter(course_id=course_id)
+    if created_after:
+        qs = qs.filter(created_at__gte=created_after)
     return qs.order_by("-created_at")
 
 

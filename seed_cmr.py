@@ -912,7 +912,7 @@ def seed():
     )
     PlanSubscription.objects.get_or_create(
         tenant=tenant,
-        defaults=dict(plan="starter", billing_status="paid", **_PLAN),
+        defaults=dict(plan="standard", billing_status="paid", **_PLAN),
     )
     for resource, hard in (
         ("students", _PLAN["student_limit"]),

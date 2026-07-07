@@ -85,6 +85,16 @@ def list_exams(branch_id, *, academic_period_id=None):
     return qs.order_by("-created_at")
 
 
+def list_exams_for_year(branch_id, *, academic_year_id=None):
+    """Exams for a branch, optionally scoped to one academic year — the admin
+    overview screen uses this to bound its live view to the current year
+    instead of every exam the branch has ever run."""
+    qs = Exam.objects.filter(branch_id=branch_id, is_active=True).select_related("academic_period")
+    if academic_year_id:
+        qs = qs.filter(academic_period__academic_year_id=academic_year_id)
+    return qs.order_by("-created_at")
+
+
 def get_exam(branch_id, exam_id) -> Exam | None:
     try:
         return Exam.objects.select_related("academic_period", "academic_period__academic_year").get(
@@ -129,6 +139,17 @@ def soft_delete_exam(exam: Exam, user=None) -> Exam:
 def list_schedule_slots(exam_id):
     return (
         ExamScheduleSlot.objects.filter(exam_id=exam_id, is_active=True)
+        .select_related("subject", "batch", "room", "exam")
+        .order_by("start_at")
+    )
+
+
+def list_schedule_slots_for_exams(exam_ids):
+    """Batch variant of ``list_schedule_slots`` for many exams in one query —
+    the admin overview screen needs every exam's slots at once, not one round
+    trip per exam."""
+    return (
+        ExamScheduleSlot.objects.filter(exam_id__in=exam_ids, is_active=True)
         .select_related("subject", "batch", "room", "exam")
         .order_by("start_at")
     )

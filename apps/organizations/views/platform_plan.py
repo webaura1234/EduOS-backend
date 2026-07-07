@@ -19,6 +19,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsPlatformOwner
+from apps.organizations.plan_catalog import PLAN_LIMITS, normalize_plan
 from apps.organizations.queries import platform_tenant as q
 
 
@@ -44,14 +45,14 @@ class PlatformPlanView(APIView):
                 {"error": "tenantId and newPlan are required."},
                 status=http.HTTP_400_BAD_REQUEST,
             )
-        if new_plan not in q.PLAN_LIMITS:
+        if normalize_plan(new_plan) not in PLAN_LIMITS:
             return Response(
                 {"error": f"Invalid plan '{new_plan}'."},
                 status=http.HTTP_400_BAD_REQUEST,
             )
 
         try:
-            result = q.change_plan(tenant_id, new_plan, user=request.user)
+            result = q.change_plan(tenant_id, normalize_plan(new_plan), user=request.user)
         except q._PlanLimitViolation as exc:
             return Response(exc.payload, status=http.HTTP_409_CONFLICT)
         except ValueError as exc:
@@ -74,7 +75,7 @@ class PlatformPlanLimitsValidateView(APIView):
         if context != "plan_downgrade" or not tenant_id or not new_plan:
             return Response({"ok": True})
 
-        if new_plan not in q.PLAN_LIMITS:
+        if normalize_plan(new_plan) not in PLAN_LIMITS:
             return Response({"ok": True})
 
         blocked = q.validate_plan_limits(tenant_id, new_plan)

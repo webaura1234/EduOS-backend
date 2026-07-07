@@ -1,6 +1,7 @@
 """Tests for admin overview helpers."""
 
-from apps.fees.views.admin_overview import _batch_label, _derive_installments_from_components, _PAY_METHOD
+from apps.fees.helpers.payment_dict import PAY_METHOD
+from apps.fees.views.admin_overview import _batch_label, _derive_installments_from_components
 
 
 def test_derive_installments_from_components():
@@ -17,8 +18,8 @@ def test_derive_installments_from_components():
 
 
 def test_razorpay_maps_to_upi_for_display():
-    assert _PAY_METHOD["razorpay"] == "upi"
-    assert _PAY_METHOD["bank_transfer"] == "upi"
+    assert PAY_METHOD["razorpay"] == "upi"
+    assert PAY_METHOD["bank_transfer"] == "upi"
 
 
 def test_batch_label_includes_course_and_section():
