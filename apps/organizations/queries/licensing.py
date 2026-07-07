@@ -153,6 +153,8 @@ def tenant_detail(tenant: Tenant, *, branch_id=None) -> dict:
         .order_by("-created_at")[:100]
     )
 
+    from apps.organizations.billing import pricing
+
     return {
         "tenant": {
             "id": str(tenant.pk),
@@ -161,6 +163,7 @@ def tenant_detail(tenant: Tenant, *, branch_id=None) -> dict:
             "status": tenant.status,
         },
         "summary": summary_dict(summary, unit_price=price),
+        "pricing": pricing.pricing_for_tenant(tenant.pk),
         "branches": branch_billing_rows(tenant),
         "unlicensedQueue": [student_license_dict(r) for r in unlicensed],
         "payments": [payment_dict(p) for p in payments],

@@ -28,6 +28,22 @@ def _parse_date(value, default):
     return datetime.date.fromisoformat(value)
 
 
+def _branch_summary_rows(tenant) -> list[dict]:
+    from apps.organizations.queries.branch import list_branches
+
+    return [
+        {
+            "branch_id": str(b.pk),
+            "branch_name": b.name,
+            "code": b.code,
+            "city": b.city,
+            "is_active": b.is_active,
+            "created_at": b.created_at.isoformat(),
+        }
+        for b in list_branches(tenant.pk)
+    ]
+
+
 def _resolve_rows(report_type, branch, params) -> list[dict]:
     """Request-time snapshot of the report rows (F-064), via module query layers.
 
@@ -93,6 +109,21 @@ def generate_report(*, tenant, branch, report_type, params=None, requester=None,
     them and streams large exports instead of building an in-memory JSON snapshot.
     """
     params = params or {}
+
+    if report_type == ReportType.BRANCH_SUMMARY:
+        rows = _branch_summary_rows(tenant)
+        export = report_q.create_export(
+            tenant=tenant, branch=None, report_type=report_type, params=params,
+            requested_by=requester,
+        )
+        report_q.update_export(export, {
+            "snapshot": {"rows": rows},
+            "row_count": len(rows),
+            "status": ReportStatus.READY,
+            "expires_at": timezone.now() + timezone.timedelta(hours=24),
+        }, user=requester)
+        export.refresh_from_db()
+        return export
 
     definition = _get_registered_definition(report_type)
     if definition is not None:

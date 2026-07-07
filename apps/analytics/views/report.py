@@ -7,7 +7,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.academics.scoping import resolve_branch
+from apps.accounts.models.user import Role
 from apps.accounts.permissions import IsAdminOrSuperAdmin
+from apps.analytics.enums import ReportType
 from apps.analytics.enums import ReportStatus
 from apps.analytics.interactors import report as report_i
 from apps.analytics.queries import report as report_q
@@ -21,20 +23,42 @@ class ReportExportsView(APIView):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
 
     def get(self, request):
-        branch = resolve_branch(request)
         limit = min(int(request.query_params.get("limit", 50)), 100)
-        rows = report_q.list_exports(request.user.tenant_id, branch_id=branch.pk)[:limit]
-        return Response({"reports": ReportExportSerializer(rows, many=True).data})
+        report_type = request.query_params.get("reportType")
+        if request.user.role == Role.SUPER_ADMIN and not request.query_params.get("branch"):
+            rows = report_q.list_exports(request.user.tenant_id)
+            if report_type:
+                rows = rows.filter(report_type=report_type)
+            return Response({"reports": ReportExportSerializer(rows[:limit], many=True).data})
+
+        branch = resolve_branch(request)
+        rows = report_q.list_exports(request.user.tenant_id, branch_id=branch.pk)
+        if report_type:
+            rows = rows.filter(report_type=report_type)
+        return Response({"reports": ReportExportSerializer(rows[:limit], many=True).data})
 
     def post(self, request):
-        branch = resolve_branch(request)
         s = CreateReportSerializer(data=request.data)
         s.is_valid(raise_exception=True)
-        export = report_i.generate_report(
-            tenant=request.user.tenant, branch=branch,
-            report_type=s.validated_data["reportType"], params=s.validated_data["params"],
-            requester=request.user,
-        )
+        report_type = s.validated_data["reportType"]
+        if report_type == ReportType.BRANCH_SUMMARY:
+            if request.user.role != Role.SUPER_ADMIN:
+                return Response(
+                    {"error": "Only super admins can export branch summaries."},
+                    status=http.HTTP_403_FORBIDDEN,
+                )
+            export = report_i.generate_report(
+                tenant=request.user.tenant, branch=None,
+                report_type=report_type, params=s.validated_data["params"],
+                requester=request.user,
+            )
+        else:
+            branch = resolve_branch(request)
+            export = report_i.generate_report(
+                tenant=request.user.tenant, branch=branch,
+                report_type=report_type, params=s.validated_data["params"],
+                requester=request.user,
+            )
         return Response({"report": ReportExportSerializer(export).data},
                         status=http.HTTP_201_CREATED)
 

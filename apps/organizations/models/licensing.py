@@ -67,7 +67,12 @@ class TenantSubscriptionPeriod(BaseModel):
 
 
 class TenantLicensePricing(BaseModel):
-    """Optional per-tenant override of the list price."""
+    """Per-tenant pricing overrides — a discount applied to the plan list price.
+
+    ``discount_percent`` (0-100) is the active override and applies to the plan
+    list price. ``price_per_student_inr`` is retained for backward compatibility
+    with older flat-price data but is no longer used for net-price calculation.
+    """
 
     tenant = models.OneToOneField(
         "organizations.Tenant",
@@ -75,13 +80,17 @@ class TenantLicensePricing(BaseModel):
         related_name="license_pricing",
     )
     price_per_student_inr = models.PositiveIntegerField(default=DEFAULT_LICENSE_PRICE_INR)
+    discount_percent = models.PositiveSmallIntegerField(
+        default=0,
+        help_text="Discount (0-100) applied to the plan list price for this tenant only.",
+    )
     effective_from = models.DateField(null=True, blank=True)
 
     class Meta:
         db_table = "organizations_tenant_license_pricing"
 
     def __str__(self):
-        return f"{self.tenant_id} @ ₹{self.price_per_student_inr}/student"
+        return f"{self.tenant_id} @ {self.discount_percent}% off"
 
 
 class LicenseInvoice(BaseModel):

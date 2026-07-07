@@ -20,6 +20,7 @@ from apps.organizations.views.platform_licensing import (
     PlatformLicensingPaymentsView,
     PlatformLicensingPeriodView,
     PlatformLicensingTenantDetailView,
+    PlatformLicensingTenantPricingView,
 )
 from apps.organizations.views.platform_student_subscription import (
     PlatformStudentSubscriptionActionsView,
@@ -98,6 +99,11 @@ urlpatterns = [
         "platform/licensing/tenants/<uuid:tenant_id>/",
         PlatformLicensingTenantDetailView.as_view(),
         name="platform-licensing-tenant-detail",
+    ),
+    path(
+        "platform/licensing/tenants/<uuid:tenant_id>/pricing/",
+        PlatformLicensingTenantPricingView.as_view(),
+        name="platform-licensing-tenant-pricing",
     ),
     path(
         "platform/licensing/payments/",

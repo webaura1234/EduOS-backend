@@ -16,6 +16,7 @@ class ReportExportSerializer(serializers.Serializer):
     format = serializers.CharField(read_only=True)
     expiresAt = serializers.DateTimeField(source="expires_at", read_only=True, allow_null=True)
     createdAt = serializers.DateTimeField(source="created_at", read_only=True)
+    updatedAt = serializers.DateTimeField(source="updated_at", read_only=True)
     error = serializers.CharField(read_only=True)
 
 

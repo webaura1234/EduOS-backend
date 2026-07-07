@@ -29,3 +29,5 @@ class ReportType(models.TextChoices):
     STUDENT_ATTENDANCE = "student_attendance", "Student — My Attendance"
     STUDENT_FEE_STATEMENT = "student_fee_statement", "Student — My Fee Statement"
     STUDENT_EXAM_RESULTS = "student_exam_results", "Student — My Exam Results"
+    # Super-admin — tenant-wide cross-branch export
+    BRANCH_SUMMARY = "branch_summary", "Branches — Summary"

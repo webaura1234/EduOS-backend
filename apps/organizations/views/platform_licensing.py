@@ -57,6 +57,50 @@ class PlatformLicensingTenantDetailView(APIView):
         return Response(detail)
 
 
+class PlatformLicensingTenantPricingView(APIView):
+    """PATCH /api/v1/organizations/platform/licensing/tenants/<tenant_id>/pricing/
+
+    Set a per-school discount percent applied to the plan list price.
+    """
+
+    permission_classes = [IsAuthenticated, IsPlatformOwner]
+
+    def patch(self, request, tenant_id) -> Response:
+        from apps.organizations.billing import pricing
+        from apps.organizations.models import TenantLicensePricing
+
+        tenant = _get_tenant(tenant_id)
+        if tenant is None:
+            return Response({"error": "School not found."}, status=http.HTTP_404_NOT_FOUND)
+
+        try:
+            discount = int(request.data.get("discountPercent"))
+        except (TypeError, ValueError):
+            return Response(
+                {"error": "discountPercent must be a number between 0 and 100."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+        if not 0 <= discount <= 100:
+            return Response(
+                {"error": "discountPercent must be between 0 and 100."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+
+        row, _ = TenantLicensePricing.objects.get_or_create(tenant=tenant)
+        row.discount_percent = discount
+        row.updated_by = request.user
+        row.save(update_fields=["discount_percent", "updated_by", "updated_at"])
+
+        log_audit(
+            category="licensing",
+            action="pricing_updated",
+            detail=f"Discount set to {discount}% for {tenant.name}",
+            user=request.user,
+            tenant=tenant,
+        )
+        return Response({"pricing": pricing.pricing_for_tenant(tenant.pk)})
+
+
 class PlatformLicensingPaymentsView(APIView):
     """GET+POST /api/v1/organizations/platform/licensing/payments/"""
 

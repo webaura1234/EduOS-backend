@@ -119,11 +119,10 @@ def create_primary_branch(tenant, name, city, state, user=None) -> Branch:
 
 
 def plan_catalog() -> list[dict]:
-    """Return the static plan catalog for the frontend PlatformPlanLimits[] type."""
-    return [
-        {"plan": plan, **limits}
-        for plan, limits in PLAN_LIMITS.items()
-    ]
+    """Return the DB-backed plan catalog for the frontend PlatformPlanLimits[] type."""
+    from apps.organizations.billing import pricing
+
+    return pricing.plan_catalog_for_api()
 
 
 def plan_rows() -> list[dict]:

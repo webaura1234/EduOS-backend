@@ -13,6 +13,7 @@ from apps.accounts.queries.user import (
     count_active_by_role_in_tenant,
     get_first_user_by_role_in_tenant,
 )
+from apps.organizations.billing import pricing
 from apps.organizations.billing.platform_pricing import (
     amount_due_inr,
     annual_subscription_inr,
@@ -21,6 +22,7 @@ from apps.organizations.billing.platform_pricing import (
 from apps.organizations.billing.student_subscription import current_academic_year
 from apps.organizations.models import StudentPlatformSubscription
 from apps.organizations.enums import StudentPlatformSubscriptionStatus
+from apps.organizations.plan_catalog import normalize_plan
 from apps.organizations.queries import platform_tenant as q
 
 
@@ -31,7 +33,10 @@ def tenant_summary(tenant) -> dict:
     plan = normalize_plan(subscription.plan if subscription else "standard")
     student_count = count_active_by_role_in_tenant(tenant.id, Role.STUDENT)
     billing_status = subscription.billing_status if subscription else "trial"
-    annual_inr = annual_subscription_inr(plan=plan, student_count=student_count)
+    tenant_pricing = pricing.pricing_for_tenant(tenant.id, plan)
+    annual_inr = annual_subscription_inr(
+        plan=plan, student_count=student_count, tenant_id=tenant.id
+    )
 
     year = current_academic_year()
     student_sub_qs = StudentPlatformSubscription.objects.filter(
@@ -72,6 +77,9 @@ def tenant_summary(tenant) -> dict:
         "annualSubscriptionInr": annual_inr,
         "collectedSubscriptionInr": collected_inr,
         "amountDueInr": amount_due_inr(billing_status=billing_status, annual_inr=annual_inr),
+        "listPricePerStudentInr": tenant_pricing["listPricePerStudentInr"],
+        "discountPercent": tenant_pricing["discountPercent"],
+        "unitPricePerStudentInr": tenant_pricing["unitPricePerStudentInr"],
     }
 
 

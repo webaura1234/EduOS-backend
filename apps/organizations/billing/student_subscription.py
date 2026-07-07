@@ -30,10 +30,17 @@ def _default_status_for_tenant(tenant_id) -> str:
 
 
 def annual_fee_for_plan(plan: str) -> int:
-    from apps.organizations.billing.platform_pricing import ANNUAL_PER_STUDENT_INR
+    """Plan list price per student (no tenant discount). Prefer annual_fee_for_tenant."""
+    from apps.organizations.billing import pricing
 
-    plan = normalize_plan(plan)
-    return ANNUAL_PER_STUDENT_INR.get(plan, ANNUAL_PER_STUDENT_INR[PlanType.STANDARD])
+    return pricing.list_price_for_plan(plan)
+
+
+def annual_fee_for_tenant(tenant_id, plan: str) -> int:
+    """Net per-student annual fee for a tenant (list price minus tenant discount)."""
+    from apps.organizations.billing import pricing
+
+    return pricing.net_unit_price_inr(tenant_id, plan)
 
 
 def upsert_student_platform_subscription(
@@ -55,7 +62,7 @@ def upsert_student_platform_subscription(
     except PlanSubscription.DoesNotExist:
         plan = PlanType.STANDARD
 
-    fee = annual_fee_for_plan(plan)
+    fee = annual_fee_for_tenant(student_user.tenant_id, plan)
     resolved_status = status or _default_status_for_tenant(student_user.tenant_id)
     paid_at = timezone.now() if resolved_status == StudentPlatformSubscriptionStatus.PAID else None
 

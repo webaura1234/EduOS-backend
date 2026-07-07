@@ -1,27 +1,32 @@
-"""Platform SaaS pricing — annual fee per enrolled student (INR)."""
+"""Platform SaaS pricing — annual fee per enrolled student (INR).
 
-from apps.organizations.enums import BillingStatus, PlanType
-from apps.organizations.plan_catalog import PLAN_PRICE_PER_STUDENT_INR, normalize_plan
+Thin wrappers over the unified pricing service. Prices are plan-aware and
+apply per-tenant discounts; the pricing source of truth is
+``apps.organizations.billing.pricing``.
+"""
 
-# Licensing list price — one student license per academic year (INR).
-# Configurable per tenant via TenantLicensePricing; this is the default.
+from apps.organizations.billing import pricing
+from apps.organizations.enums import BillingStatus
+
+# Licensing list price fallback (INR) — used only when no plan definition exists.
 DEFAULT_LICENSE_PRICE_INR = 499
 
-# Per-plan seat price for the student subscription roster.
-ANNUAL_PER_STUDENT_INR: dict[str, int] = PLAN_PRICE_PER_STUDENT_INR
+
+def unit_price_for_tenant(tenant_id, plan: str | None = None) -> int:
+    """Net per-student price for a tenant (plan list price minus tenant discount)."""
+    return pricing.net_unit_price_inr(tenant_id, plan)
 
 
-def unit_price_for_tenant(tenant_id) -> int:
-    """License unit price for a tenant — per-tenant override, else list price."""
-    from apps.organizations.models import TenantLicensePricing
+def annual_subscription_inr(*, plan: str, student_count: int, tenant_id=None) -> int:
+    """Annual subscription = students x net per-student price.
 
-    row = TenantLicensePricing.objects.filter(tenant_id=tenant_id, is_active=True).first()
-    return row.price_per_student_inr if row else DEFAULT_LICENSE_PRICE_INR
-
-
-def annual_subscription_inr(*, plan: str, student_count: int) -> int:
-    plan = normalize_plan(plan)
-    rate = ANNUAL_PER_STUDENT_INR.get(plan, ANNUAL_PER_STUDENT_INR[PlanType.STANDARD])
+    When ``tenant_id`` is provided the tenant discount is applied; otherwise the
+    plan list price is used.
+    """
+    if tenant_id is not None:
+        rate = pricing.net_unit_price_inr(tenant_id, plan)
+    else:
+        rate = pricing.list_price_for_plan(plan)
     return max(0, int(student_count)) * rate
 
 

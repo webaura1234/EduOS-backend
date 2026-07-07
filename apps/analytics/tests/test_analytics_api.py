@@ -309,3 +309,37 @@ def test_naac_export_lists_gaps(env):
     body = _data(resp)
     assert "data" in body and isinstance(body["missingFields"], list)
     assert len(body["missingFields"]) >= 1
+
+
+def test_super_admin_branch_summary_export(env):
+    env["super_admin"].branch = None
+    env["super_admin"].save(update_fields=["branch"])
+    BranchFactory(tenant=env["tenant"], name="East Campus", code="E1", city="Delhi")
+
+    create_resp = _client(env["super_admin"]).post(
+        reverse("analytics:report-exports"),
+        {"reportType": ReportType.BRANCH_SUMMARY},
+        format="json",
+    )
+    assert create_resp.status_code == 201, create_resp.content
+    report = _data(create_resp)["report"]
+    assert report["reportType"] == ReportType.BRANCH_SUMMARY
+    assert report["status"] == ReportStatus.READY
+    assert report["rowCount"] >= 2
+
+    list_resp = _client(env["super_admin"]).get(
+        reverse("analytics:report-exports") + "?reportType=branch_summary"
+    )
+    assert list_resp.status_code == 200
+    reports = _data(list_resp)["reports"]
+    assert len(reports) >= 1
+    assert all(r["reportType"] == ReportType.BRANCH_SUMMARY for r in reports)
+
+
+def test_branch_summary_export_denied_to_admin(env):
+    resp = _client(env["admin"]).post(
+        reverse("analytics:report-exports"),
+        {"reportType": ReportType.BRANCH_SUMMARY},
+        format="json",
+    )
+    assert resp.status_code == 403
