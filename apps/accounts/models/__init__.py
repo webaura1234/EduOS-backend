@@ -3,6 +3,7 @@ from .profile import FacultyProfile, GuardianProfile, StudentProfile
 from .security import AuthAuditLog, LoginAttempt, PendingIdentityChange, StudentIDCounter
 from .token import InviteToken, MFAToken, OTPRecord, RefreshToken
 from .user import Role, User
+from .walkthrough import WalkthroughCompletion
 
 __all__ = [
     "User",
@@ -19,4 +20,5 @@ __all__ = [
     "AuthAuditLog",
     "StudentIDCounter",
     "PendingIdentityChange",
+    "WalkthroughCompletion",
 ]

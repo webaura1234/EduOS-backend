@@ -51,6 +51,7 @@ from apps.accounts.views.student_profile import StudentProfileFormView
 from apps.accounts.views.faculty_profile import FacultyProfileFormView
 from apps.accounts.views.faculty_dashboard import FacultyDashboardView
 from apps.accounts.views.super_admin_operations import SuperAdminOperationsOverviewView
+from apps.accounts.views.walkthrough import MeWalkthroughsView
 
 app_name = "accounts"
 
@@ -65,6 +66,7 @@ urlpatterns = [
     path("logout/all/",         LogoutAllView.as_view(),         name="logout-all"),
     path("me/",                 MeView.as_view(),                name="me"),
     path("me/access/",          MeAccessView.as_view(),          name="me-access"),
+    path("me/walkthroughs/",    MeWalkthroughsView.as_view(),    name="me-walkthroughs"),
     path("me/dashboard/",       StudentDashboardView.as_view(),  name="student-dashboard"),
     path("me/student-profile/", StudentProfileFormView.as_view(), name="student-profile-form"),
     path("me/faculty-profile/", FacultyProfileFormView.as_view(), name="faculty-profile-form"),
