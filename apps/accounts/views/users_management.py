@@ -104,10 +104,6 @@ class UserManagementActionView(APIView):
             return Response(um.reset_password(admin=admin, user_id=user_id, branch_id=branch_filter))
         if action == "hard_delete_student":
             return Response(um.hard_delete_student(admin=admin, user_id=user_id, branch_id=branch_filter))
-        if action == "promote_student_to_faculty":
-            return Response(um.promote_student_to_faculty(
-                admin=admin, user_id=user_id, branch_id=branch_filter,
-            ))
         if action == "update_user":
             payload = request.data.get("payload") or {}
             return Response(um.update_user(

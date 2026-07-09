@@ -19,7 +19,7 @@ from apps.accounts.views.auth import (
     SwitchLinkedAccountView,
     StepUpVerifyView,
 )
-from apps.accounts.views.mfa import MFAVerifyView
+from apps.accounts.views.mfa import MFAVerifyView, OtpLoginRequestView
 from apps.accounts.views.admins import SuperAdminAdminsView, SuperAdminAdminDetailView
 from apps.accounts.views.invite import AcceptInviteView, CreateInviteView
 from apps.accounts.views.password import (
@@ -58,6 +58,7 @@ app_name = "accounts"
 urlpatterns = [
     # ── Core auth ─────────────────────────────────────────────────────────
     path("login/",              LoginView.as_view(),             name="login"),
+    path("otp-login/request/",  OtpLoginRequestView.as_view(),   name="otp-login-request"),
     path("mfa/verify/",         MFAVerifyView.as_view(),         name="mfa-verify"),
     path("platform/login/",     PlatformLoginView.as_view(),     name="platform-login"),
     path("login/disambiguate/", LoginDisambiguateView.as_view(), name="login-disambiguate"),

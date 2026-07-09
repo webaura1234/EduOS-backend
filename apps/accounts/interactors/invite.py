@@ -21,6 +21,7 @@ from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
 from apps.accounts.dtos import InviteAcceptedDTO, InviteCreatedDTO
 from apps.core.exceptions import GoneError
 
+from apps.accounts.linked_accounts import filter_linkable_users
 from apps.accounts.models.user import Role, User
 from apps.accounts.queries.user import (
     assign_linked_group,
@@ -114,8 +115,12 @@ def create_and_send_invite(
         if not custom_login_id:
             raise ValidationError("Student ID (Roll Number / Admission No) is required.")
 
-    # EC-AUTH-13: detect an existing account on this phone in the same tenant.
-    existing_on_phone = get_users_by_phone_in_tenant(phone, tenant_id) if phone else []
+    # EC-AUTH-13: detect link-eligible existing accounts on this phone in the same tenant.
+    existing_on_phone = (
+        filter_linkable_users(get_users_by_phone_in_tenant(phone, tenant_id), role)
+        if phone
+        else []
+    )
 
     # Create user with unusable password (must_change_password=True by default)
     user = create_invited_user(

@@ -46,20 +46,48 @@ class LoginResponseDTO:
 @dataclass
 class MFARequiredDTO:
     """
-    Returned by interactors.auth.login() and platform_login() when the user's role
-    requires a second factor (admin, super_admin, platform_owner).
-
-    The client must collect the OTP and POST to /api/v1/auth/mfa/verify/ with
-    the mfa_session_token to complete login.
+    Returned when email OTP is required to complete login (admin, super_admin,
+    platform_owner). Client POSTs OTP to /api/v1/auth/mfa/verify/.
     """
     mfa_session_token: str
     email_hint: str
+    has_parent_account: bool = False
 
     def to_dict(self) -> dict:
         return {
             "mfa_required": True,
             "mfa_session_token": self.mfa_session_token,
             "email_hint": self.email_hint,
+            "has_parent_account": self.has_parent_account,
+        }
+
+
+@dataclass
+class OtpLoginPasswordRequiredDTO:
+    """No privileged account for phone OTP — client should collect password (parent)."""
+
+    has_parent_account: bool = False
+
+    def to_dict(self) -> dict:
+        return {
+            "password_required": True,
+            "has_parent_account": self.has_parent_account,
+            "message": "Continue with your password to sign in.",
+        }
+
+
+@dataclass
+class OtpLoginDisambiguationDTO:
+    """Multiple privileged accounts share this phone — pick one before OTP is sent."""
+
+    accounts: list
+    has_parent_account: bool = False
+
+    def to_dict(self) -> dict:
+        return {
+            "disambiguation": True,
+            "accounts": self.accounts,
+            "has_parent_account": self.has_parent_account,
         }
 
 

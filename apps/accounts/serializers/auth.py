@@ -63,6 +63,13 @@ class MFAVerifySerializer(serializers.Serializer):
     )
 
 
+class OtpLoginRequestSerializer(serializers.Serializer):
+    """Request email OTP for passwordless privileged-role login."""
+    phone = serializers.CharField(max_length=32)
+    tenant_id = serializers.UUIDField(required=False, allow_null=True)
+    user_id = serializers.UUIDField(required=False, allow_null=True)
+
+
 class BranchAdminSerializer(serializers.Serializer):
     """Branch-admin row for the super-admin admin-management screen."""
     id = serializers.UUIDField(read_only=True)

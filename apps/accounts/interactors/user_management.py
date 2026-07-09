@@ -12,6 +12,7 @@ from django.utils import timezone
 from rest_framework.exceptions import NotFound, ValidationError
 
 from apps.accounts.interactors.password import admin_reset_password
+from apps.accounts.linked_accounts import filter_linkable_users, has_linked_accounts
 from apps.accounts.models.user import Role
 from apps.accounts.queries import user as uq
 
@@ -42,6 +43,7 @@ def managed_user_dict(user, invite=None) -> dict:
         "linked_user_group_id": (
             str(user.linked_user_group_id) if user.linked_user_group_id else None
         ),
+        "has_linked_accounts": has_linked_accounts(user),
         "branch": user.branch.name if getattr(user, "branch", None) else None,
         "is_active": user.is_active,
         "invite_status": invite_status,
@@ -135,38 +137,6 @@ def hard_delete_student(*, admin, user_id, branch_id=None) -> dict:
 
 
 @transaction.atomic
-def promote_student_to_faculty(*, admin, user_id, branch_id=None) -> dict:
-    student = _require_user(admin.tenant_id, user_id, branch_id=branch_id or admin.branch_id)
-    if student.role != Role.STUDENT:
-        raise ValidationError("Only student accounts can be promoted.")
-
-    # Link the two accounts so they're recognised as the same person.
-    group_id = student.linked_user_group_id or uuid.uuid4()
-    if not student.linked_user_group_id:
-        student.linked_user_group_id = group_id
-        student.save(update_fields=["linked_user_group_id"])
-
-    faculty = uq.create_invited_user(
-        first_name=student.first_name,
-        last_name=student.last_name,
-        role=Role.FACULTY,
-        tenant_id=student.tenant_id,
-        branch_id=student.branch_id,
-        phone=student.phone,
-        custom_login_id=f"FAC-{str(uuid.uuid4())[:8].upper()}",
-        email=student.email,
-        created_by=admin,
-    )
-    faculty.linked_user_group_id = group_id
-    faculty.save(update_fields=["linked_user_group_id"])
-
-    return {
-        "student": managed_user_dict(student),
-        "faculty": managed_user_dict(faculty),
-    }
-
-
-@transaction.atomic
 def update_user(*, admin, user_id, name=None, email=None, phone=None, branch_id=None) -> dict:
     user = _require_user(admin.tenant_id, user_id, branch_id=branch_id or admin.branch_id)
     fields: list[str] = []
@@ -221,7 +191,10 @@ def _multi_role_matches(tenant_id, phone, email, role) -> list:
     if email:
         for u in uq.get_users_by_email_in_tenant(email, tenant_id):
             seen[str(u.id)] = u
-    return [u for u in seen.values() if u.role != role]
+    return filter_linkable_users(
+        [u for u in seen.values() if u.role != role],
+        role,
+    )
 
 
 def _enroll_new_student(*, user, batch, admin) -> None:

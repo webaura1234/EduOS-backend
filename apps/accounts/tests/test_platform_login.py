@@ -1,7 +1,8 @@
-"""Platform-owner login — tenant-less phone+password (separate platform app)."""
+"""Platform-owner passwordless OTP login."""
 
 import pytest
 from django.urls import reverse
+from rest_framework import status
 from rest_framework.test import APIClient
 
 from apps.accounts.models.user import Role
@@ -12,32 +13,45 @@ pytestmark = pytest.mark.django_db
 
 @pytest.fixture
 def platform_owner():
-    return UserFactory(role=Role.PLATFORM_OWNER, tenant=None, branch=None,
-                       phone="+919800000777", custom_login_id=None,
-                       must_change_password=False, password="Owner123!")
+    return UserFactory(
+        role=Role.PLATFORM_OWNER,
+        tenant=None,
+        branch=None,
+        phone="+919800000777",
+        email="owner@platform.in",
+        custom_login_id=None,
+        must_change_password=False,
+        password="Owner123!",
+    )
 
 
-def test_platform_login_succeeds(platform_owner):
-    """Platform owner always gets MFA challenge — never direct tokens."""
-    resp = APIClient().post(reverse("accounts:platform-login"),
-                            {"identifier": "+919800000777", "password": "Owner123!"},
-                            format="json")
-    assert resp.status_code == 200, resp.content
+def test_platform_password_login_rejected(platform_owner):
+    """Legacy platform/login rejects password — OTP flow only."""
+    resp = APIClient().post(
+        reverse("accounts:platform-login"),
+        {"identifier": "+919800000777", "password": "Owner123!"},
+        format="json",
+    )
+    assert resp.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+def test_platform_otp_login_request(platform_owner):
+    resp = APIClient().post(
+        reverse("accounts:otp-login-request"),
+        {"phone": "+919800000777"},
+        format="json",
+    )
+    assert resp.status_code == status.HTTP_200_OK
     data = resp.json()["data"]
     assert data.get("mfa_required") is True
     assert "mfa_session_token" in data
-    assert "email_hint" in data
 
 
-def test_platform_login_wrong_password(platform_owner):
-    resp = APIClient().post(reverse("accounts:platform-login"),
-                            {"identifier": "+919800000777", "password": "nope"},
-                            format="json")
-    assert resp.status_code == 401
-
-
-def test_platform_login_unknown_phone():
-    resp = APIClient().post(reverse("accounts:platform-login"),
-                            {"identifier": "+919800000000", "password": "x"},
-                            format="json")
-    assert resp.status_code == 401
+def test_platform_otp_login_unknown_phone():
+    resp = APIClient().post(
+        reverse("accounts:otp-login-request"),
+        {"phone": "+919800000000"},
+        format="json",
+    )
+    assert resp.status_code == status.HTTP_200_OK
+    assert resp.json()["data"].get("password_required") is True

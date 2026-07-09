@@ -15,10 +15,20 @@ import secrets
 from rest_framework.exceptions import AuthenticationFailed
 
 from apps.accounts.audit import log_auth_event
-from apps.accounts.dtos import MFARequiredDTO
+from apps.accounts.dtos import (
+    MFARequiredDTO,
+    OtpLoginDisambiguationDTO,
+    OtpLoginPasswordRequiredDTO,
+)
 from apps.accounts.models.token import MFAToken
 from apps.accounts.models.user import Role
-from apps.accounts.queries.user import get_user_for_token
+from apps.accounts.queries.user import (
+    get_active_user_for_login,
+    get_phone_login_candidates,
+    get_user_in_tenant,
+    phone_lookup_values,
+)
+from apps.accounts.models.user import User
 from apps.accounts.tokens import (
     decode_mfa_session_token,
     generate_mfa_session_token,
@@ -27,6 +37,105 @@ from apps.accounts.tokens import (
 logger = logging.getLogger("apps.accounts.interactors.mfa")
 
 MFA_REQUIRED_ROLES = {Role.ADMIN, Role.SUPER_ADMIN, Role.PLATFORM_OWNER}
+PRIVILEGED_OTP_ROLES = {Role.ADMIN, Role.SUPER_ADMIN, Role.PLATFORM_OWNER}
+INSTITUTION_OTP_ROLES = {Role.ADMIN, Role.SUPER_ADMIN}
+
+
+def _parent_exists_on_phone(phone: str, tenant_id: str) -> bool:
+    return User.objects.filter(
+        phone__in=phone_lookup_values(phone),
+        tenant_id=tenant_id,
+        role=Role.PARENT,
+        is_active=True,
+    ).exists()
+
+
+def _privileged_candidates(phone: str, tenant_id: str | None) -> list[User]:
+    if tenant_id is None:
+        owner = get_active_user_for_login(
+            tenant_id=None, role=Role.PLATFORM_OWNER, phone=phone,
+        )
+        return [owner] if owner else []
+    return [
+        u for u in get_phone_login_candidates(phone, tenant_id)
+        if u.role in INSTITUTION_OTP_ROLES
+    ]
+
+
+def request_otp_login(
+    phone: str,
+    *,
+    tenant_id: str | None = None,
+    user_id: str | None = None,
+    ip_address: str | None = None,
+):
+    """
+    Start passwordless email OTP login for admin / super_admin / platform_owner.
+
+    Returns MFARequiredDTO, OtpLoginDisambiguationDTO, or OtpLoginPasswordRequiredDTO.
+    """
+    from apps.accounts.interactors.auth import (
+        _check_tenant_allows_login,
+        _enforce_login_lockout,
+        _normalize_phone,
+    )
+    from rest_framework.exceptions import ValidationError
+
+    if tenant_id is not None:
+        _check_tenant_allows_login(tenant_id)
+
+    normalized = _normalize_phone(phone.strip())
+    has_parent = bool(tenant_id and _parent_exists_on_phone(normalized, tenant_id))
+
+    if user_id:
+        if tenant_id is None:
+            try:
+                user = User.objects.get(pk=user_id, role=Role.PLATFORM_OWNER, is_active=True)
+            except User.DoesNotExist:
+                user = None
+        else:
+            user = get_user_in_tenant(user_id, tenant_id)
+            if user and user.role not in INSTITUTION_OTP_ROLES:
+                user = None
+        candidates = [user] if user else []
+    else:
+        candidate_for_lockout = None
+        pre_candidates = _privileged_candidates(normalized, tenant_id)
+        if len(pre_candidates) == 1:
+            candidate_for_lockout = pre_candidates[0]
+        _enforce_login_lockout(
+            identifier=normalized,
+            tenant_id=tenant_id,
+            candidate=candidate_for_lockout,
+            ip_address=ip_address,
+        )
+        candidates = pre_candidates
+
+    if len(candidates) == 0:
+        return OtpLoginPasswordRequiredDTO(has_parent_account=has_parent)
+
+    if len(candidates) > 1:
+        return OtpLoginDisambiguationDTO(
+            accounts=[
+                {"user_id": str(u.id), "role": u.role, "name": u.full_name}
+                for u in candidates
+            ],
+            has_parent_account=has_parent,
+        )
+
+    user = candidates[0]
+    challenge = issue_mfa_challenge(user)
+    if challenge is None:
+        raise ValidationError(
+            "Email OTP sign-in is not available for this account. "
+            "Please ask your administrator to add a registered email address."
+        )
+
+    return MFARequiredDTO(
+        mfa_session_token=challenge.mfa_session_token,
+        email_hint=challenge.email_hint,
+        has_parent_account=has_parent,
+    )
 
 
 def _generate_otp() -> str:
@@ -101,6 +210,7 @@ def verify_mfa_otp(
     Returns LoginResponseDTO on success.
     Raises AuthenticationFailed on any failure.
     """
+    from apps.accounts.queries.user import get_user_for_token
     from apps.accounts.interactors.auth import _issue_login_tokens
 
     payload = decode_mfa_session_token(mfa_session_token)

@@ -4,8 +4,6 @@ All ORM that touches accounts (User / StudentProfile / StudentGuardianLink) for 
 enrollment provisioning saga lives here, keeping the architecture's queries-only rule.
 """
 
-import uuid
-
 from django.db.models import Q
 
 from apps.accounts.models.guardian import StudentGuardianLink
@@ -107,13 +105,3 @@ def student_hard_cap(tenant_id):
         tenant_id=tenant_id, resource="student", hard_cap__gt=0, is_active=True
     ).order_by("-period_start").first()
     return quota.hard_cap if quota else None
-
-
-def link_user_group(*users) -> uuid.UUID:
-    """Assign a shared linked_user_group_id to a set of User rows (multi-role person)."""
-    group_id = uuid.uuid4()
-    for u in users:
-        if u and not u.linked_user_group_id:
-            u.linked_user_group_id = group_id
-            u.save(update_fields=["linked_user_group_id"])
-    return group_id

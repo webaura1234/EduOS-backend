@@ -35,23 +35,76 @@ def _login(api_client, *, identifier, password, role, tenant_id):
     )
 
 
-# ── Admin / Super Admin — MFA required ───────────────────────────────────────
+# ── Admin / Super Admin — passwordless OTP login ─────────────────────────────
 
-def test_admin_login_returns_mfa_required(api_client, tenant, branch):
-    """Admin login must return mfa_required shape (not tokens) — isMFARequired() check."""
+def test_admin_password_login_rejected(api_client, tenant, branch):
+    """Admin password login is disabled — must use otp-login/request."""
     UserFactory(role=Role.ADMIN, phone="+919800000111", password="Password123!",
                 email="admin@school.in",
                 tenant=tenant, branch=branch, custom_login_id=None, must_change_password=False)
     resp = _login(api_client, identifier="+919800000111", password="Password123!",
                   role=Role.ADMIN, tenant_id=tenant.id)
+    assert resp.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+def test_otp_login_request_admin(api_client, tenant, branch):
+    """otp-login/request returns mfa_required for admin."""
+    UserFactory(role=Role.ADMIN, phone="+919800000111", password="Password123!",
+                email="admin@school.in",
+                tenant=tenant, branch=branch, custom_login_id=None, must_change_password=False)
+    resp = api_client.post(
+        reverse("accounts:otp-login-request"),
+        {"phone": "+919800000111", "tenant_id": str(tenant.id)},
+        format="json",
+    )
     assert resp.status_code == status.HTTP_200_OK
-    body = resp.json()
-    assert body["success"] is True
-    data = body["data"]
-    # Frontend checks: isMFARequired checks data.mfa_required === true
+    data = resp.json()["data"]
     assert data.get("mfa_required") is True
     assert "mfa_session_token" in data
     assert "email_hint" in data
+
+
+def test_otp_login_password_required_no_privileged_account(api_client, tenant, branch):
+    """Unknown privileged phone returns password_required (parent path)."""
+    resp = api_client.post(
+        reverse("accounts:otp-login-request"),
+        {"phone": "+919899999999", "tenant_id": str(tenant.id)},
+        format="json",
+    )
+    assert resp.status_code == status.HTTP_200_OK
+    data = resp.json()["data"]
+    assert data.get("password_required") is True
+
+
+def test_parent_password_login_still_works(api_client, tenant, branch):
+    """Parent login via password is unchanged."""
+    UserFactory(role=Role.PARENT, phone="+919800000222", password="Password123!",
+                tenant=tenant, branch=branch, custom_login_id=None, must_change_password=False)
+    resp = _login(api_client, identifier="+919800000222", password="Password123!",
+                  role=Role.PARENT, tenant_id=tenant.id)
+    assert resp.status_code == status.HTTP_200_OK
+    data = resp.json()["data"]
+    assert "access" in data and "refresh" in data
+    assert data.get("mfa_required") is not True
+
+
+def test_otp_login_admin_with_parent_on_same_phone(api_client, tenant, branch):
+    """Admin OTP path still flags parent account on shared phone."""
+    shared = "+919800000333"
+    UserFactory(role=Role.ADMIN, phone=shared, password="Password123!",
+                email="admin@school.in",
+                tenant=tenant, branch=branch, custom_login_id=None, must_change_password=False)
+    UserFactory(role=Role.PARENT, phone=shared, password="Password123!",
+                tenant=tenant, branch=branch, custom_login_id=None, must_change_password=False)
+    resp = api_client.post(
+        reverse("accounts:otp-login-request"),
+        {"phone": shared, "tenant_id": str(tenant.id)},
+        format="json",
+    )
+    assert resp.status_code == status.HTTP_200_OK
+    data = resp.json()["data"]
+    assert data.get("mfa_required") is True
+    assert data.get("has_parent_account") is True
 
 
 def test_mfa_verify_envelope_shape(api_client, tenant, branch):
@@ -59,10 +112,11 @@ def test_mfa_verify_envelope_shape(api_client, tenant, branch):
     user = UserFactory(role=Role.ADMIN, phone="+919800000115", password="Password123!",
                        email="mfa@school.in",
                        tenant=tenant, branch=branch, custom_login_id=None, must_change_password=False)
-    # Trigger MFA challenge
-    login_resp = _login(api_client, identifier="+919800000115", password="Password123!",
-                        role=Role.ADMIN, tenant_id=tenant.id)
-    mfa_token = login_resp.json()["data"]["mfa_session_token"]
+    api_client.post(
+        reverse("accounts:otp-login-request"),
+        {"phone": "+919800000115", "tenant_id": str(tenant.id)},
+        format="json",
+    )
 
     # Grab the OTP from the MFAToken table (email is mocked, so it was stored)
     from apps.accounts.interactors.mfa import _hash_otp

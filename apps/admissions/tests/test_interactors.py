@@ -214,6 +214,69 @@ def test_provision_enrollment_interactor():
     assert StudentEnrollment.objects.filter(pk=res["enrollmentId"]).exists()
 
 
+def test_provision_enrollment_existing_parent_guardian_link_only():
+    """Reusing an existing parent must NOT set a shared linked_user_group_id
+    with the student — guardian relationship lives in StudentGuardianLink."""
+    from apps.accounts.models.guardian import StudentGuardianLink
+    from apps.accounts.tests.factories import UserFactory
+
+    tenant = TenantFactory()
+    branch = BranchFactory(tenant=tenant)
+    batch = BatchFactory(course__department__branch=branch)
+    parent = UserFactory(role=Role.PARENT, tenant=tenant, branch=branch,
+                         phone="+919876500001", custom_login_id=None,
+                         must_change_password=False)
+
+    res = ProvisionEnrollmentInteractor(
+        branch=branch, batch=batch, academic_year=batch.academic_year,
+        admission_number="ADM-LINK-1", first_name="Sib", last_name="Two",
+        parent_name="Jane Doe", parent_phone="+919876500001",
+    ).execute()
+
+    assert res["status"] == "completed"
+    assert res["linkedExistingParent"] == str(parent.pk)
+    student = User.objects.get(pk=res["studentUserId"])
+    parent.refresh_from_db()
+    assert student.linked_user_group_id is None
+    assert parent.linked_user_group_id is None
+    assert StudentGuardianLink.objects.filter(student=student, guardian=parent).exists()
+
+
+def test_provision_enrollment_faculty_phone_links_new_parent_not_student():
+    """EC-FORM-09: parent phone matches faculty → warn, then on confirm create the
+    parent linked to the faculty (same person). The student is never in the group."""
+    from apps.accounts.tests.factories import UserFactory
+    from apps.admissions.interactors.enrollment import LinkedAccountWarning
+
+    tenant = TenantFactory()
+    branch = BranchFactory(tenant=tenant)
+    batch = BatchFactory(course__department__branch=branch)
+    faculty = UserFactory(role=Role.FACULTY, tenant=tenant, branch=branch,
+                          phone="+919876500002", custom_login_id="FAC-EN-1",
+                          must_change_password=False)
+
+    kwargs = dict(
+        branch=branch, batch=batch, academic_year=batch.academic_year,
+        admission_number="ADM-LINK-2", first_name="Kid", last_name="One",
+        parent_name="Kavitha F", parent_phone="+919876500002",
+    )
+
+    with pytest.raises(LinkedAccountWarning):
+        ProvisionEnrollmentInteractor(**kwargs).execute()
+
+    res = ProvisionEnrollmentInteractor(
+        **{**kwargs, "admission_number": "ADM-LINK-3"}, confirm_linked=True,
+    ).execute()
+    assert res["status"] == "completed"
+
+    faculty.refresh_from_db()
+    student = User.objects.get(pk=res["studentUserId"])
+    parent = User.objects.get(role=Role.PARENT, phone="+919876500002", tenant=tenant)
+    assert faculty.linked_user_group_id is not None
+    assert parent.linked_user_group_id == faculty.linked_user_group_id
+    assert student.linked_user_group_id is None
+
+
 def test_transfer_enrollment_interactor():
     enr = StudentEnrollmentFactory()
     

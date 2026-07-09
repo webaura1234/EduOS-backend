@@ -1,7 +1,17 @@
 """Interactors — enrollment provisioning saga + transfer (F-081/F-082/F-085)."""
 
+import uuid
+
 from django.db import transaction
 from rest_framework.exceptions import PermissionDenied, ValidationError
+
+from apps.accounts.linked_accounts import filter_linkable_users
+from apps.accounts.models.user import Role
+from apps.accounts.queries.user import (
+    assign_linked_group,
+    get_users_by_email_in_tenant,
+    get_users_by_phone_in_tenant,
+)
 
 from apps.admissions.enums import ApplicationStatus, EnrollmentStatus
 from apps.admissions.queries import application as app_q
@@ -100,29 +110,54 @@ class ProvisionEnrollmentInteractor:
             gender=self.gender, guardian_phone=self.parent_phone, user=self.user,
         )
 
-        # 5. Parent linking (F-081 / EC-FORM-09): match existing same-tenant user.
+        # 5. Parent linking (F-081 / EC-FORM-09): reuse parent or create + guardian link.
         linked_existing = None
         if self.parent_phone or self.parent_email:
-            existing = prov_q.find_user_by_phone_or_email(
-                self.tenant.pk, phone=self.parent_phone, email=self.parent_email,
+            existing_parent = prov_q.find_user_by_phone_or_email(
+                self.tenant.pk,
+                phone=self.parent_phone,
+                email=self.parent_email,
+                role=Role.PARENT,
             )
-            if existing and not self.confirm_linked:
-                raise LinkedAccountWarning(existing)
-            if existing:
-                linked_existing = existing
-                prov_q.link_user_group(existing, student_user)
-                parent_user = existing
+            if existing_parent:
+                parent_user = existing_parent
+                linked_existing = existing_parent
             else:
+                seen: dict[str, object] = {}
+                if self.parent_phone:
+                    for u in get_users_by_phone_in_tenant(self.parent_phone, self.tenant.pk):
+                        seen[str(u.id)] = u
+                if self.parent_email:
+                    for u in get_users_by_email_in_tenant(self.parent_email, self.tenant.pk):
+                        seen[str(u.id)] = u
+                linkable = filter_linkable_users(list(seen.values()), Role.PARENT)
+
+                if linkable and not self.confirm_linked:
+                    raise LinkedAccountWarning(linkable[0])
+
                 pn = (self.parent_name or "Parent").split(" ", 1)
                 parent_user = prov_q.create_parent_user(
-                    tenant=self.tenant, branch=self.branch, first_name=pn[0],
+                    tenant=self.tenant,
+                    branch=self.branch,
+                    first_name=pn[0],
                     last_name=pn[1] if len(pn) > 1 else "",
-                    phone=self.parent_phone, email=self.parent_email,
+                    phone=self.parent_phone,
+                    email=self.parent_email,
                 )
+                if linkable:
+                    group_id = next(
+                        (u.linked_user_group_id for u in linkable if u.linked_user_group_id),
+                        uuid.uuid4(),
+                    )
+                    assign_linked_group([*linkable, parent_user], group_id)
+                    linked_existing = linkable[0]
+
             prov_q.get_guardian_profile(parent_user)
             prov_q.create_guardian_link(
-                student_user=student_user, guardian_user=parent_user,
-                is_primary_contact=True, has_portal_access=True,
+                student_user=student_user,
+                guardian_user=parent_user,
+                is_primary_contact=True,
+                has_portal_access=True,
             )
 
         # 6. Enrollment record (the anchor).

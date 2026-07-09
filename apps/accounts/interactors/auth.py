@@ -12,7 +12,7 @@ from django.contrib.auth import authenticate
 from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
 
 from apps.accounts.phone import normalize_phone as _normalize_phone
-from apps.accounts.dtos import LoginResolutionDTO, LoginResponseDTO, MFARequiredDTO, TokenPairDTO
+from apps.accounts.dtos import LoginResolutionDTO, LoginResponseDTO, TokenPairDTO
 
 from apps.accounts.constants import (
     LOGIN_ATTEMPT_WINDOW_MINUTES,
@@ -44,6 +44,10 @@ from apps.organizations.enums import InstitutionStatus
 from apps.organizations.queries.institution import get_tenant
 
 logger = logging.getLogger("apps.accounts.interactors.auth")
+
+OTP_LOGIN_MESSAGE = (
+    "This account uses email OTP sign-in. Enter your phone number to receive a verification code."
+)
 
 LOGIN_ALLOWED_TENANT_STATUSES = frozenset({
     InstitutionStatus.TRIAL,
@@ -230,6 +234,11 @@ def login(
     # 3b. Enforce the parent-portal gate before issuing any session (EC-AUTH-26)
     _check_parent_portal(user)
 
+    # Privileged roles use passwordless email OTP — reject password login.
+    from apps.accounts.interactors.mfa import MFA_REQUIRED_ROLES
+    if user.role in MFA_REQUIRED_ROLES:
+        raise AuthenticationFailed(OTP_LOGIN_MESSAGE)
+
     # 3c. Record success
     record_login_attempt(
         identifier=identifier,
@@ -239,16 +248,6 @@ def login(
         user=user,
     )
 
-    # 4. MFA gate — admin/super_admin/platform_owner require email OTP
-    from apps.accounts.interactors.mfa import MFA_REQUIRED_ROLES, issue_mfa_challenge
-    if user.role in MFA_REQUIRED_ROLES:
-        challenge = issue_mfa_challenge(user)
-        if challenge is not None:
-            logger.info("MFA challenge issued: user=%s role=%s", user.id, user.role)
-            return challenge
-        # No email set — fall through to token issuance (graceful degradation)
-
-    # 5. Issue tokens
     logger.info("Login success: user=%s role=%s", user.id, user.role)
     log_auth_event(event="login_success", user=user, ip_address=ip_address,
                    metadata={"role": user.role})
@@ -283,7 +282,11 @@ def disambiguate_login(
 
     normalized_phone = _normalize_phone(identifier)
     phone_candidates = get_phone_login_candidates(normalized_phone, tenant_id)
-    matched = [u for u in phone_candidates if u.check_password(password)]
+    from apps.accounts.interactors.mfa import MFA_REQUIRED_ROLES
+    matched = [
+        u for u in phone_candidates
+        if u.check_password(password) and u.role not in MFA_REQUIRED_ROLES
+    ]
 
     if len(matched) > 1:
         # Password verified; ask the client to pick a role (EC-AUTH-11).
@@ -406,55 +409,8 @@ def logout(refresh_token_str: str) -> None:
 def platform_login(
     identifier: str, password: str, device_info: str = "", ip_address=None,
 ):
-    """Authenticate a tenant-less PLATFORM_OWNER by phone (separate platform app).
-
-    Platform owners have no tenant, so the standard tenant-scoped login can't serve them.
-    Returns LoginResponseDTO normally, or MFARequiredDTO when email MFA is required.
-    """
-    normalized = _normalize_phone(identifier)
-    candidate = get_active_user_for_login(
-        tenant_id=None, role=Role.PLATFORM_OWNER, phone=normalized,
-    )
-    _enforce_login_lockout(
-        identifier=identifier,
-        tenant_id=None,
-        candidate=candidate,
-        ip_address=ip_address,
-    )
-
-    user = candidate
-    if user is None or not user.check_password(password):
-        record_login_attempt(
-            identifier=identifier,
-            tenant_id=None,
-            ip_address=ip_address,
-            was_successful=False,
-            failure_reason="wrong_password",
-            user=candidate,
-        )
-        log_auth_event(
-            event="login_failed",
-            user=candidate,
-            ip_address=ip_address,
-            metadata={"identifier": identifier, "reason": "wrong_password"},
-        )
-        raise AuthenticationFailed("Invalid credentials.")
-
-    record_login_attempt(
-        identifier=identifier,
-        tenant_id=None,
-        ip_address=ip_address,
-        was_successful=True,
-        user=user,
-    )
-
-    from apps.accounts.interactors.mfa import issue_mfa_challenge
-    challenge = issue_mfa_challenge(user)
-    if challenge is not None:
-        logger.info("MFA challenge issued for platform owner: user=%s", user.id)
-        return challenge
-
-    return _issue_login_tokens(user, device_info, ip_address)
+    """Deprecated — platform owners must use passwordless email OTP login."""
+    raise AuthenticationFailed(OTP_LOGIN_MESSAGE)
 
 
 def switch_linked_account(

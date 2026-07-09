@@ -94,16 +94,6 @@ def test_hard_delete_blocked_by_dues(env):
     assert User.objects.filter(pk=env["student"].id).exists()
 
 
-def test_promote_student_to_faculty(env):
-    resp = _act(env, {"action": "promote_student_to_faculty",
-                      "userId": str(env["student"].id)})
-    assert resp.status_code == 200, resp.content
-    body = _data(resp)
-    assert body["student"]["role"] == "student"
-    assert body["faculty"]["role"] == "faculty"
-    assert body["student"]["linked_user_group_id"] == body["faculty"]["linked_user_group_id"]
-
-
 def test_create_user_with_invite(env):
     resp = _client(env["admin"]).post(
         reverse("accounts:users-management"),
@@ -118,8 +108,9 @@ def test_create_user_with_invite(env):
     assert body["invite"] is not None
 
 
-def test_check_multi_role_detects_existing(env):
-    # Same phone as the student, but creating a parent → should warn.
+def test_check_multi_role_ignores_student_guardian_phone(env):
+    # Same phone as the student (guardian contact), creating a parent → student is
+    # NOT a linkable pair; no warning (linking is guardian-link only, EC-AUTH-14).
     env["student"].phone = "+919812000000"
     env["student"].save(update_fields=["phone"])
     resp = _client(env["admin"]).post(
@@ -128,7 +119,74 @@ def test_check_multi_role_detects_existing(env):
         format="json",
     )
     assert resp.status_code == 200, resp.content
+    assert _data(resp)["warning"] is None
+
+
+def test_check_multi_role_admin_parent(env):
+    # Admin shares the phone → valid same-person pair (EC-AUTH-13); warning shown.
+    resp = _client(env["admin"]).post(
+        reverse("accounts:users-check-multi-role"),
+        {"phone": "+919810000001", "email": "", "role": "parent"},
+        format="json",
+    )
+    assert resp.status_code == 200, resp.content
     warning = _data(resp)["warning"]
     assert warning is not None
     assert warning["will_link_by"] == "phone"
-    assert any(a["user_id"] == str(env["student"].id) for a in warning["existing_accounts"])
+    assert [a["user_id"] for a in warning["existing_accounts"]] == [str(env["admin"].id)]
+
+
+def test_check_multi_role_faculty_parent(env):
+    faculty = UserFactory(role=Role.FACULTY, tenant=env["tenant"], branch=env["branch"],
+                          phone="+919810000077", custom_login_id="FAC-MR-1",
+                          must_change_password=False)
+    resp = _client(env["admin"]).post(
+        reverse("accounts:users-check-multi-role"),
+        {"phone": "+919810000077", "email": "", "role": "parent"},
+        format="json",
+    )
+    assert resp.status_code == 200, resp.content
+    warning = _data(resp)["warning"]
+    assert warning is not None
+    assert any(a["user_id"] == str(faculty.id) for a in warning["existing_accounts"])
+
+
+def test_check_multi_role_admin_faculty_not_linkable(env):
+    # Admin ↔ faculty is not a valid same-person pair → no warning.
+    resp = _client(env["admin"]).post(
+        reverse("accounts:users-check-multi-role"),
+        {"phone": "+919810000001", "email": "", "role": "faculty"},
+        format="json",
+    )
+    assert resp.status_code == 200, resp.content
+    assert _data(resp)["warning"] is None
+
+
+def test_managed_user_has_linked_accounts(env):
+    import uuid as _uuid
+
+    from apps.accounts.interactors.user_management import managed_user_dict
+
+    # Orphan group id (no peers) → unlinked.
+    env["student"].linked_user_group_id = _uuid.uuid4()
+    env["student"].save(update_fields=["linked_user_group_id"])
+    assert managed_user_dict(env["student"])["has_linked_accounts"] is False
+
+    # Invalid pair (student + parent sharing a group) → still unlinked.
+    parent = UserFactory(role=Role.PARENT, tenant=env["tenant"], branch=env["branch"],
+                         phone="+919810000088", custom_login_id=None,
+                         linked_user_group_id=env["student"].linked_user_group_id,
+                         must_change_password=False)
+    assert managed_user_dict(env["student"])["has_linked_accounts"] is False
+    assert managed_user_dict(parent)["has_linked_accounts"] is False
+
+    # Valid pair (faculty + parent) → linked on both sides.
+    group = _uuid.uuid4()
+    faculty = UserFactory(role=Role.FACULTY, tenant=env["tenant"], branch=env["branch"],
+                          phone="+919810000099", custom_login_id="FAC-HL-1",
+                          linked_user_group_id=group, must_change_password=False)
+    parent2 = UserFactory(role=Role.PARENT, tenant=env["tenant"], branch=env["branch"],
+                          phone="+919810000099", custom_login_id=None,
+                          linked_user_group_id=group, must_change_password=False)
+    assert managed_user_dict(faculty)["has_linked_accounts"] is True
+    assert managed_user_dict(parent2)["has_linked_accounts"] is True
