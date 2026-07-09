@@ -35,6 +35,7 @@ from apps.accounts.queries.user import (
     record_login_attempt,
 )
 from apps.accounts.tokens import (
+    decode_access_token,
     decode_refresh_token,
     generate_access_token,
     generate_refresh_token,
@@ -152,8 +153,12 @@ def _resolve_disambiguate_lockout_candidate(identifier: str, tenant_id: str):
 def _issue_login_tokens(user, device_info: str, ip_address: str) -> LoginResponseDTO:
     """Issue an access + refresh pair and build the login DTO."""
     access_token = generate_access_token(user)
+    access_jti = decode_access_token(access_token).get("jti", "")
     refresh_token_str, _ = generate_refresh_token(
-        user=user, device_info=device_info, ip_address=ip_address
+        user=user,
+        device_info=device_info,
+        ip_address=ip_address,
+        current_access_jti=access_jti or "",
     )
     return LoginResponseDTO(
         access=access_token,
@@ -367,12 +372,14 @@ def refresh_tokens(refresh_token_str: str, device_info: str = "", ip_address: st
 
     # 4. Issue new pair in the same family, next generation
     new_access = generate_access_token(user)
+    access_jti = decode_access_token(new_access).get("jti", "")
     new_refresh_str, _ = generate_refresh_token(
         user=user,
         device_info=device_info,
         ip_address=ip_address,
         family_id=db_token.family_id,
         generation=db_token.generation + 1,
+        current_access_jti=access_jti or "",
     )
 
     logger.info("Token rotated: user=%s family=%s gen=%d", user.id, db_token.family_id, db_token.generation + 1)

@@ -67,6 +67,12 @@ class RefreshToken(BaseModel):
     device_info = models.CharField(max_length=255, blank=True, default="")
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     is_revoked = models.BooleanField(default=False, db_index=True)
+    current_access_jti = models.CharField(
+        max_length=36,
+        blank=True,
+        default="",
+        help_text="JTI of the latest access token issued for this session (enables remote revoke).",
+    )
 
     class Meta:
         db_table = "accounts_refresh_token"

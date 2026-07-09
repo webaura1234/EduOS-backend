@@ -13,6 +13,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.models.token import RefreshToken
+from apps.accounts.queries.session import revoke_refresh_token_session
 
 
 class SessionsView(APIView):
@@ -61,8 +62,7 @@ class SessionDetailView(APIView):
                 status=status.HTTP_200_OK,
             )
 
-        token.is_revoked = True
-        token.save(update_fields=["is_revoked", "updated_at"])
+        revoke_refresh_token_session(token)
 
         return Response(
             {"detail": "Session revoked successfully."},

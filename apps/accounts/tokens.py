@@ -125,6 +125,7 @@ def generate_refresh_token(
     ip_address: str = None,
     family_id=None,
     generation: int = 1,
+    current_access_jti: str = "",
 ) -> tuple[str, RefreshToken]:
     """
     Encode a refresh token and persist it to the DB.
@@ -157,6 +158,7 @@ def generate_refresh_token(
         ip_address=ip_address,
         family_id=family_id,
         generation=generation,
+        current_access_jti=current_access_jti,
     )
 
     return token_str, db_record

@@ -249,3 +249,41 @@ def test_ec_auth_26_parent_portal_disabled():
 
     with pytest.raises(PermissionDenied):
         login(identifier="+919817777777", password=PW, role=Role.PARENT, tenant_id=str(tenant.id))
+
+
+# ── EC-AUTH-05: branch reassignment → next API call 401 ───────────────────────
+def test_ec_auth_05_branch_change_invalidates_token(api_client, admin_user, tenant, branch):
+    from apps.accounts.tokens import generate_access_token
+    from apps.organizations.tests.factories import BranchFactory
+
+    token = generate_access_token(admin_user)
+    api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+    other_branch = BranchFactory(tenant=tenant, name="Other Branch")
+    admin_user.branch = other_branch
+    admin_user.save(update_fields=["branch"])
+
+    resp = api_client.get(reverse("accounts:me"))
+    assert resp.status_code == 401
+
+
+# ── Remote session revoke immediately invalidates access token ────────────────
+def test_remote_session_revoke_blocklists_access_token(api_client, admin_user):
+    from apps.accounts.tokens import decode_access_token, generate_access_token, generate_refresh_token
+
+    access = generate_access_token(admin_user)
+    access_jti = decode_access_token(access).get("jti", "")
+    _, session = generate_refresh_token(
+        admin_user,
+        current_access_jti=access_jti or "",
+    )
+
+    api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
+    assert api_client.get(reverse("accounts:me")).status_code == 200
+
+    api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {generate_access_token(admin_user)}")
+    del_resp = api_client.delete(reverse("accounts:session-detail", kwargs={"session_id": session.id}))
+    assert del_resp.status_code == 200
+
+    api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
+    assert api_client.get(reverse("accounts:me")).status_code == 401

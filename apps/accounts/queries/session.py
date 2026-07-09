@@ -23,6 +23,7 @@ def create_refresh_token_record(
     ip_address: str = None,
     family_id=None,
     generation: int = 1,
+    current_access_jti: str = "",
 ) -> RefreshToken:
     """Persist a refresh token record (enables revocation + replay prevention)."""
     import uuid as _uuid
@@ -34,6 +35,7 @@ def create_refresh_token_record(
         ip_address=ip_address,
         family_id=family_id or _uuid.uuid4(),
         generation=generation,
+        current_access_jti=current_access_jti,
     )
 
 
@@ -57,9 +59,34 @@ def revoke_token_family(family_id) -> int:
     Called when a revoked token is presented again — signals theft.
     Returns the number of tokens revoked.
     """
-    count = RefreshToken.objects.filter(family_id=family_id, is_revoked=False).update(is_revoked=True)
+    tokens = list(
+        RefreshToken.objects.filter(family_id=family_id, is_revoked=False)
+    )
+    for rt in tokens:
+        revoke_refresh_token_session(rt)
+    count = len(tokens)
     logger.warning("Token family %s fully revoked (%d token(s)) — possible replay attack", family_id, count)
     return count
+
+
+def blocklist_refresh_token_access(rt: RefreshToken) -> None:
+    """Immediately invalidate the access token tied to this refresh session."""
+    from django.conf import settings
+
+    from apps.accounts.tokens import revoke_access_token_jti
+
+    if not rt.current_access_jti:
+        return
+    ttl = int(settings.JWT["ACCESS_TOKEN_LIFETIME"].total_seconds())
+    revoke_access_token_jti(rt.current_access_jti, ttl)
+
+
+def revoke_refresh_token_session(rt: RefreshToken) -> None:
+    """Revoke a session and blocklist its current access token."""
+    blocklist_refresh_token_access(rt)
+    if not rt.is_revoked:
+        rt.is_revoked = True
+        rt.save(update_fields=["is_revoked", "updated_at", "current_access_jti"])
 
 
 def revoke_refresh_token(token_str: str) -> bool:
@@ -68,8 +95,12 @@ def revoke_refresh_token(token_str: str) -> bool:
 
     Returns True if the token was found and revoked, False if not found.
     """
-    updated = RefreshToken.objects.filter(token=token_str).update(is_revoked=True)
-    return updated > 0
+    try:
+        rt = RefreshToken.objects.get(token=token_str)
+    except RefreshToken.DoesNotExist:
+        return False
+    revoke_refresh_token_session(rt)
+    return True
 
 
 def revoke_all_user_tokens(user: User) -> int:
@@ -79,10 +110,12 @@ def revoke_all_user_tokens(user: User) -> int:
     Used after password change to force re-login on all devices.
     Returns the number of tokens revoked.
     """
-    return RefreshToken.objects.filter(
-        user=user,
-        is_revoked=False,
-    ).update(is_revoked=True)
+    tokens = list(
+        RefreshToken.objects.filter(user=user, is_revoked=False)
+    )
+    for rt in tokens:
+        revoke_refresh_token_session(rt)
+    return len(tokens)
 
 
 def count_active_sessions_for_tenant(tenant_id) -> int:
@@ -99,10 +132,12 @@ def revoke_tokens_for_tenant(tenant_id) -> int:
     Revoke every active refresh token for a tenant's users (session-kill on tenant
     deactivation, EC-TEN-04). Returns the number of sessions terminated.
     """
-    return RefreshToken.objects.filter(
-        user__tenant_id=tenant_id,
-        is_revoked=False,
-    ).update(is_revoked=True)
+    tokens = list(
+        RefreshToken.objects.filter(user__tenant_id=tenant_id, is_revoked=False)
+    )
+    for rt in tokens:
+        revoke_refresh_token_session(rt)
+    return len(tokens)
 
 
 def delete_expired_tokens() -> int:

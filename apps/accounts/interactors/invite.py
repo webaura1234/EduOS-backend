@@ -223,10 +223,13 @@ def accept_invite(
 
     # Issue token pair — user is now logged in
     access_token = generate_access_token(user)
+    from apps.accounts.tokens import decode_access_token
+    access_jti = decode_access_token(access_token).get("jti", "")
     refresh_token_str, _ = generate_refresh_token(
         user=user,
         device_info=device_info,
         ip_address=ip_address,
+        current_access_jti=access_jti or "",
     )
 
     logger.info("Invite accepted: user=%s role=%s", user.id, user.role)

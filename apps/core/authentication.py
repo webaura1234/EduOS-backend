@@ -85,6 +85,18 @@ class JWTAuthentication(BaseAuthentication):
         if token_role is not None and token_role != user.role:
             raise AuthenticationFailed("Session is no longer valid. Please log in again.")
 
+        # Reject tokens whose tenant/branch claims no longer match the user record
+        # (e.g. after a transfer or branch reassignment).
+        token_tenant_id = payload.get("tenant_id")
+        user_tenant_id = str(user.tenant_id) if user.tenant_id else None
+        if token_tenant_id != user_tenant_id:
+            raise AuthenticationFailed("Session is no longer valid. Please log in again.")
+
+        token_branch_id = payload.get("branch_id")
+        user_branch_id = str(user.branch_id) if user.branch_id else None
+        if token_branch_id != user_branch_id:
+            raise AuthenticationFailed("Session is no longer valid. Please log in again.")
+
         logger.debug(
             "JWT auth: user=%s role=%s tenant=%s",
             user_id,
