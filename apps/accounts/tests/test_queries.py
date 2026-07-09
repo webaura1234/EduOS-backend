@@ -6,6 +6,7 @@ from django.utils import timezone
 from apps.accounts.queries import user as user_queries
 from apps.accounts.queries import session as session_queries
 from apps.accounts.tests.factories import UserFactory, RefreshTokenFactory, OTPRecordFactory, InviteTokenFactory, LoginAttemptFactory
+from apps.organizations.tests.factories import TenantFactory, BranchFactory
 from apps.accounts.models.user import Role
 
 
@@ -61,12 +62,27 @@ def test_get_valid_otp(tenant, branch):
     user = UserFactory(tenant=tenant, branch=branch, phone="+919876543210")
     otp = OTPRecordFactory(user=user, phone="+919876543210", is_used=False)
 
-    assert user_queries.get_valid_otp("+919876543210") == otp
+    assert user_queries.get_valid_otp("+919876543210", str(tenant.id)) == otp
 
     # Used OTP
     otp.is_used = True
     otp.save()
-    assert user_queries.get_valid_otp("+919876543210") is None
+    assert user_queries.get_valid_otp("+919876543210", str(tenant.id)) is None
+
+
+def test_get_valid_otp_scoped_to_tenant(tenant, branch):
+    other_tenant = TenantFactory(subdomain="other-school")
+    other_branch = BranchFactory(tenant=other_tenant)
+    phone = "+919876543211"
+
+    user_a = UserFactory(tenant=tenant, branch=branch, phone=phone)
+    user_b = UserFactory(tenant=other_tenant, branch=other_branch, phone=phone)
+
+    otp_a = OTPRecordFactory(user=user_a, phone=phone, is_used=False)
+    OTPRecordFactory(user=user_b, phone=phone, is_used=False)
+
+    assert user_queries.get_valid_otp(phone, str(tenant.id)) == otp_a
+    assert user_queries.get_valid_otp(phone, str(other_tenant.id)) != otp_a
 
 
 def test_count_otps_in_window():

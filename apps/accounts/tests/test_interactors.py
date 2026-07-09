@@ -290,6 +290,53 @@ def test_verify_otp_and_reset_wrong_otp(tenant, branch):
         password_interactor.verify_otp_and_reset(phone, "wrong_otp", "NewSecurePass321!", tenant.id)
 
 
+def test_verify_otp_locks_after_max_attempts(tenant, branch):
+    phone = "+919876543210"
+    user = UserFactory(role=Role.ADMIN, phone=phone, tenant=tenant, branch=branch)
+    otp_hash = password_interactor._hash_otp("123456")
+    OTPRecordFactory(user=user, phone=phone, otp_hash=otp_hash)
+
+    for _ in range(4):
+        with pytest.raises(AuthenticationFailed):
+            password_interactor.verify_otp(phone, "000000", tenant.id)
+
+    with pytest.raises(PermissionDenied):
+        password_interactor.verify_otp(phone, "000000", tenant.id)
+
+
+def test_verify_otp_rejects_other_tenant(tenant, branch):
+    other_tenant = TenantFactory(subdomain="otp-other")
+    other_branch = BranchFactory(tenant=other_tenant)
+    phone = "+919876543212"
+    user = UserFactory(role=Role.ADMIN, phone=phone, tenant=tenant, branch=branch)
+    otp_hash = password_interactor._hash_otp("123456")
+    OTPRecordFactory(user=user, phone=phone, otp_hash=otp_hash)
+
+    with pytest.raises(AuthenticationFailed):
+        password_interactor.verify_otp(phone, "123456", other_tenant.id)
+
+
+def test_login_blocked_for_deactivated_tenant(tenant, branch):
+    tenant.status = "deactivated"
+    tenant.save(update_fields=["status"])
+    UserFactory(
+        role=Role.STUDENT,
+        custom_login_id="STU-DEACT",
+        password="Pass123!",
+        tenant=tenant,
+        branch=branch,
+        must_change_password=False,
+    )
+
+    with pytest.raises(PermissionDenied):
+        auth_interactor.login(
+            identifier="STU-DEACT",
+            password="Pass123!",
+            role=Role.STUDENT,
+            tenant_id=str(tenant.id),
+        )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Invite Interactor Tests
 # ─────────────────────────────────────────────────────────────────────────────

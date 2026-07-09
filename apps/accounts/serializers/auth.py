@@ -9,17 +9,18 @@ from apps.accounts.models.user import Role
 
 class LoginSerializer(serializers.Serializer):
     identifier = serializers.CharField(
+        max_length=255,
         help_text="Phone number (admin/parent) or Employee ID / Roll Number (faculty/student)."
     )
-    password = serializers.CharField(write_only=True, style={"input_type": "password"})
+    password = serializers.CharField(max_length=128, write_only=True, style={"input_type": "password"})
     role = serializers.ChoiceField(choices=Role.choices)
     tenant_id = serializers.UUIDField()
 
 
 class DisambiguateLoginSerializer(serializers.Serializer):
     """Universal login input without a role — backend resolves it (EC-AUTH-11)."""
-    identifier = serializers.CharField()
-    password = serializers.CharField(write_only=True, style={"input_type": "password"})
+    identifier = serializers.CharField(max_length=255)
+    password = serializers.CharField(max_length=128, write_only=True, style={"input_type": "password"})
     tenant_id = serializers.UUIDField()
 
 
@@ -43,13 +44,13 @@ class LogoutSerializer(serializers.Serializer):
 class SwitchLinkedSerializer(serializers.Serializer):
     """Switch to a linked account (same person, multi-role) — re-verifies password."""
     target_user_id = serializers.UUIDField()
-    password = serializers.CharField(write_only=True, style={"input_type": "password"})
+    password = serializers.CharField(max_length=128, write_only=True, style={"input_type": "password"})
 
 
 class PlatformLoginSerializer(serializers.Serializer):
     """Platform-owner login — phone identifier + password, no tenant."""
-    identifier = serializers.CharField(help_text="Platform owner phone number.")
-    password = serializers.CharField(write_only=True, style={"input_type": "password"})
+    identifier = serializers.CharField(max_length=255, help_text="Platform owner phone number.")
+    password = serializers.CharField(max_length=128, write_only=True, style={"input_type": "password"})
 
 
 class MFAVerifySerializer(serializers.Serializer):

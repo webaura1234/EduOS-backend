@@ -155,6 +155,35 @@ def test_refresh_envelope_shape(api_client, tenant, branch):
     assert "access" in data and "refresh" in data
 
 
+# ── Logout all ────────────────────────────────────────────────────────────────
+
+def test_logout_all_revokes_all_refresh_tokens(api_client, tenant, branch):
+    """POST /logout/all/ must revoke every session without NameError."""
+    user = UserFactory(
+        role=Role.STUDENT,
+        custom_login_id="STU-LOGOUT-ALL",
+        password="Pass123!",
+        tenant=tenant,
+        branch=branch,
+        must_change_password=False,
+    )
+    generate_refresh_token(user, device_info="laptop", ip_address="127.0.0.1")
+    generate_refresh_token(user, device_info="phone", ip_address="127.0.0.1")
+
+    access = generate_access_token(user)
+    api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
+    resp = api_client.post(reverse("accounts:logout-all"))
+
+    assert resp.status_code == status.HTTP_200_OK
+    body = resp.json()
+    assert body["success"] is True
+    assert "device" in body["data"]["detail"].lower() or "signed out" in body["data"]["detail"].lower()
+
+    from apps.accounts.models.token import RefreshToken
+
+    assert RefreshToken.objects.filter(user=user, is_revoked=False).count() == 0
+
+
 # ── Error shape ───────────────────────────────────────────────────────────────
 
 def test_invalid_login_error_envelope(api_client, tenant, branch):

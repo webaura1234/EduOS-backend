@@ -39,8 +39,15 @@ from apps.accounts.tokens import (
     generate_access_token,
     generate_refresh_token,
 )
+from apps.organizations.enums import InstitutionStatus
+from apps.organizations.queries.institution import get_tenant
 
 logger = logging.getLogger("apps.accounts.interactors.auth")
+
+LOGIN_ALLOWED_TENANT_STATUSES = frozenset({
+    InstitutionStatus.TRIAL,
+    InstitutionStatus.ACTIVE,
+})
 
 
 def _resolve_candidate_user(identifier: str, role: str, tenant_id: str):
@@ -58,6 +65,88 @@ def _check_parent_portal(user) -> None:
     """EC-AUTH-26: block parent login when the institution has the parent portal disabled."""
     if user.role == Role.PARENT and user.tenant and not user.tenant.parent_access_enabled:
         raise PermissionDenied("The parent portal is not available for this institution.")
+
+
+def _check_tenant_allows_login(tenant_id: str | None) -> None:
+    """Reject authentication when the institution is suspended or deactivated."""
+    if tenant_id is None:
+        return
+    tenant = get_tenant(tenant_id)
+    if tenant is None:
+        raise AuthenticationFailed("Invalid credentials.")
+    if tenant.status not in LOGIN_ALLOWED_TENANT_STATUSES:
+        raise PermissionDenied(
+            "This institution is not currently available. Please contact support."
+        )
+
+
+def _check_tenant_allows_user(user) -> None:
+    """Reject token refresh when the user's institution is no longer active."""
+    if user.tenant_id is None:
+        return
+    tenant = user.tenant or get_tenant(user.tenant_id)
+    if tenant is None or tenant.status not in LOGIN_ALLOWED_TENANT_STATUSES:
+        raise PermissionDenied(
+            "This institution is not currently available. Please contact support."
+        )
+
+
+def _enforce_login_lockout(
+    *,
+    identifier: str,
+    tenant_id: str | None,
+    candidate,
+    ip_address,
+) -> None:
+    if candidate is not None:
+        failed_count = count_failed_attempts_for_user(
+            candidate.id, window_minutes=LOGIN_ATTEMPT_WINDOW_MINUTES
+        )
+    else:
+        failed_count = count_failed_attempts(
+            identifier=identifier,
+            tenant_id=tenant_id,
+            window_minutes=LOGIN_ATTEMPT_WINDOW_MINUTES,
+        )
+
+    if failed_count >= MAX_LOGIN_ATTEMPTS:
+        logger.warning(
+            "Login locked out: identifier=%s tenant=%s user=%s failures=%d",
+            identifier, tenant_id, getattr(candidate, "id", None), failed_count,
+        )
+        record_login_attempt(
+            identifier=identifier,
+            tenant_id=tenant_id,
+            ip_address=ip_address,
+            was_successful=False,
+            failure_reason="locked_out",
+            user=candidate,
+        )
+        log_auth_event(
+            event="login_locked",
+            user=candidate,
+            ip_address=ip_address,
+            metadata={"identifier": identifier},
+        )
+        raise PermissionDenied(
+            f"Too many failed attempts. Please try again in "
+            f"{LOGIN_LOCKOUT_DURATION_MINUTES} minutes."
+        )
+
+
+def _resolve_disambiguate_lockout_candidate(identifier: str, tenant_id: str):
+    """Best-effort user resolution for lockout scoping on universal login."""
+    normalized_phone = _normalize_phone(identifier)
+    phone_candidates = get_phone_login_candidates(normalized_phone, tenant_id)
+    if len(phone_candidates) == 1:
+        return phone_candidates[0]
+    for role in (Role.FACULTY, Role.STUDENT):
+        user = get_active_user_for_login(
+            tenant_id=tenant_id, role=role, custom_login_id=identifier
+        )
+        if user is not None:
+            return user
+    return None
 
 
 def _issue_login_tokens(user, device_info: str, ip_address: str) -> LoginResponseDTO:
@@ -98,40 +187,17 @@ def login(
     PermissionDenied   — when the identifier is currently locked out.
     AuthenticationFailed — when credentials are invalid.
     """
+    _check_tenant_allows_login(tenant_id)
+
     # 0. Resolve which user this identifier points to (for user-scoped lockout, EC-AUTH-25)
     candidate = _resolve_candidate_user(identifier, role, tenant_id)
 
-    # 1. Check lockout — scoped to the resolved user when known, else to the raw identifier
-    if candidate is not None:
-        failed_count = count_failed_attempts_for_user(
-            candidate.id, window_minutes=LOGIN_ATTEMPT_WINDOW_MINUTES
-        )
-    else:
-        failed_count = count_failed_attempts(
-            identifier=identifier,
-            tenant_id=tenant_id,
-            window_minutes=LOGIN_ATTEMPT_WINDOW_MINUTES,
-        )
-
-    if failed_count >= MAX_LOGIN_ATTEMPTS:
-        logger.warning(
-            "Login locked out: identifier=%s tenant=%s user=%s failures=%d",
-            identifier, tenant_id, getattr(candidate, "id", None), failed_count,
-        )
-        record_login_attempt(
-            identifier=identifier,
-            tenant_id=tenant_id,
-            ip_address=ip_address,
-            was_successful=False,
-            failure_reason="locked_out",
-            user=candidate,
-        )
-        log_auth_event(event="login_locked", user=candidate, ip_address=ip_address,
-                       metadata={"identifier": identifier})
-        raise PermissionDenied(
-            f"Too many failed attempts. Please try again in "
-            f"{LOGIN_LOCKOUT_DURATION_MINUTES} minutes."
-        )
+    _enforce_login_lockout(
+        identifier=identifier,
+        tenant_id=tenant_id,
+        candidate=candidate,
+        ip_address=ip_address,
+    )
 
     # 2. Verify credentials via auth backend
     user = authenticate(
@@ -202,6 +268,14 @@ def disambiguate_login(
       2. If exactly one account matches (phone or custom_id), log the user in.
       3. Otherwise, fall back to a custom_id lookup (faculty/student).
     """
+    _check_tenant_allows_login(tenant_id)
+    _enforce_login_lockout(
+        identifier=identifier,
+        tenant_id=tenant_id,
+        candidate=_resolve_disambiguate_lockout_candidate(identifier, tenant_id),
+        ip_address=ip_address,
+    )
+
     normalized_phone = _normalize_phone(identifier)
     phone_candidates = get_phone_login_candidates(normalized_phone, tenant_id)
     matched = [u for u in phone_candidates if u.check_password(password)]
@@ -286,6 +360,8 @@ def refresh_tokens(refresh_token_str: str, device_info: str = "", ip_address: st
     if not user.is_active:
         raise AuthenticationFailed("User account is inactive.")
 
+    _check_tenant_allows_user(user)
+
     # 3. Revoke the consumed token
     revoke_refresh_token(refresh_token_str)
 
@@ -328,11 +404,42 @@ def platform_login(
     Platform owners have no tenant, so the standard tenant-scoped login can't serve them.
     Returns LoginResponseDTO normally, or MFARequiredDTO when email MFA is required.
     """
-    user = get_active_user_for_login(
-        tenant_id=None, role=Role.PLATFORM_OWNER, phone=_normalize_phone(identifier),
+    normalized = _normalize_phone(identifier)
+    candidate = get_active_user_for_login(
+        tenant_id=None, role=Role.PLATFORM_OWNER, phone=normalized,
     )
+    _enforce_login_lockout(
+        identifier=identifier,
+        tenant_id=None,
+        candidate=candidate,
+        ip_address=ip_address,
+    )
+
+    user = candidate
     if user is None or not user.check_password(password):
+        record_login_attempt(
+            identifier=identifier,
+            tenant_id=None,
+            ip_address=ip_address,
+            was_successful=False,
+            failure_reason="wrong_password",
+            user=candidate,
+        )
+        log_auth_event(
+            event="login_failed",
+            user=candidate,
+            ip_address=ip_address,
+            metadata={"identifier": identifier, "reason": "wrong_password"},
+        )
         raise AuthenticationFailed("Invalid credentials.")
+
+    record_login_attempt(
+        identifier=identifier,
+        tenant_id=None,
+        ip_address=ip_address,
+        was_successful=True,
+        user=user,
+    )
 
     from apps.accounts.interactors.mfa import issue_mfa_challenge
     challenge = issue_mfa_challenge(user)

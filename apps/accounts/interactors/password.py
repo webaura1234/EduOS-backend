@@ -23,6 +23,7 @@ from apps.accounts.constants import (
     OTP_EXPIRY_MINUTES,
     OTP_LENGTH,
     OTP_MAX_PER_WINDOW,
+    OTP_MAX_VERIFY_ATTEMPTS,
     OTP_WINDOW_MINUTES,
 )
 from apps.accounts.models.user import Role
@@ -230,15 +231,26 @@ def admin_reset_password(admin, target_user_id: str, temp_password: str | None =
     return temp
 
 
-def _validate_otp(phone: str, otp: str):
-    """Return the matching unused OTP record, or raise AuthenticationFailed."""
+def _validate_otp(phone: str, otp: str, tenant_id: str):
+    """Return the matching unused OTP record, or raise AuthenticationFailed / PermissionDenied."""
     phone = normalize_phone(phone.strip())
-    otp_record = get_valid_otp(phone)
+    otp_record = get_valid_otp(phone, tenant_id)
     if otp_record is None:
         raise AuthenticationFailed("OTP is invalid or has expired.")
+    if str(otp_record.user.tenant_id) != str(tenant_id):
+        raise AuthenticationFailed("OTP is invalid or has expired.")
+    if otp_record.attempt_count >= OTP_MAX_VERIFY_ATTEMPTS:
+        raise PermissionDenied(
+            "Too many incorrect OTP attempts. Please request a new code."
+        )
     if otp_record.otp_hash != _hash_otp(otp):
         increment_otp_attempt(otp_record)
-        raise AuthenticationFailed("Incorrect OTP.")
+        remaining = OTP_MAX_VERIFY_ATTEMPTS - otp_record.attempt_count
+        if remaining <= 0:
+            raise PermissionDenied(
+                "Too many incorrect OTP attempts. Please request a new code."
+            )
+        raise AuthenticationFailed(f"Incorrect OTP. {remaining} attempt(s) remaining.")
     return otp_record
 
 
@@ -252,7 +264,7 @@ def verify_otp(phone: str, otp: str, tenant_id: str) -> None:
     Raises:
       AuthenticationFailed — OTP not found, expired, or wrong.
     """
-    _validate_otp(phone, otp)
+    _validate_otp(phone, otp, tenant_id)
 
 
 def verify_otp_and_reset(phone: str, otp: str, new_password: str, tenant_id: str) -> None:
@@ -263,7 +275,7 @@ def verify_otp_and_reset(phone: str, otp: str, new_password: str, tenant_id: str
       AuthenticationFailed — OTP not found, expired, or wrong.
       ValidationError      — password doesn't meet strength requirements.
     """
-    otp_record = _validate_otp(phone, otp)
+    otp_record = _validate_otp(phone, otp, tenant_id)
 
     # Mark as used
     mark_otp_used(otp_record)

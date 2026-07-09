@@ -15,6 +15,7 @@ OTP_MAX_PER_WINDOW = 3           # max OTPs sent per phone per window
 OTP_WINDOW_MINUTES = 30          # rolling window for OTP rate limit
 OTP_LENGTH = 6                   # digits in the OTP
 OTP_EXPIRY_MINUTES = 5           # OTP valid for 5 minutes after issue
+OTP_MAX_VERIFY_ATTEMPTS = 5      # max wrong guesses per OTP before it is invalidated
 
 # ── Invite token ─────────────────────────────────────────────────────────
 INVITE_EXPIRY_HOURS = 48         # invite links expire in 48 hours

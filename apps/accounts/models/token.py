@@ -109,6 +109,8 @@ class OTPRecord(BaseModel):
     is_used = models.BooleanField(default=False, db_index=True)
     attempt_count = models.PositiveSmallIntegerField(default=0)
 
+    MAX_ATTEMPTS = 5
+
     class Meta:
         db_table = "accounts_otp_record"
         verbose_name = "OTP Record"
@@ -126,7 +128,11 @@ class OTPRecord(BaseModel):
 
     @property
     def is_valid(self):
-        return not self.is_used and not self.is_expired
+        return (
+            not self.is_used
+            and not self.is_expired
+            and self.attempt_count < self.MAX_ATTEMPTS
+        )
 
 
 class MFAToken(BaseModel):

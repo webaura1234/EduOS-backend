@@ -32,3 +32,10 @@ CACHES = {
 # for live development — tests must be hermetic.
 S3_MODE = "sandbox"
 R2_PUBLIC_BASE_URL = ""
+
+# Rate limits share a process-wide cache; disable in tests so auth endpoint
+# suites are not flaky when many login/OTP requests run in one session.
+REST_FRAMEWORK = {
+    **REST_FRAMEWORK,
+    "DEFAULT_THROTTLE_CLASSES": [],
+}

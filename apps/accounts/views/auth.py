@@ -17,6 +17,7 @@ from apps.accounts.dtos import (
     TokenPairDTO,
     UserProfileDTO,
 )
+from apps.accounts.audit import log_auth_event
 from apps.accounts.interactors.auth import (
     disambiguate_login,
     login,

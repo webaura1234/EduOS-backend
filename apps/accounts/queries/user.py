@@ -333,16 +333,19 @@ def get_active_refresh_token(token_str: str) -> RefreshToken | None:
 # OTP lookups
 # ─────────────────────────────────────────────────────────────────────────────
 
-def get_valid_otp(phone: str) -> OTPRecord | None:
+def get_valid_otp(phone: str, tenant_id: str) -> OTPRecord | None:
     """
-    Return the most recent unused, unexpired OTPRecord for this phone, or None.
+    Return the most recent unused, unexpired OTPRecord for this phone in the tenant, or None.
     """
     return (
         OTPRecord.objects.filter(
             phone=phone,
+            user__tenant_id=tenant_id,
             is_used=False,
             expires_at__gt=timezone.now(),
+            attempt_count__lt=OTPRecord.MAX_ATTEMPTS,
         )
+        .select_related("user")
         .order_by("-created_at")
         .first()
     )
