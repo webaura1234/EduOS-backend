@@ -94,6 +94,10 @@ def upsert_student_platform_subscription(
     from apps.organizations.billing.license_allocator import on_student_enrolled
 
     on_student_enrolled(student_user)
+
+    from apps.organizations.billing.billing_refresh import refresh_tenant_billing
+
+    refresh_tenant_billing(student_user.tenant_id)
     return row
 
 

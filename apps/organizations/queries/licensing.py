@@ -8,6 +8,8 @@ from django.db.models import Sum
 from django.utils import timezone
 
 from apps.organizations.billing import license_allocator as alloc
+from apps.organizations.billing import pricing
+from apps.organizations.billing.billing_refresh import billing_dict_for_tenant
 from apps.organizations.billing.platform_pricing import unit_price_for_tenant
 from apps.organizations.enums import StudentLicenseStatus, SubscriptionPeriodStatus
 from apps.organizations.models import (
@@ -17,6 +19,7 @@ from apps.organizations.models import (
     Tenant,
     TenantLicenseSummary,
 )
+from apps.organizations.plan_catalog import normalize_plan
 from apps.organizations.queries import branch as branch_q
 from apps.organizations.serializers.licensing import (
     invoice_dict,
@@ -41,9 +44,34 @@ def _tenant_summary(tenant: Tenant) -> TenantLicenseSummary:
     return summary
 
 
+def _school_billing_row(tenant: Tenant, summary: TenantLicenseSummary) -> dict:
+    """Per-school row for platform billing overview — materialized totals + pricing."""
+    subscription = getattr(tenant, "subscription", None)
+    plan = normalize_plan(subscription.plan if subscription else "standard")
+    tenant_pricing = pricing.pricing_for_tenant(tenant.pk, plan)
+    price = unit_price_for_tenant(tenant.pk)
+    period = summary.current_period
+
+    return {
+        "tenantId": str(tenant.pk),
+        "tenantName": tenant.name,
+        "subdomain": tenant.subdomain,
+        "plan": tenant_pricing["plan"],
+        "listPricePerStudentInr": tenant_pricing["listPricePerStudentInr"],
+        "discountPercent": tenant_pricing["discountPercent"],
+        "unitPricePerStudentInr": tenant_pricing["unitPricePerStudentInr"],
+        **summary_dict(summary, unit_price=price),
+        "periodEndDate": period.end_date.isoformat() if period else None,
+    }
+
+
 def platform_overview() -> dict:
     """Global KPIs + per-school billing rows for the Platform Owner."""
-    tenants = list(Tenant.objects.filter(is_active=True).order_by("name"))
+    tenants = list(
+        Tenant.objects.filter(is_active=True)
+        .select_related("subscription")
+        .order_by("name"),
+    )
     summaries = {
         s.tenant_id: s
         for s in TenantLicenseSummary.objects.select_related("current_period").filter(
@@ -51,7 +79,7 @@ def platform_overview() -> dict:
         )
     }
 
-    revenue = (
+    license_revenue = (
         LicensePayment.objects.filter(is_active=True)
         .aggregate(total=Sum("amount_inr"))["total"] or 0
     )
@@ -62,7 +90,10 @@ def platform_overview() -> dict:
     rows = []
     total_licensed = 0
     total_unlicensed = 0
-    total_pending = 0
+    total_students = 0
+    total_annual = 0
+    total_collected = 0
+    total_outstanding = 0
     upcoming_renewals = []
 
     for tenant in tenants:
@@ -74,15 +105,12 @@ def platform_overview() -> dict:
 
         total_licensed += summary.licenses_consumed
         total_unlicensed += summary.unlicensed_active_count
-        total_pending += summary.pending_amount_inr
+        total_students += summary.active_student_count
+        total_annual += summary.annual_subscription_inr
+        total_collected += summary.collected_subscription_inr
+        total_outstanding += max(0, summary.annual_subscription_inr - summary.collected_subscription_inr)
 
-        row = {
-            "tenantId": str(tenant.pk),
-            "tenantName": tenant.name,
-            "subdomain": tenant.subdomain,
-            **summary_dict(summary, unit_price=price),
-        }
-        rows.append(row)
+        rows.append(_school_billing_row(tenant, summary))
 
         if period and today <= period.end_date <= renewal_cutoff:
             upcoming_renewals.append({
@@ -96,10 +124,14 @@ def platform_overview() -> dict:
     return {
         "kpis": {
             "totalSchools": len(tenants),
+            "totalStudents": total_students,
+            "annualSubscriptionInr": total_annual,
+            "collectedSubscriptionInr": total_collected,
+            "outstandingInr": total_outstanding,
             "totalLicensedStudents": total_licensed,
             "totalUnlicensedStudents": total_unlicensed,
-            "pendingCollectionsInr": total_pending,
-            "revenueCollectedInr": int(revenue),
+            "pendingCollectionsInr": sum(r["pendingAmountInr"] for r in rows),
+            "revenueCollectedInr": int(license_revenue),
             "schoolsRequiringBilling": sum(1 for r in rows if r["unlicensedStudents"] > 0),
         },
         "schools": rows,
@@ -108,7 +140,7 @@ def platform_overview() -> dict:
 
 
 def branch_billing_rows(tenant: Tenant) -> list[dict]:
-    """Per-branch unpaid counts for Platform Owner branch-scoped collection."""
+    """Per-branch counts for licensing operations (unlicensed queue amounts)."""
     price = unit_price_for_tenant(tenant.pk)
     rows = []
     for branch in branch_q.list_branches(tenant.pk):
@@ -128,9 +160,10 @@ def branch_billing_rows(tenant: Tenant) -> list[dict]:
 
 
 def tenant_detail(tenant: Tenant, *, branch_id=None) -> dict:
-    """One school: summary, unlicensed FIFO queue, payments, invoices."""
+    """One school: unified billing, unlicensed FIFO queue, payments, invoices."""
     summary = _tenant_summary(tenant)
     price = unit_price_for_tenant(tenant.pk)
+    billing = billing_dict_for_tenant(tenant.pk)
 
     unlicensed_qs = (
         StudentLicense.objects.select_related("student_user", "branch")
@@ -153,8 +186,6 @@ def tenant_detail(tenant: Tenant, *, branch_id=None) -> dict:
         .order_by("-created_at")[:100]
     )
 
-    from apps.organizations.billing import pricing
-
     return {
         "tenant": {
             "id": str(tenant.pk),
@@ -162,8 +193,8 @@ def tenant_detail(tenant: Tenant, *, branch_id=None) -> dict:
             "subdomain": tenant.subdomain,
             "status": tenant.status,
         },
+        "billing": billing,
         "summary": summary_dict(summary, unit_price=price),
-        "pricing": pricing.pricing_for_tenant(tenant.pk),
         "branches": branch_billing_rows(tenant),
         "unlicensedQueue": [student_license_dict(r) for r in unlicensed],
         "payments": [payment_dict(p) for p in payments],
@@ -217,7 +248,6 @@ def active_period_status(tenant_id) -> str | None:
     period = alloc.get_current_period(tenant_id)
     if period:
         return period.status
-    # No active/grace period — expired if any period ever existed.
     from apps.organizations.models import TenantSubscriptionPeriod
 
     if TenantSubscriptionPeriod.objects.filter(tenant_id=tenant_id, is_active=True).exists():

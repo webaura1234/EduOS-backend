@@ -84,6 +84,10 @@ class TenantLicensePricing(BaseModel):
         default=0,
         help_text="Discount (0-100) applied to the plan list price for this tenant only.",
     )
+    net_unit_price_inr = models.PositiveIntegerField(
+        default=0,
+        help_text="Persisted net per-student price after discount; refreshed on pricing changes.",
+    )
     effective_from = models.DateField(null=True, blank=True)
 
     class Meta:
@@ -297,6 +301,9 @@ class TenantLicenseSummary(BaseModel):
     licenses_consumed = models.PositiveIntegerField(default=0)
     unlicensed_active_count = models.PositiveIntegerField(default=0)
     pending_amount_inr = models.PositiveIntegerField(default=0)
+    active_student_count = models.PositiveIntegerField(default=0)
+    annual_subscription_inr = models.PositiveIntegerField(default=0)
+    collected_subscription_inr = models.PositiveIntegerField(default=0)
     current_period = models.ForeignKey(
         TenantSubscriptionPeriod,
         on_delete=models.SET_NULL,

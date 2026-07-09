@@ -56,6 +56,16 @@ def apply_discount(list_price: int, discount_percent: int) -> int:
 
 def net_unit_price_inr(tenant_id, plan: str | None = None) -> int:
     """Net per-student price for a tenant on the given plan (defaults to its plan)."""
+    from apps.organizations.models import TenantLicensePricing
+
+    row = (
+        TenantLicensePricing.objects.filter(tenant_id=tenant_id, is_active=True)
+        .only("net_unit_price_inr", "discount_percent")
+        .first()
+    )
+    if row is not None and row.net_unit_price_inr > 0:
+        return row.net_unit_price_inr
+
     resolved_plan = normalize_plan(plan) if plan else plan_for_tenant(tenant_id)
     list_price = list_price_for_plan(resolved_plan)
     return apply_discount(list_price, discount_percent_for_tenant(tenant_id))
@@ -66,11 +76,12 @@ def pricing_for_tenant(tenant_id, plan: str | None = None) -> dict:
     resolved_plan = normalize_plan(plan) if plan else plan_for_tenant(tenant_id)
     list_price = list_price_for_plan(resolved_plan)
     discount = discount_percent_for_tenant(tenant_id)
+    unit = net_unit_price_inr(tenant_id, resolved_plan)
     return {
         "plan": resolved_plan,
         "listPricePerStudentInr": list_price,
         "discountPercent": discount,
-        "unitPricePerStudentInr": apply_discount(list_price, discount),
+        "unitPricePerStudentInr": unit,
     }
 
 

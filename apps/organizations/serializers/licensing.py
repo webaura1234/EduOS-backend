@@ -23,12 +23,18 @@ def period_dict(period: TenantSubscriptionPeriod | None) -> dict | None:
 
 
 def summary_dict(summary: TenantLicenseSummary, *, unit_price: int) -> dict:
+    annual = summary.annual_subscription_inr
+    collected = summary.collected_subscription_inr
     return {
         "licensesPurchased": summary.licenses_purchased,
         "licensesConsumed": summary.licenses_consumed,
         "unlicensedStudents": summary.unlicensed_active_count,
         "pendingAmountInr": summary.pending_amount_inr,
         "unitPriceInr": unit_price,
+        "activeStudentCount": summary.active_student_count,
+        "annualSubscriptionInr": annual,
+        "collectedSubscriptionInr": collected,
+        "outstandingInr": max(0, annual - collected),
         "period": period_dict(summary.current_period),
     }
 

@@ -45,6 +45,18 @@ def _get_client_ip(request) -> str:
     return request.META.get("REMOTE_ADDR", "")
 
 
+def _device_info_from_request(request) -> str:
+    """
+    Human-readable device + portal label set by the BFF (X-Device-Info).
+    Falls back to the raw User-Agent when the header is absent.
+    """
+    label = (request.META.get("HTTP_X_DEVICE_INFO") or "").strip()
+    if label:
+        return label[:255]
+    ua = (request.META.get("HTTP_USER_AGENT") or "").strip()
+    return ua[:255] if ua else "Unknown device"
+
+
 def _revoke_request_access_token(request) -> None:
     """Blocklist the access token from the current request in Redis."""
     from django.utils import timezone
@@ -80,7 +92,7 @@ class LoginView(APIView):
             password=data["password"],
             role=data["role"],
             tenant_id=str(data["tenant_id"]),
-            device_info=request.META.get("HTTP_USER_AGENT", ""),
+            device_info=_device_info_from_request(request),
             ip_address=_get_client_ip(request),
         )
 
@@ -107,7 +119,7 @@ class LoginDisambiguateView(APIView):
             identifier=data["identifier"],
             password=data["password"],
             tenant_id=str(data["tenant_id"]),
-            device_info=request.META.get("HTTP_USER_AGENT", ""),
+            device_info=_device_info_from_request(request),
             ip_address=_get_client_ip(request),
         )
         return Response(result, status=status.HTTP_200_OK)
@@ -130,7 +142,7 @@ class RefreshView(APIView):
 
         result: TokenPairDTO = refresh_tokens(
             refresh_token_str=serializer.validated_data["refresh"],
-            device_info=request.META.get("HTTP_USER_AGENT", ""),
+            device_info=_device_info_from_request(request),
             ip_address=_get_client_ip(request),
         )
 
@@ -274,7 +286,7 @@ class PlatformLoginView(APIView):
         result: LoginResponseDTO = platform_login(
             identifier=serializer.validated_data["identifier"],
             password=serializer.validated_data["password"],
-            device_info=request.META.get("HTTP_USER_AGENT", ""),
+            device_info=_device_info_from_request(request),
             ip_address=_get_client_ip(request),
         )
         return Response(result, status=status.HTTP_200_OK)
@@ -319,7 +331,7 @@ class SwitchLinkedAccountView(APIView):
             current_user=request.user,
             target_user_id=str(serializer.validated_data["target_user_id"]),
             password=serializer.validated_data["password"],
-            device_info=request.META.get("HTTP_USER_AGENT", ""),
+            device_info=_device_info_from_request(request),
             ip_address=_get_client_ip(request),
         )
         return Response(

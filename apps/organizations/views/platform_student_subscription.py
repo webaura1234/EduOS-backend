@@ -72,4 +72,8 @@ class PlatformStudentSubscriptionActionsView(APIView):
             row.paid_at = None
         row.save(update_fields=["status", "paid_at", "updated_at"])
 
+        from apps.organizations.billing.billing_refresh import refresh_tenant_billing
+
+        refresh_tenant_billing(row.tenant_id, user=request.user)
+
         return Response({"row": subscription_row_dict(row)})

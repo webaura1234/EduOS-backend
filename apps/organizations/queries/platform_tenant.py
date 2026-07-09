@@ -184,6 +184,10 @@ def change_plan(tenant_id, new_plan: str, user=None) -> tuple[dict, str]:
         subscription.updated_by = user
     subscription.save(update_fields=["plan", "updated_at", "updated_by"])
 
+    from apps.organizations.billing.billing_refresh import refresh_tenant_billing
+
+    refresh_tenant_billing(tenant_id, user=user)
+
     prev_rank = PLAN_ORDER.index(previous_plan) if previous_plan in PLAN_ORDER else 0
     new_rank = PLAN_ORDER.index(new_plan) if new_plan in PLAN_ORDER else 0
     is_downgrade = new_rank < prev_rank

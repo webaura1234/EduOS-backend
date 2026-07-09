@@ -19,45 +19,34 @@ from apps.organizations.billing.platform_pricing import (
     annual_subscription_inr,
     collected_subscription_inr,
 )
-from apps.organizations.billing.student_subscription import current_academic_year
-from apps.organizations.models import StudentPlatformSubscription
-from apps.organizations.enums import StudentPlatformSubscriptionStatus
 from apps.organizations.plan_catalog import normalize_plan
 from apps.organizations.queries import platform_tenant as q
 
 
 def tenant_summary(tenant) -> dict:
     """Present a Tenant as the camelCase `PlatformTenantSummary` the frontend expects."""
+    from apps.organizations.models import TenantLicenseSummary
+
     subscription = getattr(tenant, "subscription", None)
     super_admin = get_first_user_by_role_in_tenant(tenant.id, Role.SUPER_ADMIN)
     plan = normalize_plan(subscription.plan if subscription else "standard")
     student_count = count_active_by_role_in_tenant(tenant.id, Role.STUDENT)
     billing_status = subscription.billing_status if subscription else "trial"
     tenant_pricing = pricing.pricing_for_tenant(tenant.id, plan)
-    annual_inr = annual_subscription_inr(
-        plan=plan, student_count=student_count, tenant_id=tenant.id
-    )
 
-    year = current_academic_year()
-    student_sub_qs = StudentPlatformSubscription.objects.filter(
-        tenant_id=tenant.id,
-        academic_year=year,
-        is_active=True,
-    )
-    if student_sub_qs.exists():
-        from django.db.models import Sum, Q
-
-        agg = student_sub_qs.aggregate(
-            annual=Sum("annual_fee_inr"),
-            collected=Sum(
-                "annual_fee_inr",
-                filter=Q(status=StudentPlatformSubscriptionStatus.PAID),
-            ),
-        )
-        annual_inr = int(agg["annual"] or annual_inr)
-        collected_inr = int(agg["collected"] or 0)
+    license_summary = TenantLicenseSummary.objects.filter(tenant_id=tenant.id).first()
+    if license_summary and license_summary.active_student_count > 0:
+        annual_inr = license_summary.annual_subscription_inr
+        collected_inr = license_summary.collected_subscription_inr
+        student_count = license_summary.active_student_count
     else:
-        collected_inr = collected_subscription_inr(billing_status=billing_status, annual_inr=annual_inr)
+        annual_inr = annual_subscription_inr(
+            plan=plan, student_count=student_count, tenant_id=tenant.id
+        )
+        collected_inr = collected_subscription_inr(
+            billing_status=billing_status, annual_inr=annual_inr
+        )
+
     return {
         "id": str(tenant.id),
         "name": tenant.name,
@@ -84,18 +73,18 @@ def tenant_summary(tenant) -> dict:
 
 
 def platform_stats_from_summaries(summaries: list[dict]) -> dict:
-    from apps.organizations.billing.student_subscription import aggregate_platform_subscription_stats
+    from apps.organizations.billing.billing_refresh import aggregate_platform_billing_stats
 
-    sub_stats = aggregate_platform_subscription_stats()
-    if sub_stats["totalStudents"] > 0:
+    billing_stats = aggregate_platform_billing_stats()
+    if billing_stats["totalStudents"] > 0:
         return {
-            "totalStudents": sub_stats["totalStudents"],
-            "annualSubscriptionInr": sub_stats["annualSubscriptionInr"],
-            "collectedSubscriptionInr": sub_stats["collectedSubscriptionInr"],
+            "totalStudents": billing_stats["totalStudents"],
+            "annualSubscriptionInr": billing_stats["annualSubscriptionInr"],
+            "collectedSubscriptionInr": billing_stats["collectedSubscriptionInr"],
             "billingStats": {
-                "paid": sub_stats["paid"],
-                "overdue": sub_stats["overdue"],
-                "trial": sub_stats["unpaid"],
+                "paid": billing_stats["paid"],
+                "overdue": billing_stats["overdue"],
+                "trial": billing_stats["unpaid"],
             },
         }
 

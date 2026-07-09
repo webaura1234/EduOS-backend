@@ -318,6 +318,10 @@ def record_payment(
         "licenses_purchased", "licenses_consumed",
         "unlicensed_active_count", "pending_amount_inr", "updated_at",
     ])
+
+    from apps.organizations.billing.billing_refresh import refresh_tenant_billing
+
+    refresh_tenant_billing(tenant.pk, user=user)
     return payment
 
 

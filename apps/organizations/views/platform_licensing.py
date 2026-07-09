@@ -91,6 +91,10 @@ class PlatformLicensingTenantPricingView(APIView):
         row.updated_by = request.user
         row.save(update_fields=["discount_percent", "updated_by", "updated_at"])
 
+        from apps.organizations.billing.billing_refresh import refresh_tenant_billing
+
+        refresh_tenant_billing(tenant.pk, user=request.user)
+
         log_audit(
             category="licensing",
             action="pricing_updated",
@@ -98,7 +102,12 @@ class PlatformLicensingTenantPricingView(APIView):
             user=request.user,
             tenant=tenant,
         )
-        return Response({"pricing": pricing.pricing_for_tenant(tenant.pk)})
+        from apps.organizations.billing.billing_refresh import billing_dict_for_tenant
+
+        return Response({
+            "pricing": pricing.pricing_for_tenant(tenant.pk),
+            "billing": billing_dict_for_tenant(tenant.pk),
+        })
 
 
 class PlatformLicensingPaymentsView(APIView):

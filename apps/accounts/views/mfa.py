@@ -9,7 +9,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.interactors.mfa import verify_mfa_otp, request_otp_login
 from apps.accounts.serializers.auth import MFAVerifySerializer, OtpLoginRequestSerializer
-from apps.accounts.views.auth import _get_client_ip
+from apps.accounts.views.auth import _device_info_from_request, _get_client_ip
 
 
 class MFAVerifyView(APIView):
@@ -33,7 +33,7 @@ class MFAVerifyView(APIView):
         result = verify_mfa_otp(
             mfa_session_token=data["mfa_session_token"],
             otp=data["otp"],
-            device_info=request.META.get("HTTP_USER_AGENT", ""),
+            device_info=_device_info_from_request(request),
             ip_address=_get_client_ip(request),
         )
 

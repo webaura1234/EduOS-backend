@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsPlatformOwner
+from apps.organizations.billing.billing_refresh import subscription_collected_trend
 from apps.organizations.interactors import platform_tenant as interactor
 from apps.organizations.queries import platform_tenant as q
 from apps.organizations.serializers.platform_tenant import (
@@ -48,6 +49,7 @@ class PlatformTenantListCreateView(APIView):
             },
             "stats": q.status_counts(),
             "platformStats": platform_stats_from_summaries(summaries),
+            "collectedTrend": subscription_collected_trend(),
         })
 
     def post(self, request) -> Response:

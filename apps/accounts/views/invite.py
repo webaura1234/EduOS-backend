@@ -16,6 +16,7 @@ from apps.accounts.serializers.invite import (
     AcceptInviteSerializer,
     CreateInviteSerializer,
 )
+from apps.accounts.views.auth import _device_info_from_request
 
 
 def _get_client_ip(request) -> str:
@@ -72,7 +73,7 @@ class AcceptInviteView(APIView):
         result = accept_invite(
             token_uuid=data["token"],
             new_password=data["new_password"],
-            device_info=request.META.get("HTTP_USER_AGENT", ""),
+            device_info=_device_info_from_request(request),
             ip_address=_get_client_ip(request),
         )
 
