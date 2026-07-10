@@ -14,10 +14,16 @@ def get_enquiry(branch_id, enquiry_id) -> Enquiry | None:
         return None
 
 
-def list_enquiries(branch_id, *, status=None, source=None, created_after=None):
-    qs = Enquiry.objects.filter(branch_id=branch_id, is_active=True).select_related("course")
+def list_enquiries(branch_id, *, status=None, statuses=None, source=None, created_after=None):
+    qs = (
+        Enquiry.objects.filter(branch_id=branch_id, is_active=True)
+        .select_related("course")
+        .select_related("application")
+    )
     if status:
         qs = qs.filter(status=status)
+    if statuses:
+        qs = qs.filter(status__in=statuses)
     if source:
         qs = qs.filter(source=source)
     if created_after:

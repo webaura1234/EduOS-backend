@@ -324,19 +324,29 @@ class AdminAttendanceOverviewView(APIView):
         audits = [_audit(a) for a in audit_q.list_audits(branch.pk)[:100]]
 
         date_from, date_to, period_label, report_filters = _resolve_report_range(request)
-        batch_id = report_filters.get("batchId")
 
-        ranking = report_i.ranking_report(
-            branch, date_from=date_from, date_to=date_to, batch_id=batch_id
+        # The Reports tab is the only consumer of shortage/detention/period rows, and it
+        # requests them with explicit filter params. Computing them (a full ranking scan +
+        # detention report) for the *base* overview — which the Leave/Rules/Audit/Mark tabs
+        # load — is wasted work and payload. Skip it unless the caller asks for a report.
+        wants_reports = any(
+            key in request.query_params for key in ("period", "batchId", "month", "week")
         )
-        shortage = _shortage_rows(ranking, batch_names)
-        detention = _shortage_rows(
-            report_i.detention_report(
-                branch, batch_id=batch_id, date_from=date_from, date_to=date_to
-            ),
-            batch_names,
-        )
-        period_rows = _period_student_rows(ranking, batch_names, period_label=period_label)
+        if wants_reports:
+            batch_id = report_filters.get("batchId")
+            ranking = report_i.ranking_report(
+                branch, date_from=date_from, date_to=date_to, batch_id=batch_id
+            )
+            shortage = _shortage_rows(ranking, batch_names)
+            detention = _shortage_rows(
+                report_i.detention_report(
+                    branch, batch_id=batch_id, date_from=date_from, date_to=date_to
+                ),
+                batch_names,
+            )
+            period_rows = _period_student_rows(ranking, batch_names, period_label=period_label)
+        else:
+            shortage, detention, period_rows = [], [], []
 
         return Response({
             "live": _live_snapshot(branch),

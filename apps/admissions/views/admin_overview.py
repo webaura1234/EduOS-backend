@@ -52,12 +52,20 @@ _DOC_STATUS = {"pending": "pending", "verified": "verified", "rejected": "reject
 
 
 def _enquiry(e) -> dict:
+    app_id = None
+    if hasattr(e, "application"):
+        try:
+            app_id = str(e.application.id)
+        except Exception:
+            app_id = None
     return {
         "id": str(e.id),
         "applicantName": e.applicant_name,
         "phone": e.phone,
         "email": e.email,
         "source": e.source,
+        "status": e.status,
+        "applicationId": app_id,
         "courseInterest": e.course.name if e.course_id else "",
         "notes": e.notes,
         "createdAt": e.created_at.isoformat(),
@@ -121,13 +129,15 @@ def _application(a) -> dict:
         str(enrollments[0].student_profile_id) if enrollments else None
     )
     profile = _applicant_profile(a, enq)
+    step_data = a.step if isinstance(a.step, dict) else {}
     return {
         "id": str(a.id),
+        "enquiryId": str(enq.id) if enq else None,
         "applicantName": enq.applicant_name,
         "phone": enq.phone,
         "email": enq.email,
-        "course": a.course.name if a.course_id else "",
-        "intake": "",
+        "course": a.course.name if a.course_id else step_data.get("course", ""),
+        "intake": step_data.get("intake", ""),
         "stage": _STATUS_TO_STAGE.get(a.status, "application"),
         "source": enq.source,
         "wizard": _wizard(a.step),
@@ -176,10 +186,16 @@ class AdminAdmissionsOverviewView(APIView):
 
         years = list(cal_q.list_years(branch.pk))
         cycle_start = _current_cycle_start(years)
-        enquiries = list(enq_q.list_enquiries(branch.pk, created_after=cycle_start))
+        enquiries = list(
+            enq_q.list_enquiries(
+                branch.pk,
+                created_after=cycle_start,
+                statuses=["new", "contacted"],
+            )
+        )
         applications = list(app_q.list_applications(branch.pk, created_after=cycle_start))
 
-        # Funnel — counts per pipeline stage + per enquiry source.
+        # Funnel — one count per lead at their current stage (active enquiries + applications).
         by_stage = {s: 0 for s in _PIPELINE_STAGES}
         by_stage["enquiry"] = len(enquiries)
         enrolled = 0
@@ -192,11 +208,15 @@ class AdminAdmissionsOverviewView(APIView):
         by_source = {s: 0 for s in _SOURCES}
         for e in enquiries:
             by_source[e.source] = by_source.get(e.source, 0) + 1
+        for a in applications:
+            src = a.enquiry.source if a.enquiry_id else "walk_in"
+            by_source[src] = by_source.get(src, 0) + 1
 
-        conversion = round(enrolled / len(enquiries) * 100) if enquiries else 0
+        total_leads = len(enquiries) + len(applications)
+        conversion = round(enrolled / total_leads * 100) if total_leads else 0
 
-        courses = [c.name for c in struct_q.list_courses(branch.pk)]
         course_rows = list(struct_q.list_courses(branch.pk))
+        courses = [c.name for c in course_rows]
         intakes = [y.name for y in years]
 
         return Response({

@@ -73,11 +73,14 @@ def test_save_application_step_interactor():
     save_application_step(
         branch_id=app.branch.pk,
         application_id=app.pk,
-        step={"step": 2, "percentage": 50},
+        step={"step": 2, "percentage": 50, "completedStepIndex": 1, "currentStep": 2},
     )
     
     app.refresh_from_db()
-    assert app.step == {"step": 2, "percentage": 50}
+    assert app.step["step"] == 2
+    assert app.step["percentage"] == 50
+    assert app.step["currentStep"] == 2
+    assert 1 in app.step["completedSteps"]
 
 
 def test_document_and_verification_interactors():

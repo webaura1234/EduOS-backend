@@ -7,6 +7,8 @@ Interactors return DTOs — never raw dicts.
 """
 
 import logging
+import os
+from datetime import timedelta
 
 from django.contrib.auth import authenticate
 from rest_framework.exceptions import AuthenticationFailed, PermissionDenied
@@ -326,29 +328,79 @@ def disambiguate_login(
     raise AuthenticationFailed("Invalid credentials.")
 
 
+# Grace window for refresh-token rotation reuse (rotation-with-leeway).
+#
+# The client is a browser talking through a Next.js BFF that fires MANY parallel
+# API calls per page, plus retries and multiple tabs. When the short-lived access
+# token expires, several of those in-flight calls can each present the SAME refresh
+# token before any of them has observed the rotated replacement. Treating that as
+# theft (revoke the whole family → logout everywhere) turns a normal race into a
+# random sign-out. So: re-presenting a token that was rotated out within this window
+# is a benign race — we serve a fresh valid pair in the same family instead of
+# revoking it. Reuse OUTSIDE the window is still treated as a genuine replay/theft.
+# Tunable via env; 60s comfortably covers slow requests and BFF bursts.
+REFRESH_REUSE_GRACE = timedelta(seconds=int(os.environ.get("REFRESH_REUSE_GRACE_SECONDS", "60")))
+
+
+def _issue_family_pair(user, *, family_id, generation, device_info, ip_address) -> TokenPairDTO:
+    """Mint an access + refresh pair inside an existing token family."""
+    new_access = generate_access_token(user)
+    access_jti = decode_access_token(new_access).get("jti", "")
+    new_refresh_str, _ = generate_refresh_token(
+        user=user,
+        device_info=device_info,
+        ip_address=ip_address,
+        family_id=family_id,
+        generation=generation,
+        current_access_jti=access_jti or "",
+    )
+    return TokenPairDTO(access=new_access, refresh=new_refresh_str)
+
+
 def refresh_tokens(refresh_token_str: str, device_info: str = "", ip_address: str = None) -> TokenPairDTO:
     """
     Rotate a refresh token and return a new token pair.
 
-    Family-based replay detection: every use produces a new token in the same
-    family. If a previously-used (revoked) token is presented, the entire family
-    is immediately revoked (all devices force-logged out) to contain the breach.
+    Rotation with a grace window: every use produces a new token in the same family.
+    Re-presenting a just-rotated token WITHIN ``REFRESH_REUSE_GRACE`` is a benign race
+    (parallel BFF calls, retries, multiple tabs) and is served a fresh pair. Re-use of a
+    token that was rotated out LONGER ago is a replay/theft → the whole family is revoked
+    (all devices signed out) to contain the breach.
 
-    Raises AuthenticationFailed if the token is invalid, expired, or revoked.
+    Raises AuthenticationFailed if the token is invalid, expired, or a genuine replay.
     """
+    from django.utils import timezone as _tz
+
     # 1. Verify JWT signature and expiry first (cheap, no DB hit)
     decode_refresh_token(refresh_token_str)
 
     # 2. Look up the token regardless of revocation state (for replay detection)
     db_token = get_refresh_token_any_state(refresh_token_str)
-
     if db_token is None:
         # Token unknown: either purged after expiry or never issued (forged)
         raise AuthenticationFailed("Refresh token is invalid or has expired.")
 
+    user = db_token.user
+
     if db_token.is_revoked:
-        # A revoked token was presented — this is a replay attack.
-        # Revoke the entire family to protect the legitimate session.
+        # `updated_at` is stamped when the token is rotated out (revoked), so it marks
+        # when this token stopped being current.
+        revoked_at = db_token.updated_at
+        within_grace = revoked_at is not None and (_tz.now() - revoked_at) <= REFRESH_REUSE_GRACE
+        if within_grace and user.is_active:
+            _check_tenant_allows_user(user)
+            logger.info(
+                "Refresh reuse within %ss grace: user=%s family=%s gen=%s — re-issued (no revoke).",
+                int(REFRESH_REUSE_GRACE.total_seconds()), user.id, db_token.family_id, db_token.generation,
+            )
+            return _issue_family_pair(
+                user,
+                family_id=db_token.family_id,
+                generation=db_token.generation + 1,
+                device_info=device_info,
+                ip_address=ip_address,
+            )
+        # Reuse outside the grace window → genuine replay. Contain the breach.
         revoke_token_family(db_token.family_id)
         logger.warning(
             "Replay attack detected: user=%s family=%s — all family tokens revoked.",
@@ -360,36 +412,21 @@ def refresh_tokens(refresh_token_str: str, device_info: str = "", ip_address: st
             "For your security, you have been signed out everywhere. Please log in again."
         )
 
-    from django.utils import timezone as _tz
     if db_token.expires_at < _tz.now():
         raise AuthenticationFailed("Refresh token has expired. Please log in again.")
-
-    user = db_token.user
     if not user.is_active:
         raise AuthenticationFailed("User account is inactive.")
-
     _check_tenant_allows_user(user)
 
-    # 3. Revoke the consumed token
+    # 3. Revoke the consumed token, then issue the next pair in the same family.
     revoke_refresh_token(refresh_token_str)
-
-    # 4. Issue new pair in the same family, next generation
-    new_access = generate_access_token(user)
-    access_jti = decode_access_token(new_access).get("jti", "")
-    new_refresh_str, _ = generate_refresh_token(
-        user=user,
-        device_info=device_info,
-        ip_address=ip_address,
+    logger.info("Token rotated: user=%s family=%s gen=%d", user.id, db_token.family_id, db_token.generation + 1)
+    return _issue_family_pair(
+        user,
         family_id=db_token.family_id,
         generation=db_token.generation + 1,
-        current_access_jti=access_jti or "",
-    )
-
-    logger.info("Token rotated: user=%s family=%s gen=%d", user.id, db_token.family_id, db_token.generation + 1)
-
-    return TokenPairDTO(
-        access=new_access,
-        refresh=new_refresh_str,
+        device_info=device_info,
+        ip_address=ip_address,
     )
 
 

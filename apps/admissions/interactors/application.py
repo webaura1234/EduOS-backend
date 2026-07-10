@@ -1,10 +1,29 @@
 """Interactors — application step-save, documents, and rejection (F-072/F-079/F-083)."""
 
 from django.db import transaction
+from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
+from apps.academics.queries.structure import get_course_by_name
 from apps.admissions.enums import ApplicationStatus, DocVerificationStatus
 from apps.admissions.queries import application as app_q
+
+
+def _merge_step(existing: dict, incoming: dict) -> dict:
+    merged = {**(existing or {}), **incoming}
+    if "applicant" in incoming and isinstance(incoming["applicant"], dict):
+        prev = existing.get("applicant") if isinstance(existing.get("applicant"), dict) else {}
+        merged["applicant"] = {**prev, **incoming["applicant"]}
+    completed = list(existing.get("completedSteps") or [])
+    step_index = incoming.get("completedStepIndex")
+    if isinstance(step_index, int) and step_index not in completed:
+        completed.append(step_index)
+    if completed:
+        merged["completedSteps"] = sorted(completed)
+    if "currentStep" in incoming:
+        merged["currentStep"] = incoming["currentStep"]
+    merged["lastSavedAt"] = timezone.now().isoformat()
+    return merged
 
 
 @transaction.atomic
@@ -14,7 +33,18 @@ def save_application_step(*, branch_id, application_id, step, user=None):
         raise ValidationError({"application": "Application not found."})
     if application.status == ApplicationStatus.ENROLLED:
         raise ValidationError({"application": "Cannot update an enrolled application."})
-    return app_q.update_application(application, {"step": step}, user=user)
+
+    existing = application.step if isinstance(application.step, dict) else {}
+    merged = _merge_step(existing, step)
+
+    fields = {"step": merged}
+    course_name = step.get("course") or step.get("courseName")
+    if course_name and str(course_name).strip():
+        course = get_course_by_name(branch_id, str(course_name).strip())
+        if course:
+            fields["course"] = course
+
+    return app_q.update_application(application, fields, user=user)
 
 
 @transaction.atomic

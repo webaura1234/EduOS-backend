@@ -47,6 +47,8 @@ if _use_postgres:
     # mode, which does NOT support server-side cursors → "InvalidCursorName" errors.
     # Disabling them is the supported fix for any transaction-pooled Postgres.
     DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True  # noqa: F405
+    DATABASES["default"]["CONN_MAX_AGE"] = int(os.environ.get("CONN_MAX_AGE", "60"))  # noqa: F405
+    DATABASES["default"]["CONN_HEALTH_CHECKS"] = True  # noqa: F405
 else:
     DATABASES = {
         "default": {

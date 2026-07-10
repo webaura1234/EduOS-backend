@@ -111,15 +111,44 @@ def test_refresh_token_success():
     assert rt.is_revoked is True
 
 
-def test_refresh_token_revoked():
+def test_refresh_reuse_within_grace_reissues():
+    """A just-rotated token re-presented within the grace window is a benign race
+    (parallel BFF calls / retries): a fresh pair is issued and the family is NOT revoked."""
     from apps.accounts.tokens import generate_refresh_token
+    from apps.accounts.models.token import RefreshToken
     user = UserFactory(is_active=True)
     token_str, rt = generate_refresh_token(user)
-    rt.is_revoked = True
-    rt.save()
+
+    auth_interactor.refresh_tokens(token_str)  # rotate: rt revoked, successor issued
+    rt.refresh_from_db()
+    assert rt.is_revoked is True
+
+    # Re-present the same (now-revoked) token immediately → within grace → succeeds.
+    result = auth_interactor.refresh_tokens(token_str)
+    assert isinstance(result, TokenPairDTO)
+    assert result.refresh is not None
+    # Family is intact — at least one live token remains (no force-logout).
+    assert RefreshToken.objects.filter(family_id=rt.family_id, is_revoked=False).exists()
+
+
+def test_refresh_replay_outside_grace_revokes_family():
+    """Re-presenting a token that was rotated out longer than the grace window ago is a
+    genuine replay/theft → the whole family is revoked."""
+    from datetime import timedelta
+    from django.utils import timezone
+    from apps.accounts.tokens import generate_refresh_token
+    from apps.accounts.models.token import RefreshToken
+    user = UserFactory(is_active=True)
+    token_str, rt = generate_refresh_token(user)
+
+    auth_interactor.refresh_tokens(token_str)  # rotate → rt revoked
+    # Backdate the revocation beyond the grace window.
+    RefreshToken.objects.filter(pk=rt.pk).update(updated_at=timezone.now() - timedelta(seconds=600))
 
     with pytest.raises(AuthenticationFailed):
         auth_interactor.refresh_tokens(token_str)
+    # Entire family revoked — no live tokens left.
+    assert not RefreshToken.objects.filter(family_id=rt.family_id, is_revoked=False).exists()
 
 
 def test_logout():

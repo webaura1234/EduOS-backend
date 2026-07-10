@@ -52,15 +52,17 @@ def test_enquiry_and_application_reflected(env):
         phone="+919800000000",
     )
     app_q.create_application(branch=env["branch"], enquiry=enq, status="submitted")
+    enq_q.update_enquiry(enq, {"status": "converted"})
 
     body = _data(_client(env["admin"]).get(reverse("admissions:admin-overview")))
-    assert any(e["applicantName"] == "Ravi Kumar" for e in body["enquiries"])
+    assert not any(e["applicantName"] == "Ravi Kumar" for e in body["enquiries"])
     assert len(body["applications"]) == 1
     app = body["applications"][0]
     assert app["applicantName"] == "Ravi Kumar"
     assert app["stage"] == "application"   # submitted → application (wizard in progress)
     assert app["status"] == "active"
-    assert body["funnel"]["byStage"]["enquiry"] == 1
+    assert body["funnel"]["byStage"]["enquiry"] == 0
+    assert body["funnel"]["byStage"]["application"] == 1
     assert body["funnel"]["bySource"]["walk_in"] == 1
 
 

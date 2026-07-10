@@ -43,6 +43,21 @@ def count_for_subject(subject_id) -> int:
     return MarksEntry.objects.filter(subject_id=subject_id, is_active=True).count()
 
 
+def subjects_with_marks(subject_ids) -> set:
+    """Subset of ``subject_ids`` that have at least one marks entry — in ONE query.
+
+    Batched replacement for calling ``count_for_subject`` per subject (which the
+    academics admin overview did once per subject → an N+1 across the whole list)."""
+    ids = list(subject_ids)
+    if not ids:
+        return set()
+    return set(
+        MarksEntry.objects.filter(subject_id__in=ids, is_active=True)
+        .values_list("subject_id", flat=True)
+        .distinct()
+    )
+
+
 def list_marks_for_slot(schedule_slot_id):
     return (
         MarksEntry.objects.filter(

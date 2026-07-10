@@ -129,6 +129,11 @@ DATABASES = {
         "HOST": os.environ.get("DB_HOST", "localhost"),
         "PORT": os.environ.get("DB_PORT", "5432"),
         "ATOMIC_REQUESTS": True,
+        # Persist connections across requests (default 0 re-opens one every request,
+        # which on a remote DB pays a full TCP+TLS handshake each time). dev.py sets
+        # this for the Neon setup too; kept here so prod inherits it.
+        "CONN_MAX_AGE": int(os.environ.get("CONN_MAX_AGE", "60")),
+        "CONN_HEALTH_CHECKS": True,
     },
 }
 

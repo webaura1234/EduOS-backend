@@ -26,7 +26,7 @@ def convert_enquiry_to_application(*, enquiry, course=None, user=None):
         raise ValidationError({"enquiry": "This enquiry already has an application."})
     application = app_q.create_application(
         branch=enquiry.branch, enquiry=enquiry, course=course or enquiry.course,
-        status=ApplicationStatus.SUBMITTED, step={"step": 1}, user=user,
+        status=ApplicationStatus.SUBMITTED, step={"currentStep": 1, "step": 1}, user=user,
     )
     enquiry_q.update_enquiry(enquiry, {"status": EnquiryStatus.CONVERTED}, user=user)
     return application

@@ -20,6 +20,7 @@ from apps.academics.queries import structure as struct_q
 from apps.academics.queries import syllabus as syl_q
 from apps.academics.queries import timetable as tt_q
 from apps.academics.scoping import resolve_branch
+from apps.examinations.queries import marks as exam_marks_q
 from apps.accounts.models.user import Role, User
 from apps.accounts.permissions import IsAdminOrSuperAdmin
 
@@ -139,7 +140,7 @@ def _period(p) -> dict:
     }
 
 
-def _subject(s, *, units, batches, progress_map) -> dict:
+def _subject(s, *, units, batches, progress_map, has_marks=False) -> dict:
     section_progress = []
     for batch in batches:
         completed = progress_map.get(batch.pk, {}).get(s.id, set())
@@ -159,7 +160,7 @@ def _subject(s, *, units, batches, progress_map) -> dict:
         "syllabusUnits": [syl_q.unit_dict(u) for u in units],
         "credits": s.credits,
         "archived": not s.is_active,
-        "hasMarks": curr_q.subject_has_marks(s.pk),
+        "hasMarks": has_marks,
         "sectionProgress": section_progress,
         "syllabusCompletionPercent": 0,
         "completedUnitIds": [],
@@ -223,6 +224,8 @@ class AdminAcademicsOverviewView(APIView):
         batch_ids = [b.pk for b in batches]
         subjects = list(curr_q.list_subjects(branch.pk))
         subject_ids = [s.id for s in subjects]
+        # Which subjects have marks — ONE query for the whole list (was one per subject).
+        marked_subject_ids = exam_marks_q.subjects_with_marks(subject_ids)
         units_map = syl_q.units_by_subject(branch.pk, subject_ids)
         batches_map = syl_q.batches_by_subject(branch.pk, subject_ids)
         progress_map = syl_q.progress_for_batches(branch.pk, batch_ids, subject_ids)
@@ -266,6 +269,7 @@ class AdminAcademicsOverviewView(APIView):
                     units=units_map.get(s.id, []),
                     batches=batches_map.get(s.id, []),
                     progress_map=progress_map,
+                    has_marks=s.id in marked_subject_ids,
                 )
                 for s in subjects
             ],
