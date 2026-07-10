@@ -68,6 +68,7 @@ def _calendar_change(c) -> dict:
 
 
 def _review_queue(branch_id, *, academic_period_id=None) -> list:
+    dismissed = set(extra_q.dismissed_review_ids(branch_id))
     tbd_ids, unassigned_ids, subject_gaps = extra_q.review_entries(
         branch_id, academic_period_id=academic_period_id,
     )
@@ -79,7 +80,7 @@ def _review_queue(branch_id, *, academic_period_id=None) -> list:
             "message": f"{len(tbd_ids)} timetable slot(s) need a subject reassigned.",
             "slotIds": tbd_ids,
             "createdAt": "",
-            "resolved": False,
+            "resolved": "review-tbd" in dismissed,
         })
     if unassigned_ids:
         items.append({
@@ -88,7 +89,7 @@ def _review_queue(branch_id, *, academic_period_id=None) -> list:
             "message": f"{len(unassigned_ids)} timetable slot(s) need a faculty assigned.",
             "slotIds": unassigned_ids,
             "createdAt": "",
-            "resolved": False,
+            "resolved": "review-faculty" in dismissed,
         })
     if subject_gaps:
         items.append({
@@ -98,7 +99,7 @@ def _review_queue(branch_id, *, academic_period_id=None) -> list:
             "slotIds": [],
             "gaps": subject_gaps,
             "createdAt": "",
-            "resolved": False,
+            "resolved": "review-subject-teachers" in dismissed,
         })
     return items
 
@@ -192,6 +193,7 @@ def _timetable_slot(e) -> dict:
         "periodIndex": slot.sequence if slot else 0,
         "startTime": slot.start_time.isoformat() if slot else "",
         "endTime": slot.end_time.isoformat() if slot else "",
+        "academicPeriodId": str(e.timetable.academic_period_id),
         "status": "active" if has_faculty else "faculty_unassigned",
         "statusNote": None,
     }
@@ -253,7 +255,12 @@ class AdminAcademicsOverviewView(APIView):
             "academicYears": [{"id": str(y.id), "label": y.name} for y in years],
             "periods": [_period(p) for p in periods],
             "holidays": [
-                {"id": str(h.id), "name": h.name, "date": h.date.isoformat()}
+                {
+                    "id": str(h.id),
+                    "name": h.name,
+                    "date": h.date.isoformat(),
+                    "holidayType": h.holiday_type,
+                }
                 for h in hol_q.list_holidays(branch.pk)
             ],
             "workingDays": _working_days(branch),

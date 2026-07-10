@@ -25,6 +25,16 @@ from apps.academics.views.curriculum import (
 from apps.academics.views.holiday import HolidayDetailView, HolidayListCreateView
 from apps.academics.views.admin_actions import AdminAcademicsActionView
 from apps.academics.views.admin_overview import AdminAcademicsOverviewView
+from apps.academics.views.admin_tab_overview import (
+    AdminAcademicsCalendarTabView,
+    AdminAcademicsStaffingTabView,
+    AdminAcademicsStructureTabView,
+    AdminAcademicsStudyMaterialsTabView,
+    AdminAcademicsSubjectsTabView,
+    AdminAcademicsSubstitutionsTabView,
+    AdminAcademicsTimetableTabView,
+)
+from apps.academics.views.dependencies import AcademicsDependenciesView
 from apps.academics.views.substitution_availability import SubstitutionAvailableFacultyView
 from apps.academics.views.faculty_materials import FacultyStudyMaterialsView
 from apps.academics.views.faculty_syllabus import FacultySyllabusView
@@ -68,7 +78,23 @@ app_name = "academics"
 urlpatterns = [
     # Admin aggregate (AcademicsData shape) + gap-domain write actions
     path("admin-overview/", AdminAcademicsOverviewView.as_view(), name="admin-overview"),
+    path("admin-overview/calendar/", AdminAcademicsCalendarTabView.as_view(), name="admin-calendar-tab"),
+    path("admin-overview/structure/", AdminAcademicsStructureTabView.as_view(), name="admin-structure-tab"),
+    path("admin-overview/staffing/", AdminAcademicsStaffingTabView.as_view(), name="admin-staffing-tab"),
+    path("admin-overview/subjects/", AdminAcademicsSubjectsTabView.as_view(), name="admin-subjects-tab"),
+    path("admin-overview/timetable/", AdminAcademicsTimetableTabView.as_view(), name="admin-timetable-tab"),
+    path(
+        "admin-overview/study-materials/",
+        AdminAcademicsStudyMaterialsTabView.as_view(),
+        name="admin-study-materials-tab",
+    ),
+    path(
+        "admin-overview/substitutions/",
+        AdminAcademicsSubstitutionsTabView.as_view(),
+        name="admin-substitutions-tab",
+    ),
     path("admin-overview/actions/", AdminAcademicsActionView.as_view(), name="admin-actions"),
+    path("dependencies/", AcademicsDependenciesView.as_view(), name="dependencies"),
     path(
         "substitutions/available-faculty/",
         SubstitutionAvailableFacultyView.as_view(),

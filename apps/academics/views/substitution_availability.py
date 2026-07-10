@@ -7,6 +7,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.academics.helpers import entry_matches_date
 from apps.academics.queries import substitution_availability as avail_q
 from apps.academics.queries import timetable as tt_q
 from apps.academics.scoping import resolve_branch
@@ -34,7 +35,7 @@ class SubstitutionAvailableFacultyView(APIView):
         if entry is None:
             return Response({"error": "Timetable slot not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        if entry.day_of_week != on_date.weekday():
+        if not entry_matches_date(entry.day_of_week, on_date):
             return Response(
                 {"error": "Selected date does not match this session's weekday."},
                 status=status.HTTP_400_BAD_REQUEST,

@@ -17,9 +17,11 @@ from apps.academics.queries import curriculum as curr_q
 from apps.academics.queries import structure as struct_q
 from apps.academics.queries import syllabus as syl_q
 from apps.academics.queries import timetable as tt_q
-from apps.academics.helpers import batch_display_label, is_school
+from apps.academics.helpers import batch_display_label, entry_matches_date, is_school
+from apps.academics.interactors import calendar as cal_i
 from apps.academics.interactors import curriculum as curr_i
 from apps.academics.interactors import structure as struct_i
+from apps.academics.interactors import timetable as tt_i
 from apps.academics.scoping import resolve_branch
 from apps.accounts.permissions import IsAdminOrSuperAdmin
 
@@ -188,29 +190,43 @@ class AdminAcademicsActionView(APIView):
             return Response({"ok": True, "workingDays": branch.working_days})
 
         if action == "save_period":
-            # FE sends {label, startDate, endDate, academicYearId}; derive type + sequence.
             period_type = "semester" if branch.tenant.institution_type == "college" else "term"
             pid = payload.get("id")
+            year_id = payload.get("academicYearId")
+            year = cal_q.get_year(branch.pk, year_id) if year_id else cal_q.get_current_year(branch.pk)
+            if year is None:
+                return Response({"error": "Academic year not found."}, status=status.HTTP_404_NOT_FOUND)
             if pid:
-                period = cal_q.get_period(payload.get("academicYearId"), pid)
+                period = cal_q.get_period(year.pk, pid)
                 if period is None:
                     return Response({"error": "Period not found."}, status=status.HTTP_404_NOT_FOUND)
-                cal_q.update_period(period, {
-                    "name": payload.get("label", period.name),
-                    "start_date": _date(payload.get("startDate")),
-                    "end_date": _date(payload.get("endDate")),
-                }, user=user)
+                period = cal_i.update_academic_period(
+                    period, year,
+                    fields={
+                        "name": payload.get("label", period.name),
+                        "start_date": _date(payload.get("startDate")),
+                        "end_date": _date(payload.get("endDate")),
+                    },
+                    user=user,
+                )
                 return Response({"id": str(period.id)})
-            period = cal_q.create_period(
-                payload.get("academicYearId"),
+            period = cal_i.create_academic_period(
+                year,
                 period_type=period_type,
-                sequence=_next_period_sequence(payload.get("academicYearId")),
+                sequence=_next_period_sequence(year.pk),
                 name=payload.get("label", "Term"),
                 start_date=_date(payload.get("startDate")),
                 end_date=_date(payload.get("endDate")),
                 user=user,
             )
             return Response({"id": str(period.id)}, status=status.HTTP_201_CREATED)
+
+        if action == "resolve_review":
+            review_id = request.data.get("reviewId") or payload.get("reviewId")
+            if not review_id:
+                return Response({"error": "reviewId is required."}, status=status.HTTP_400_BAD_REQUEST)
+            extra_q.dismiss_review(branch, str(review_id), user=user)
+            return Response({"ok": True, "reviewId": str(review_id)})
 
         if action == "save_department":
             # FE sends {id?, name, parentId?}; department_type defaults on the model.
@@ -445,6 +461,12 @@ class AdminAcademicsActionView(APIView):
                     return Response({"error": str(msg)}, status=status.HTTP_400_BAD_REQUEST)
                 raise
             assignment = curr_q.get_batch_faculty(branch.pk, assignment.pk)
+            tt_q.propagate_faculty_to_entries(
+                branch.pk,
+                batch_subject_id=batch_subject.id,
+                faculty_id=assignment.faculty_id,
+                user=user,
+            )
             return Response(_subject_teacher_payload(assignment))
 
         if action == "unassign_subject_teacher":
@@ -492,7 +514,7 @@ class AdminAcademicsActionView(APIView):
                 return Response({"error": "Subject not found."}, status=status.HTTP_404_NOT_FOUND)
 
             year = cal_q.get_current_year(branch.pk)
-            period = cal_q.list_periods(year.pk).first() if year else None
+            period = _resolve_period(branch, payload.get("academicPeriodId"))
             if period is None:
                 return Response(
                     {"error": "Create a current academic year with at least one term/period first."},
@@ -510,27 +532,59 @@ class AdminAcademicsActionView(APIView):
             batch_subject = _resolve_batch_subject(branch, batch, subject, period, user)
 
             entry_id = payload.get("id")
-            if entry_id:
-                entry = tt_q.get_timetable_entry(branch.pk, entry_id)
-                if entry is None:
-                    return Response({"error": "Timetable slot not found."},
-                                    status=status.HTTP_404_NOT_FOUND)
-                tt_q.update_timetable_entry(entry, {
-                    "batch_subject_id": batch_subject.id,
-                    "period_slot_id": slot.id,
-                    "day_of_week": day_of_week,
-                    "faculty_id": faculty_id,
-                    "room_id": room_id,
-                    "status": "active",
-                }, user=user)
-                return Response({"id": str(entry.id)})
-
-            timetable = tt_q.get_or_create_timetable(batch=batch, academic_period=period, user=user)
-            entry = tt_q.create_timetable_entry(
-                timetable=timetable, batch_subject=batch_subject, period_slot=slot,
-                day_of_week=day_of_week, faculty_id=faculty_id, room_id=room_id, user=user,
-            )
-            return Response({"id": str(entry.id)}, status=status.HTTP_201_CREATED)
+            try:
+                if entry_id:
+                    entry = tt_q.get_timetable_entry(branch.pk, entry_id)
+                    if entry is None:
+                        return Response({"error": "Timetable slot not found."},
+                                        status=status.HTTP_404_NOT_FOUND)
+                    entry = tt_i.update_timetable_entry(
+                        branch.pk, branch.tenant_id, entry,
+                        fields={
+                            "batch_subject_id": batch_subject.id,
+                            "period_slot_id": slot.id,
+                            "day_of_week": day_of_week,
+                            "faculty_id": faculty_id,
+                            "room_id": room_id,
+                            "status": "active",
+                        },
+                        user=user,
+                    )
+                    tt_i.publish_timetable(entry.timetable, user=user)
+                else:
+                    timetable = tt_q.get_or_create_timetable(batch=batch, academic_period=period, user=user)
+                    entry = tt_i.create_timetable_entry(
+                        branch.pk, branch.tenant_id, timetable,
+                        batch_subject_id=batch_subject.id,
+                        period_slot_id=slot.id,
+                        day_of_week=day_of_week,
+                        faculty_id=faculty_id,
+                        room_id=room_id,
+                        user=user,
+                    )
+                    tt_i.publish_timetable(timetable, user=user)
+            except Exception as exc:
+                from rest_framework.exceptions import ValidationError
+                if isinstance(exc, ValidationError):
+                    detail = exc.detail
+                    if isinstance(detail, dict) and "clashes" in detail:
+                        return Response(
+                            {"error": "Cannot save: faculty or room clash in this time slot.", "clashes": detail["clashes"]},
+                            status=status.HTTP_409_CONFLICT,
+                        )
+                    if isinstance(detail, dict) and "slot" in detail:
+                        slot_msg = detail["slot"]
+                        message = slot_msg if isinstance(slot_msg, str) else str(slot_msg)
+                        return Response({"error": message, "slot": message}, status=status.HTTP_400_BAD_REQUEST)
+                    if isinstance(detail, dict):
+                        first_key = next(iter(detail))
+                        val = detail[first_key]
+                        message = val if isinstance(val, str) else str(val)
+                        return Response({"error": message}, status=status.HTTP_400_BAD_REQUEST)
+                    msg = detail if isinstance(detail, str) else str(detail)
+                    return Response({"error": msg}, status=status.HTTP_400_BAD_REQUEST)
+                raise
+            return Response({"id": str(entry.id)}, status=status.HTTP_201_CREATED if not entry_id else status.HTTP_200_OK)
 
         if action == "create_substitution":
             entry = tt_q.get_timetable_entry(branch.pk, payload.get("timetableSlotId"))
@@ -538,7 +592,7 @@ class AdminAcademicsActionView(APIView):
                 return Response({"error": "Timetable slot not found."},
                                 status=status.HTTP_404_NOT_FOUND)
             sub_date = _date(payload.get("date"))
-            if entry.day_of_week != sub_date.weekday():
+            if not entry_matches_date(entry.day_of_week, sub_date):
                 return Response(
                     {"error": "Selected date does not match this session's weekday."},
                     status=status.HTTP_400_BAD_REQUEST,
@@ -566,12 +620,18 @@ class AdminAcademicsActionView(APIView):
                     {"error": "Selected faculty is not available for this session."},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            sub = extra_q.create_substitution(
-                branch=branch, timetable_entry=entry,
-                original_faculty_id=entry.faculty_id,
-                substitute_faculty_id=substitute_id,
-                date=sub_date, reason=payload.get("reason", ""), user=user,
-            )
+            try:
+                sub = extra_q.create_substitution(
+                    branch=branch, timetable_entry=entry,
+                    original_faculty_id=entry.faculty_id,
+                    substitute_faculty_id=substitute_id,
+                    date=sub_date, reason=payload.get("reason", ""), user=user,
+                )
+            except Exception as exc:
+                from rest_framework.exceptions import ValidationError
+                if isinstance(exc, ValidationError):
+                    return Response({"error": str(exc.detail)}, status=status.HTTP_400_BAD_REQUEST)
+                raise
             return Response({"id": str(sub.id), "status": sub.status},
                             status=status.HTTP_201_CREATED)
 

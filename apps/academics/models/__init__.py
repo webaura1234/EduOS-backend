@@ -12,6 +12,7 @@ from .timetable import (
 )
 from .admin_extras import (
     AcademicSubstitution,
+    AdminReviewDismissal,
     CalendarChange,
     CalendarChangeType,
     StudyMaterial,
@@ -50,6 +51,7 @@ __all__ = [
     "AcademicRolloverRun",
     "RolloverRunStatus",
     "AcademicSubstitution",
+    "AdminReviewDismissal",
     "SubstitutionStatus",
     "StudyMaterial",
     "StudyMaterialFolder",

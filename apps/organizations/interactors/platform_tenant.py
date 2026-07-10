@@ -57,7 +57,6 @@ def create_tenant(payload: dict, user=None):
     address = payload.get("address", {})
     invite = payload["invite"]
     branches = payload.get("branches", {})
-    features = payload.get("features", {})
 
     subdomain = overview["subdomain"].strip().lower()
     if inst_q.subdomain_taken(subdomain):
@@ -78,9 +77,14 @@ def create_tenant(payload: dict, user=None):
             address_line1=address.get("addressLine1", ""),
             address_line2=address.get("addressLine2", ""),
             postal_code=address.get("pincode", ""),
-            # Parent portal is always on for schools; wizard-driven for colleges.
-            parent_access_enabled=(institution_type == "school") or bool(features.get("parentPortal")),
-            settings_json={"features": features, "integrations": payload.get("integrations", {})},
+            parent_access_enabled=(institution_type == "school"),
+            settings_json={
+                "features": {
+                    "coreErp": True,
+                    "ai": plan == "ai",
+                },
+                "integrations": {},
+            },
             user=user,
         )
     except IntegrityError as exc:  # subdomain race
@@ -119,6 +123,10 @@ def create_tenant(payload: dict, user=None):
         email=None,
         created_by=user,
     )
+
+    from apps.organizations.billing.billing_refresh import refresh_tenant_billing
+
+    refresh_tenant_billing(tenant.id, user=user)
 
     logger.info("Tenant provisioned: %s (%s) plan=%s", tenant.name, subdomain, plan)
     return tenant

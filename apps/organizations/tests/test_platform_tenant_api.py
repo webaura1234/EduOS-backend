@@ -10,7 +10,7 @@ from apps.accounts.models.token import RefreshToken
 from apps.accounts.models.user import Role
 from apps.accounts.tests.factories import UserFactory
 from apps.accounts.tokens import generate_access_token
-from apps.organizations.models import Tenant
+from apps.organizations.models import Tenant, TenantLicensePricing, TenantLicenseSummary
 from apps.organizations.tests.factories import TenantFactory
 
 pytestmark = pytest.mark.django_db
@@ -33,10 +33,19 @@ CREATE_PAYLOAD = {
     "overview": {"institutionName": "New School", "subdomain": "newschool",
                  "institutionType": "school", "plan": "ai"},
     "invite": {"superAdminName": "Asha Rao", "superAdminPhone": "+919812345678"},
-    "address": {"city": "Pune", "state": "MH", "addressLine1": "1 MG Rd", "pincode": "411001"},
-    "branches": {"hqCity": "Pune", "hqState": "MH", "entries": [{"name": "Main Campus", "assignees": []}]},
-    "features": {"parentPortal": True, "onlineFees": True},
-    "integrations": {"razorpay": True},
+    "address": {"city": "Pune", "state": "MH"},
+    "branches": {
+        "hqCity": "Pune",
+        "hqState": "MH",
+        "entries": [
+            {
+                "name": "Main Campus",
+                "assignees": [
+                    {"role": "super_admin", "name": "Asha Rao", "phone": "+919812345678"}
+                ],
+            }
+        ],
+    },
 }
 
 
@@ -59,7 +68,10 @@ def test_create_tenant_provisions_everything(client, platform_owner):
     assert tenant.updated_by_id == platform_owner.id
     assert hasattr(tenant, "subscription") and tenant.subscription.plan == "ai"
     assert tenant.tenant_settings is not None
+    assert tenant.settings == {"features": {"coreErp": True, "ai": True}, "integrations": {}}
     assert tenant.branches.count() == 1
+    assert TenantLicensePricing.objects.filter(tenant=tenant, net_unit_price_inr__gt=0).exists()
+    assert TenantLicenseSummary.objects.filter(tenant=tenant).exists()
     # Super-admin invite user created
     assert tenant.users.filter(role=Role.SUPER_ADMIN).count() == 1
 

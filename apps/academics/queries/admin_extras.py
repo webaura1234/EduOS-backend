@@ -6,6 +6,7 @@ from django.db.models import Count
 
 from apps.academics.models import (
     AcademicSubstitution,
+    AdminReviewDismissal,
     BatchFaculty,
     BatchFacultyRole,
     BatchSubject,
@@ -37,6 +38,15 @@ def get_substitution(branch_id, sub_id) -> AcademicSubstitution | None:
 
 def create_substitution(*, branch, timetable_entry, original_faculty_id,
                         substitute_faculty_id, date, reason="", user=None) -> AcademicSubstitution:
+    existing = AcademicSubstitution.objects.filter(
+        branch=branch,
+        timetable_entry=timetable_entry,
+        date=date,
+        is_active=True,
+    ).exclude(status="cancelled").first()
+    if existing is not None:
+        from rest_framework.exceptions import ValidationError
+        raise ValidationError("A substitution already exists for this session on this date.")
     return AcademicSubstitution.objects.create(
         branch=branch, timetable_entry=timetable_entry,
         original_faculty_id=original_faculty_id, substitute_faculty_id=substitute_faculty_id,
@@ -303,3 +313,24 @@ def unassigned_subject_teacher_gaps(branch_id, academic_period_id) -> list[dict]
                 "batchSubjectId": str(batch_subjects[key]) if key in batch_subjects else "",
             })
     return gaps
+
+
+def dismissed_review_ids(branch_id) -> list[str]:
+    return list(
+        AdminReviewDismissal.objects.filter(branch_id=branch_id, is_active=True).values_list(
+            "review_id", flat=True,
+        )
+    )
+
+
+def dismiss_review(branch, review_id: str, user=None) -> AdminReviewDismissal:
+    row, _ = AdminReviewDismissal.objects.get_or_create(
+        branch=branch,
+        review_id=review_id,
+        defaults={"created_by": user, "updated_by": user},
+    )
+    if not row.is_active:
+        row.is_active = True
+        row.updated_by = user
+        row.save(update_fields=["is_active", "updated_by", "updated_at"])
+    return row

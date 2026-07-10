@@ -277,6 +277,85 @@ def test_save_timetable_slot_requires_period(env):
     assert resp.status_code == 400  # no current year/period set
 
 
+def _timetable_slot_setup(env):
+    from apps.academics.models.calendar import AcademicPeriod, PeriodType
+    from apps.academics.models.timetable import Room
+
+    year = AcademicYearFactory(branch=env["branch"], is_current=True)
+    period = AcademicPeriod.objects.create(
+        academic_year=year, period_type=PeriodType.TERM, sequence=1, name="Term 1",
+        start_date=datetime.date(2025, 6, 1), end_date=datetime.date(2025, 10, 1),
+    )
+    batch = BatchFactory(course__department__branch=env["branch"], academic_year=year)
+    room = Room.objects.create(
+        branch=env["branch"], name="Room 101", code="R101", capacity=40, is_lab=False,
+    )
+    math = Subject.objects.create(course=batch.course, name="Maths", code="MA")
+    english = Subject.objects.create(course=batch.course, name="English", code="EN")
+    return batch, math, english, room, str(period.id)
+
+
+def _slot_payload(batch_id, subject_id, faculty_id, room_id, *, day=4, period=2):
+    return {
+        "classSectionId": str(batch_id),
+        "subjectId": str(subject_id),
+        "facultyUserId": str(faculty_id),
+        "roomId": str(room_id),
+        "dayOfWeek": day,
+        "periodIndex": period,
+        "startTime": "09:00",
+        "endTime": "09:45",
+    }
+
+
+def _action_errors(resp):
+    body = resp.json()
+    return body.get("errors") or body
+
+
+def test_save_timetable_slot_rejects_duplicate_class_period(env):
+    batch, math, english, room, period_id = _timetable_slot_setup(env)
+    faculty2 = UserFactory(
+        role=Role.FACULTY, tenant=env["tenant"], branch=env["branch"],
+        custom_login_id="FAC-EN", must_change_password=False,
+    )
+    first = _post(env, {"action": "save_timetable_slot", "payload": {
+        **_slot_payload(batch.id, math.id, env["faculty"].id, room.id),
+        "academicPeriodId": period_id,
+    }})
+    assert first.status_code == 201, first.content
+
+    second = _post(env, {"action": "save_timetable_slot", "payload": {
+        **_slot_payload(batch.id, english.id, faculty2.id, room.id),
+        "academicPeriodId": period_id,
+    }})
+    assert second.status_code == 400, second.content
+    errors = _action_errors(second)
+    assert "slot" in errors
+
+
+def test_save_timetable_slot_room_clash_returns_409(env):
+    batch, math, english, room, period_id = _timetable_slot_setup(env)
+    batch2 = BatchFactory(course__department__branch=env["branch"], academic_year=batch.academic_year)
+    faculty2 = UserFactory(
+        role=Role.FACULTY, tenant=env["tenant"], branch=env["branch"],
+        custom_login_id="FAC-RM", must_change_password=False,
+    )
+    first = _post(env, {"action": "save_timetable_slot", "payload": {
+        **_slot_payload(batch.id, math.id, env["faculty"].id, room.id),
+        "academicPeriodId": period_id,
+    }})
+    assert first.status_code == 201, first.content
+
+    clash = _post(env, {"action": "save_timetable_slot", "payload": {
+        **_slot_payload(batch2.id, english.id, faculty2.id, room.id),
+        "academicPeriodId": period_id,
+    }})
+    assert clash.status_code == 409, clash.content
+    errors = _action_errors(clash)
+    assert errors.get("clashes") or errors.get("error")
+
+
 def test_review_queue_flags_unassigned_faculty(env):
     entry = _timetable_entry(env)
     entry.faculty = None

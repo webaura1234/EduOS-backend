@@ -9,8 +9,17 @@ from apps.academics.queries import holiday as hol_q
 
 @transaction.atomic
 def create_holiday(branch_id, *, date, name, holiday_type, applies_to=None, user=None):
-    if hol_q.holiday_date_exists(branch_id, date):
-        raise ValidationError({"date": "A holiday already exists on this date."})
+    existing = hol_q.get_holiday_by_date(branch_id, date)
+    if existing is not None:
+        if existing.is_active:
+            raise ValidationError({"date": "A holiday already exists on this date."})
+        return hol_q.restore_holiday(
+            existing,
+            name=name,
+            holiday_type=holiday_type,
+            applies_to=applies_to,
+            user=user,
+        )
     return hol_q.create_holiday(
         branch_id, date=date, name=name, holiday_type=holiday_type,
         applies_to=applies_to, user=user,
@@ -21,8 +30,11 @@ def create_holiday(branch_id, *, date, name, holiday_type, applies_to=None, user
 def update_holiday(holiday, *, fields: dict, user=None):
     check_version(holiday, fields.pop("version", None))
     date = fields.get("date", holiday.date)
-    if hol_q.holiday_date_exists(holiday.branch_id, date, exclude_id=holiday.pk):
-        raise ValidationError({"date": "A holiday already exists on this date."})
+    conflict = hol_q.get_holiday_by_date(holiday.branch_id, date)
+    if conflict and conflict.pk != holiday.pk:
+        if conflict.is_active:
+            raise ValidationError({"date": "A holiday already exists on this date."})
+        conflict.delete()
     return hol_q.update_holiday(holiday, fields, user=user)
 
 

@@ -1,5 +1,7 @@
 """Shared helpers for academics interactors and views."""
 
+import datetime
+
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.accounts.models.user import Role, User
@@ -57,3 +59,23 @@ def require_faculty(tenant_id, faculty_id, field_name: str = "facultyId") -> Use
     if user is None:
         raise ValidationError({field_name: "Faculty user not found in your institution."})
     return user
+
+
+def date_to_iso_weekday(d: datetime.date) -> int:
+    """Return ISO weekday for a calendar date (Mon=1 … Sun=7)."""
+    return d.isoweekday()
+
+
+def js_day_to_iso(js_day: int) -> int:
+    """Convert JS getDay() (Sun=0 … Sat=6) to ISO (Mon=1 … Sun=7)."""
+    return 7 if js_day == 0 else js_day
+
+
+def iso_to_js_day(iso_day: int) -> int:
+    """Convert ISO weekday (Mon=1 … Sun=7) to JS getDay() (Sun=0 … Sat=6)."""
+    return 0 if iso_day == 7 else iso_day
+
+
+def entry_matches_date(entry_day_of_week: int, on_date: datetime.date) -> bool:
+    """True when a timetable entry's day_of_week matches the calendar date."""
+    return int(entry_day_of_week) == date_to_iso_weekday(on_date)

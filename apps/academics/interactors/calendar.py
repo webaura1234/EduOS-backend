@@ -108,4 +108,10 @@ def update_academic_period(period, year, *, fields: dict, user=None):
 @transaction.atomic
 def delete_academic_period(period, year, user=None):
     _ensure_not_frozen(year)
+    from apps.academics.models import BatchSubject, Timetable
+
+    if BatchSubject.objects.filter(academic_period_id=period.pk, is_active=True).exists():
+        raise ValidationError("Cannot delete a period that has curriculum offerings.")
+    if Timetable.objects.filter(academic_period_id=period.pk, is_active=True).exists():
+        raise ValidationError("Cannot delete a period that has timetables.")
     return cal_q.soft_delete_period(period, user=user)

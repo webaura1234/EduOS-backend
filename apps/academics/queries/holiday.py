@@ -22,10 +22,26 @@ def get_holiday(branch_id, holiday_id) -> Holiday | None:
 
 
 def holiday_date_exists(branch_id, date, exclude_id=None) -> bool:
+    """True when an active holiday already occupies this date."""
     qs = Holiday.objects.filter(branch_id=branch_id, date=date, is_active=True)
     if exclude_id:
         qs = qs.exclude(pk=exclude_id)
     return qs.exists()
+
+
+def holiday_date_taken(branch_id, date, exclude_id=None) -> bool:
+    """True when any row (including soft-deleted) uses this branch+date."""
+    qs = Holiday.objects.filter(branch_id=branch_id, date=date)
+    if exclude_id:
+        qs = qs.exclude(pk=exclude_id)
+    return qs.exists()
+
+
+def get_holiday_by_date(branch_id, date) -> Holiday | None:
+    try:
+        return Holiday.objects.get(branch_id=branch_id, date=date)
+    except (Holiday.DoesNotExist, ValueError, TypeError):
+        return None
 
 
 def is_holiday(branch_id, date: datetime.date) -> bool:
@@ -59,4 +75,27 @@ def soft_delete_holiday(holiday: Holiday, user=None) -> Holiday:
     holiday.soft_delete(user)
     holiday.version += 1
     holiday.save(update_fields=["version", "updated_at"])
+    return holiday
+
+
+def restore_holiday(
+    holiday: Holiday,
+    *,
+    name: str,
+    holiday_type: str,
+    applies_to=None,
+    user=None,
+) -> Holiday:
+    """Re-activate a soft-deleted holiday on the same date (unique constraint)."""
+    holiday.is_active = True
+    holiday.name = name
+    holiday.holiday_type = holiday_type
+    if applies_to is not None:
+        holiday.applies_to = applies_to
+    holiday.version += 1
+    if user:
+        holiday.updated_by = user
+    holiday.save(
+        update_fields=["is_active", "name", "holiday_type", "applies_to", "version", "updated_by", "updated_at"],
+    )
     return holiday

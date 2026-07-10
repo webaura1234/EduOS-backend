@@ -112,6 +112,17 @@ def get_period(year_id, period_id) -> AcademicPeriod | None:
         return None
 
 
+def get_period_for_branch(branch_id, period_id) -> AcademicPeriod | None:
+    try:
+        return AcademicPeriod.objects.select_related("academic_year").get(
+            academic_year__branch_id=branch_id,
+            pk=period_id,
+            is_active=True,
+        )
+    except (AcademicPeriod.DoesNotExist, ValueError, TypeError):
+        return None
+
+
 def period_sequence_exists(year_id, sequence, exclude_id=None) -> bool:
     qs = AcademicPeriod.objects.filter(academic_year_id=year_id, sequence=sequence, is_active=True)
     if exclude_id:

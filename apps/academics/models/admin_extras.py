@@ -102,6 +102,7 @@ class CalendarChangeType(models.TextChoices):
     WORKING_DAYS = "working_days", "Working days"
     PERIOD = "period", "Period"
     HOLIDAY = "holiday", "Holiday"
+    REVIEW_DISMISSED = "review_dismissed", "Review dismissed"
 
 
 class CalendarChange(BaseModel):
@@ -110,7 +111,7 @@ class CalendarChange(BaseModel):
     branch = models.ForeignKey(
         "organizations.Branch", on_delete=models.CASCADE, related_name="calendar_changes"
     )
-    change_type = models.CharField(max_length=15, choices=CalendarChangeType.choices)
+    change_type = models.CharField(max_length=20, choices=CalendarChangeType.choices)
     description = models.TextField(blank=True, default="")
     effective_date = models.DateField()
     attendance_frozen_through = models.DateField(null=True, blank=True)
@@ -171,3 +172,25 @@ class SyllabusUnitProgress(BaseModel):
 
     def __str__(self):
         return f"SyllabusUnitProgress({self.batch_id}, {self.unit_id})"
+
+
+class AdminReviewDismissal(BaseModel):
+    """Admin-acknowledged review queue item (derived issues may still exist)."""
+
+    branch = models.ForeignKey(
+        "organizations.Branch", on_delete=models.CASCADE, related_name="review_dismissals",
+    )
+    review_id = models.CharField(max_length=64)
+
+    class Meta:
+        db_table = "academics_admin_review_dismissal"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["branch", "review_id"],
+                name="academics_review_dismissal_branch_review_uniq",
+            ),
+        ]
+        indexes = [models.Index(fields=["branch", "review_id"])]
+
+    def __str__(self):
+        return f"AdminReviewDismissal({self.review_id})"

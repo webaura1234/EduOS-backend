@@ -1,6 +1,8 @@
 """Views — Holiday calendar."""
 
+from django.db import IntegrityError
 from rest_framework import status
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -34,11 +36,14 @@ class HolidayListCreateView(APIView):
         serializer = CreateHolidaySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        holiday = hol_i.create_holiday(
-            branch.pk, date=data["date"], name=data["name"],
-            holiday_type=data.get("holidayType", "public"),
-            applies_to=data.get("appliesTo"), user=request.user,
-        )
+        try:
+            holiday = hol_i.create_holiday(
+                branch.pk, date=data["date"], name=data["name"],
+                holiday_type=data.get("holidayType", "public"),
+                applies_to=data.get("appliesTo"), user=request.user,
+            )
+        except IntegrityError:
+            raise ValidationError({"date": "A holiday already exists on this date."})
         return Response({"holiday": HolidaySerializer(holiday).data}, status=status.HTTP_201_CREATED)
 
 

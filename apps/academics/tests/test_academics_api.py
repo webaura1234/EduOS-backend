@@ -147,6 +147,29 @@ def test_holiday_create(client):
     assert h["name"] == "Independence Day"
 
 
+def test_holiday_recreate_after_soft_delete(client):
+    created = _create(client, "holidays",
+                      {"date": "2026-07-06", "name": "Old Holiday", "holidayType": "public"}, "holiday")
+    deleted = client.delete(reverse("academics:holiday-detail", kwargs={"holiday_id": created["id"]}))
+    assert deleted.status_code == 204
+
+    restored = _create(client, "holidays",
+                       {"date": "2026-07-06", "name": "New Holiday", "holidayType": "half_day"}, "holiday")
+    assert restored["id"] == created["id"]
+    assert restored["name"] == "New Holiday"
+    assert restored["holidayType"] == "half_day"
+
+
+def test_holiday_duplicate_active_date_returns_400(client):
+    _create(client, "holidays",
+            {"date": "2026-07-07", "name": "First", "holidayType": "public"}, "holiday")
+    dup = client.post(reverse("academics:holidays"),
+                      {"date": "2026-07-07", "name": "Second", "holidayType": "public"}, format="json")
+    assert dup.status_code == 400
+    body = dup.json()
+    assert "date" in body.get("errors", body)
+
+
 def test_permission_denied_for_student(tenant, branch):
     student = UserFactory(role=Role.STUDENT, tenant=tenant, branch=branch,
                           custom_login_id="STU-X", must_change_password=False)

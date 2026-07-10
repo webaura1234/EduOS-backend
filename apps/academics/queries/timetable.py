@@ -178,7 +178,8 @@ def list_active_entries_for_branch(branch_id):
         status=TimetableEntryStatus.ACTIVE,
         is_active=True,
     ).select_related(
-        "timetable__batch__course", "batch_subject__subject", "period_slot",
+        "timetable__batch__course", "timetable__academic_period",
+        "batch_subject__subject", "period_slot",
         "faculty", "room",
     )
 
@@ -201,6 +202,25 @@ def list_faculty_teaching_slots(branch_id, faculty_id):
         )
         .order_by("day_of_week", "period_slot__sequence")
     )
+
+
+def timetable_slot_occupied(
+    timetable_id,
+    *,
+    day_of_week,
+    period_slot_id,
+    exclude_entry_id=None,
+) -> bool:
+    qs = TimetableEntry.objects.filter(
+        timetable_id=timetable_id,
+        day_of_week=day_of_week,
+        period_slot_id=period_slot_id,
+        status=TimetableEntryStatus.ACTIVE,
+        is_active=True,
+    )
+    if exclude_entry_id:
+        qs = qs.exclude(pk=exclude_entry_id)
+    return qs.exists()
 
 
 def find_clashing_entries(
@@ -282,3 +302,29 @@ def soft_delete_timetable_entries_for_branch_year(branch_id, academic_year_id, u
         timetable__batch__course__department__branch_id=branch_id,
         is_active=True,
     ).update(is_active=False)
+
+
+def propagate_faculty_to_entries(
+    branch_id,
+    *,
+    batch_subject_id,
+    faculty_id,
+    user=None,
+) -> int:
+    """Sync staffing assignment to active timetable entries for a batch subject."""
+    entries = TimetableEntry.objects.filter(
+        timetable__batch__course__department__branch_id=branch_id,
+        batch_subject_id=batch_subject_id,
+        is_active=True,
+        status=TimetableEntryStatus.ACTIVE,
+    )
+    count = 0
+    for entry in entries:
+        if entry.faculty_id != faculty_id:
+            entry.faculty_id = faculty_id
+            entry.version += 1
+            if user:
+                entry.updated_by = user
+            entry.save(update_fields=["faculty_id", "version", "updated_by", "updated_at"])
+            count += 1
+    return count

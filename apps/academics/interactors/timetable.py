@@ -93,6 +93,18 @@ def _validate_clashes(branch_id, *, day_of_week, period_slot_id, faculty_id, roo
             raise ValidationError({"clashes": [c.to_dict() for c in clashes]})
 
 
+def _validate_slot_occupancy(timetable, *, day_of_week, period_slot_id, exclude_entry_id=None):
+    if tt_q.timetable_slot_occupied(
+        timetable.pk,
+        day_of_week=day_of_week,
+        period_slot_id=period_slot_id,
+        exclude_entry_id=exclude_entry_id,
+    ):
+        raise ValidationError({
+            "slot": "This class already has a subject scheduled at this day and period. Edit the existing slot instead.",
+        })
+
+
 @transaction.atomic
 def create_period_slot(branch_id, *, name, sequence, start_time, end_time, user=None):
     if tt_q.period_slot_sequence_exists(branch_id, sequence):
@@ -140,6 +152,8 @@ def update_room(room, *, fields: dict, user=None):
 
 @transaction.atomic
 def delete_room(room, user=None):
+    if tt_q.list_active_entries_for_branch(room.branch_id).filter(room_id=room.pk).exists():
+        raise ValidationError("Cannot delete a room that is used in the timetable.")
     return tt_q.soft_delete_room(room, user=user)
 
 
@@ -163,6 +177,11 @@ def create_timetable_entry(
         if not tt_q.get_room(branch_id, room_id):
             raise ValidationError({"roomId": "Room not found."})
     if status == TimetableEntryStatus.ACTIVE:
+        _validate_slot_occupancy(
+            timetable,
+            day_of_week=day_of_week,
+            period_slot_id=period_slot_id,
+        )
         _validate_clashes(
             branch_id, day_of_week=day_of_week, period_slot_id=period_slot_id,
             faculty_id=faculty_id, room_id=room_id,
@@ -191,6 +210,12 @@ def update_timetable_entry(branch_id, tenant_id, entry, *, fields: dict, user=No
         if not tt_q.get_room(branch_id, fields["room_id"]):
             raise ValidationError({"roomId": "Room not found."})
     if status == TimetableEntryStatus.ACTIVE:
+        _validate_slot_occupancy(
+            entry.timetable,
+            day_of_week=day,
+            period_slot_id=slot_id,
+            exclude_entry_id=entry.pk,
+        )
         _validate_clashes(
             branch_id, day_of_week=day, period_slot_id=slot_id,
             faculty_id=faculty_id, room_id=room_id, exclude_entry_id=entry.pk,

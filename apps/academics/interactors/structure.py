@@ -78,6 +78,13 @@ def update_course(course, *, fields: dict, user=None):
 
 @transaction.atomic
 def delete_course(course, user=None):
+    branch_id = course.department.branch_id
+    if struct_q.list_batches(branch_id, course_id=course.pk).exists():
+        raise ValidationError("Cannot delete a grade that still has active sections.")
+    from apps.academics.queries import curriculum as curr_q
+
+    if curr_q.list_subjects(branch_id, course_id=course.pk).exists():
+        raise ValidationError("Cannot delete a grade that still has subjects.")
     return struct_q.soft_delete_course(course, user=user)
 
 

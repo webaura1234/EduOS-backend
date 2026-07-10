@@ -80,6 +80,7 @@ class HolidayType(models.TextChoices):
     PUBLIC = "public", "Public Holiday"
     SCHOOL = "school", "School Holiday"
     EXAM = "exam", "Exam Day"
+    HALF_DAY = "half_day", "Half Day"
     OPTIONAL = "optional", "Optional Holiday"
 
 
