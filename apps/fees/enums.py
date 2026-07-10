@@ -41,13 +41,38 @@ class RefundStatus(models.TextChoices):
     FAILED = "failed", "Failed"
 
 
-class ConcessionStatus(models.TextChoices):
-    PENDING = "pending", "Pending"
-    APPROVED = "approved", "Approved"
-    REJECTED = "rejected", "Rejected"
+class StudentConcessionStatus(models.TextChoices):
+    ACTIVE = "active", "Active"
+    REVOKED = "revoked", "Revoked"
+    EXPIRED = "expired", "Expired"
+
+
+# Backward-compatible alias during migration period.
+ConcessionStatus = StudentConcessionStatus
 
 
 class CreditNoteStatus(models.TextChoices):
     PENDING = "pending", "Pending"
     APPROVED = "approved", "Approved"
     REJECTED = "rejected", "Rejected"
+
+
+class FeeStructureStatus(models.TextChoices):
+    DRAFT = "draft", "Draft"
+    PUBLISHED = "published", "Published"
+    ARCHIVED = "archived", "Archived"
+
+
+class FeeHeadChargeType(models.TextChoices):
+    MANDATORY = "mandatory", "Mandatory"
+    OPTIONAL = "optional", "Optional"
+
+
+class FeeHeadBillingType(models.TextChoices):
+    ONE_TIME = "one_time", "One-time"
+    RECURRING = "recurring", "Recurring"
+
+
+class FeeHeadRefundType(models.TextChoices):
+    REFUNDABLE = "refundable", "Refundable"
+    NON_REFUNDABLE = "non_refundable", "Non-refundable"

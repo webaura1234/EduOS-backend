@@ -1,7 +1,9 @@
 from .concession import (
+    BulkApplyStudentConcessionSerializer,
     ConcessionRequestSerializer,
     ConcessionRuleSerializer,
     CreditNoteSerializer,
+    StudentConcessionSerializer,
 )
 from .fee_structure import FeeStructureSerializer, StudentFeeAssignmentSerializer
 from .invoice import FeeInvoiceLineSerializer, FeeInvoiceSerializer, InstallmentSerializer
@@ -19,6 +21,8 @@ __all__ = [
     "ReceiptSerializer",
     "RefundSerializer",
     "ConcessionRuleSerializer",
+    "StudentConcessionSerializer",
     "ConcessionRequestSerializer",
+    "BulkApplyStudentConcessionSerializer",
     "CreditNoteSerializer",
 ]

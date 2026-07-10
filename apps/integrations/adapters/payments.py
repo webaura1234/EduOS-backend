@@ -30,6 +30,13 @@ class SandboxGateway:
         # In sandbox, any referenced payment is treated as captured.
         return {"id": payment_id, "status": "captured"}
 
+    def verify_checkout_signature(self, *, order_id: str, payment_id: str, signature: str) -> bool:
+        if signature == "sandbox_sig_placeholder":
+            return True
+        secret = getattr(settings, "RAZORPAY_KEY_SECRET", "") or settings.RAZORPAY_WEBHOOK_SECRET
+        expected = _sign(f"{order_id}|{payment_id}".encode(), secret)
+        return hmac.compare_digest(expected, signature or "")
+
     def verify_webhook_signature(self, body: bytes, signature: str) -> bool:
         expected = _sign(body, settings.RAZORPAY_WEBHOOK_SECRET)
         return hmac.compare_digest(expected, signature or "")
@@ -57,6 +64,19 @@ class RazorpayGateway:
         import razorpay
         client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
         return client.payment.fetch(payment_id)
+
+    def verify_checkout_signature(self, *, order_id: str, payment_id: str, signature: str) -> bool:
+        import razorpay
+        client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+        try:
+            client.utility.verify_payment_signature({
+                "razorpay_order_id": order_id,
+                "razorpay_payment_id": payment_id,
+                "razorpay_signature": signature,
+            })
+            return True
+        except razorpay.errors.SignatureVerificationError:
+            return False
 
     def verify_webhook_signature(self, body: bytes, signature: str) -> bool:
         expected = _sign(body, settings.RAZORPAY_WEBHOOK_SECRET)

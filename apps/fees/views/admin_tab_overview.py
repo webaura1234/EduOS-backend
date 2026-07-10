@@ -20,21 +20,33 @@ from apps.fees.views.admin_overview import (
     _reconciliation_list,
     _refund,
     _structure,
+    _student_concession,
     _webhook,
 )
 
 
 def _fees_meta(branch):
+    from apps.admissions.queries.enrollment import enrollments_in_batch
+
     academic_years = list(
         AcademicYear.objects.filter(branch_id=branch.pk, is_active=True).order_by("-start_date")
     )
     current_ay = next((y for y in academic_years if y.is_current), academic_years[0] if academic_years else None)
     from apps.fees.helpers.payment_dict import batch_label as _batch_label
 
+    batches = []
+    for b in list_batches(branch.pk):
+        batches.append({
+            "id": str(b.id),
+            "label": _batch_label(b),
+            "studentCount": enrollments_in_batch(b.id).count(),
+        })
+
     return {
         "institutionType": branch.tenant.institution_type,
-        "batches": [{"id": str(b.id), "label": _batch_label(b)} for b in list_batches(branch.pk)],
+        "batches": batches,
         "currentAcademicYearId": str(current_ay.id) if current_ay else None,
+        "currentAcademicYearLabel": current_ay.name if current_ay else None,
     }
 
 
@@ -53,13 +65,26 @@ class AdminFeesConcessionsTabView(APIView):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
 
     def get(self, request) -> Response:
+        from apps.fees.enums import StudentConcessionStatus
+
         branch = resolve_branch(request)
+        rules = list(conc_q.list_concession_rules(branch.pk))
+        concessions = list(conc_q.list_student_concessions(branch.pk))
+        active = [c for c in concessions if c.status == StudentConcessionStatus.ACTIVE]
+        total_granted = sum(c.amount_paise for c in active)
+        profile_ids = {
+            c.student.student_profile_id for c in active if c.student_id
+        }
         return Response({
             **_fees_meta(branch),
-            "concessionRules": [_concession_rule(r) for r in conc_q.list_concession_rules(branch.pk)],
-            "concessionRequests": [
-                _concession_request(r) for r in conc_q.list_concession_requests(branch.pk)
-            ],
+            "concessionRules": [_concession_rule(r) for r in rules],
+            "studentConcessions": [_student_concession(c) for c in concessions],
+            "concessionRequests": [_concession_request(c) for c in concessions],
+            "stats": {
+                "totalActive": len(active),
+                "totalGrantedPaise": total_granted,
+                "studentsCovered": len(profile_ids),
+            },
         })
 
 
@@ -91,8 +116,10 @@ class AdminFeesInstallmentsTabView(APIView):
 
     def get(self, request) -> Response:
         branch = resolve_branch(request)
+        ledger, _collection = _ledger_and_collection(branch)
         return Response({
             **_fees_meta(branch),
+            "ledger": ledger,
             "installmentSchedulesByStudent": _installment_schedules(branch),
         })
 

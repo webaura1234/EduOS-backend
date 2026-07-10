@@ -4,12 +4,12 @@ import datetime
 from django.db import transaction
 
 from apps.accounts.models.guardian import StudentGuardianLink
-from apps.fees.enums import ConcessionStatus, InvoiceStatus
+from apps.fees.enums import InvoiceStatus, StudentConcessionStatus
 from apps.fees.models import (
-    ConcessionRequest,
     FeeInvoice,
     FeeInvoiceLine,
     Installment,
+    StudentConcession,
     StudentFeeAssignment,
 )
 from apps.fees.helpers.concession import discount_line_for_request
@@ -63,25 +63,24 @@ def generate_invoices_for_batch(*, branch, batch_id, academic_year, fee_structur
         )
     }
 
-    # 2. Approved concession requests, only for students who still need a new
-    # assignment — in one query instead of one per missing student.
+    # 2. Active concessions for students who still need a new assignment.
     missing_ids = [sid for sid in student_ids if sid not in assignment_by_student]
-    approved_by_student: dict = {}
+    active_by_student: dict = {}
     if missing_ids:
-        for req in ConcessionRequest.objects.filter(
-            student_id__in=missing_ids, status=ConcessionStatus.APPROVED, is_active=True,
+        for req in StudentConcession.objects.filter(
+            student_id__in=missing_ids, status=StudentConcessionStatus.ACTIVE, is_active=True,
         ).select_related("rule"):
-            approved_by_student.setdefault(req.student_id, []).append(req)
+            active_by_student.setdefault(req.student_id, []).append(req)
 
     # 3. Bulk-create the missing assignments.
     components = fee_structure.components or []
     base_paise = sum(int(c.get("amount_paise", 0)) for c in components)
     new_assignments = []
     for sid in missing_ids:
-        approved = approved_by_student.get(sid, [])
+        active = active_by_student.get(sid, [])
         discount_lines = [
             discount_line_for_request(req, base_paise=base_paise)
-            for req in approved
+            for req in active
             if discount_line_for_request(req, base_paise=base_paise)["amount_paise"] > 0
         ]
         new_assignments.append(StudentFeeAssignment(
@@ -93,6 +92,20 @@ def generate_invoices_for_batch(*, branch, batch_id, academic_year, fee_structur
         StudentFeeAssignment.objects.bulk_create(new_assignments)
         for a in new_assignments:
             assignment_by_student[a.student_id] = a
+
+    # 3b. Refresh discount_lines on existing assignments only when students have active concessions.
+    students_with_concessions = set(
+        StudentConcession.objects.filter(
+            student_id__in=student_ids,
+            status=StudentConcessionStatus.ACTIVE,
+            is_active=True,
+        ).values_list("student_id", flat=True)
+    )
+    if students_with_concessions:
+        from apps.fees.services.concession_sync import rebuild_assignment_discounts
+        for assignment in assignment_by_student.values():
+            if assignment.student_id in students_with_concessions:
+                rebuild_assignment_discounts(assignment, user=user)
 
     # 4. Which assignments already have an invoice, in one query.
     assignment_ids = [a.id for a in assignment_by_student.values()]

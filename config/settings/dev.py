@@ -89,3 +89,11 @@ CELERY_TASK_EAGER_PROPAGATES = True
 # ──────────────────────────────────────────────
 # Debug toolbar is disabled in dev by default to prevent missing 'djdt' namespace url conflicts.
 pass
+
+# ──────────────────────────────────────────────
+# Rate limits — SPA dev loads many parallel BFF routes; base 100/min is too low.
+# ──────────────────────────────────────────────
+REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {  # noqa: F405
+    "tenant": "1000/minute",
+    "auth": "60/minute",
+}

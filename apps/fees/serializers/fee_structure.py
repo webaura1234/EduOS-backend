@@ -11,6 +11,7 @@ class FeeStructureSerializer(serializers.ModelSerializer):
     totalPaise = serializers.IntegerField(source="total_paise", read_only=True)
     createdAt = serializers.DateTimeField(source="created_at", read_only=True)
     updatedAt = serializers.DateTimeField(source="updated_at", read_only=True)
+    publishedAt = serializers.DateTimeField(source="published_at", read_only=True)
 
     class Meta:
         model = FeeStructure
@@ -21,11 +22,13 @@ class FeeStructureSerializer(serializers.ModelSerializer):
             "academicYear",
             "components",
             "version",
+            "status",
             "totalPaise",
             "createdAt",
             "updatedAt",
+            "publishedAt",
         ]
-        read_only_fields = ["id", "version", "createdAt", "updatedAt"]
+        read_only_fields = ["id", "version", "createdAt", "updatedAt", "publishedAt"]
 
 
 class StudentFeeAssignmentSerializer(serializers.ModelSerializer):

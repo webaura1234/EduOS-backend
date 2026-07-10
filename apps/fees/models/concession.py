@@ -3,7 +3,7 @@
 from django.db import models
 
 from apps.core.models import BaseModel
-from apps.fees.enums import ConcessionStatus, CreditNoteStatus
+from apps.fees.enums import CreditNoteStatus, StudentConcessionStatus
 
 
 class ConcessionRule(BaseModel):
@@ -24,16 +24,28 @@ class ConcessionRule(BaseModel):
         return self.name
 
 
-class ConcessionRequest(BaseModel):
-    """A concession applied to a student, pending admin approval (F-137)."""
+class StudentConcession(BaseModel):
+    """A concession applied directly to a student by an administrator (F-137)."""
 
-    branch = models.ForeignKey("organizations.Branch", on_delete=models.CASCADE, related_name="concession_requests")
-    student = models.ForeignKey("admissions.StudentEnrollment", on_delete=models.CASCADE,
-                                related_name="concession_requests")
-    rule = models.ForeignKey(ConcessionRule, on_delete=models.SET_NULL, null=True, blank=True,
-                             related_name="requests")
+    branch = models.ForeignKey("organizations.Branch", on_delete=models.CASCADE, related_name="student_concessions")
+    student = models.ForeignKey(
+        "admissions.StudentEnrollment",
+        on_delete=models.CASCADE,
+        related_name="student_concessions",
+    )
+    rule = models.ForeignKey(
+        ConcessionRule,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="student_concessions",
+    )
     amount_paise = models.BigIntegerField()
-    status = models.CharField(max_length=10, choices=ConcessionStatus.choices, default=ConcessionStatus.PENDING)
+    status = models.CharField(
+        max_length=10,
+        choices=StudentConcessionStatus.choices,
+        default=StudentConcessionStatus.ACTIVE,
+    )
     requested_by = models.ForeignKey("accounts.User", on_delete=models.SET_NULL, null=True, related_name="+")
     approver = models.ForeignKey("accounts.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     decided_at = models.DateTimeField(null=True, blank=True)
@@ -41,12 +53,16 @@ class ConcessionRequest(BaseModel):
 
     class Meta:
         db_table = "fees_concession_request"
-        verbose_name = "Concession Request"
-        verbose_name_plural = "Concession Requests"
+        verbose_name = "Student Concession"
+        verbose_name_plural = "Student Concessions"
         indexes = [models.Index(fields=["branch", "status"])]
 
     def __str__(self):
         return f"Concession {self.amount_paise} for {self.student_id} ({self.status})"
+
+
+# Backward-compatible alias — discount_lines still use request_id key.
+ConcessionRequest = StudentConcession
 
 
 class CreditNote(BaseModel):

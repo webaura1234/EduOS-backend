@@ -31,6 +31,18 @@ _REFUND_STATUS = {"requested": "pending", "approved": "approved", "rejected": "r
                   "processed": "processed", "completed": "processed"}
 
 
+def _installment_label(assignment, sequence: int) -> str:
+    if not assignment:
+        return f"Installment {sequence}"
+    labels = []
+    for c in assignment.structure_snapshot or []:
+        if int(c.get("installment_no", 1)) == sequence:
+            lbl = c.get("label") or c.get("name")
+            if lbl:
+                labels.append(str(lbl))
+    return labels[0] if labels else f"Installment {sequence}"
+
+
 def _derive_installments_from_components(components: list) -> list:
     groups: dict[int, dict] = {}
     for c in components or []:
@@ -59,41 +71,83 @@ def _derive_installments_from_components(components: list) -> list:
 
 
 def _structure(s) -> dict:
+    from apps.admissions.queries.enrollment import enrollments_in_batch
+    from apps.fees.interactors.publish import structure_impact
+
     components = []
+    head_names = set()
     for c in (s.components or []):
         paise = c.get("amountPaise", c.get("amount_paise"))
+        label = c.get("name", c.get("label", ""))
+        head_names.add(label)
         components.append({
             "id": str(c.get("id", "")),
-            "name": c.get("name", c.get("label", "")),
+            "name": label,
             "kind": c.get("kind", "other"),
             "amount": _rupees(paise) if paise is not None else c.get("amount", 0),
             "amountPaise": paise,
         })
+    installments = _derive_installments_from_components(s.components or [])
+    annual_paise = sum(int(c.get("amount_paise", c.get("amountPaise", 0)) or 0) for c in (s.components or []))
+    impact = structure_impact(s)
+    student_count = enrollments_in_batch(s.batch_id).count() if s.batch_id else 0
+    created_by = ""
+    if s.created_by_id:
+        try:
+            created_by = s.created_by.full_name
+        except Exception:  # noqa: BLE001
+            created_by = ""
+    published_by = ""
+    if s.published_by_id:
+        try:
+            published_by = s.published_by.full_name
+        except Exception:  # noqa: BLE001
+            published_by = ""
+
     return {
         "id": str(s.id),
         "name": s.name,
         "appliesToLabel": _batch_label(s.batch) if s.batch_id else "",
         "batchId": str(s.batch_id) if s.batch_id else None,
         "academicYearId": str(s.academic_year_id) if s.academic_year_id else None,
+        "academicYearLabel": s.academic_year.name if getattr(s, "academic_year", None) else None,
         "components": components,
-        "installments": _derive_installments_from_components(s.components or []),
+        "installments": installments,
         "createdAt": s.created_at.isoformat(),
+        "updatedAt": s.updated_at.isoformat() if s.updated_at else s.created_at.isoformat(),
         "version": getattr(s, "version", 1),
+        "status": getattr(s, "status", "published"),
+        "publishedAt": s.published_at.isoformat() if getattr(s, "published_at", None) else None,
+        "publishedByName": published_by or None,
+        "createdByName": created_by or None,
+        "studentCount": student_count,
+        "invoiceCount": impact["invoiceCount"],
+        "assignmentCount": impact["assignmentCount"],
+        "isLocked": impact["isLocked"],
+        "annualFee": _rupees(annual_paise),
+        "feeHeadCount": len(head_names),
+        "matrixComponents": s.components or [],
     }
 
 
 def _concession_rule(r) -> dict:
+    criteria = r.criteria or {}
     return {
         "id": str(r.id),
         "name": r.name,
-        "description": "",
+        "description": criteria.get("description", ""),
         "percentOff": r.percent or 0,
-        "requiresApproval": True,
+        "amountPaise": r.amount_paise,
         "active": r.is_active,
+        "studentsUsing": getattr(r, "students_using", 0) or 0,
+        "totalGrantedPaise": getattr(r, "total_granted_paise", 0) or 0,
+        "lastAppliedAt": (
+            r.last_applied_at.isoformat() if getattr(r, "last_applied_at", None) else None
+        ),
     }
 
 
-def _concession_request(req) -> dict:
+def _student_concession(req) -> dict:
     return {
         "id": str(req.id),
         "studentId": str(req.student.student_profile_id) if req.student_id else "",
@@ -101,11 +155,22 @@ def _concession_request(req) -> dict:
         "classLabel": _class_label(req.student),
         "ruleId": str(req.rule_id) if req.rule_id else "",
         "ruleName": req.rule.name if req.rule_id else "",
-        "requestedAt": req.created_at.isoformat(),
-        "status": req.status if req.status in ("pending", "approved", "rejected") else "pending",
-        "reviewedAt": req.decided_at.isoformat() if req.decided_at else None,
-        "reviewNote": req.note or None,
+        "amountPaise": req.amount_paise,
+        "amount": _rupees(req.amount_paise),
+        "appliedAt": req.decided_at.isoformat() if req.decided_at else req.created_at.isoformat(),
+        "appliedBy": str(req.approver_id) if req.approver_id else None,
+        "appliedByName": (
+            req.approver.full_name or req.approver.email if req.approver else None
+        ),
+        "reason": req.note or "",
+        "status": req.status if req.status in ("active", "revoked", "expired") else "revoked",
+        "createdAt": req.created_at.isoformat(),
     }
+
+
+def _concession_request(req) -> dict:
+    """Deprecated alias for admin payload compatibility."""
+    return _student_concession(req)
 
 
 def _credit_note(c) -> dict:
@@ -158,7 +223,7 @@ def _webhook(w) -> dict:
 def _installment_schedules(branch) -> dict:
     today = datetime.date.today()
     by_student: dict[str, list] = {}
-    invoices = inv_q.list_invoices(branch.pk).prefetch_related("installments")
+    invoices = inv_q.list_invoices(branch.pk).prefetch_related("installments", "assignment")
     for inv in invoices:
         enrollment = inv.student
         sid = str(enrollment.student_profile_id) if enrollment else None
@@ -177,7 +242,7 @@ def _installment_schedules(branch) -> dict:
                 status = "overdue"
             rows.append({
                 "sequence": inst.sequence,
-                "label": f"Installment {inst.sequence}",
+                "label": _installment_label(inv.assignment, inst.sequence),
                 "dueDate": due,
                 "amount": _rupees(inst.amount_paise),
                 "paid": _rupees(inst.paid_paise),
@@ -210,7 +275,7 @@ def _ledger_and_collection(branch):
     by_student: dict[str, dict] = {}
     outstanding_total = 0
 
-    for inv in inv_q.list_invoices(branch.pk):
+    for inv in inv_q.list_invoices(branch.pk).prefetch_related("installments"):
         enrollment = inv.student
         sid = str(enrollment.student_profile_id) if enrollment else "—"
         row = by_student.setdefault(sid, {
@@ -225,12 +290,30 @@ def _ledger_and_collection(branch):
         row["_paid_paise"] += inv.paid_paise
         balance = inv.total_paise - inv.paid_paise
         outstanding_total += max(balance, 0)
-        if balance > 0 and inv.due_date:
-            if row["nextDueDate"] is None or inv.due_date.isoformat() < row["nextDueDate"]:
-                row["nextDueDate"] = inv.due_date.isoformat()
-            if inv.due_date < today:
+        if balance > 0:
+            open_inst_dates = [
+                inst.due_date for inst in inv.installments.all()
+                if inst.paid_paise < inst.amount_paise and inst.due_date
+            ]
+            if open_inst_dates:
+                earliest = min(open_inst_dates)
+                if row["nextDueDate"] is None or earliest.isoformat() < row["nextDueDate"]:
+                    row["nextDueDate"] = earliest.isoformat()
+            elif inv.due_date:
+                if row["nextDueDate"] is None or inv.due_date.isoformat() < row["nextDueDate"]:
+                    row["nextDueDate"] = inv.due_date.isoformat()
+            for inst in inv.installments.all():
+                if (
+                    inst.paid_paise < inst.amount_paise
+                    and inst.due_date
+                    and inst.due_date < today
+                ):
+                    row["isOverdue"] = True
+                    row["escalationLevel"] = max(row["escalationLevel"], 1)
+                    break
+            if not row["isOverdue"] and inv.due_date and inv.due_date < today:
                 row["isOverdue"] = True
-                row["escalationLevel"] = 1
+                row["escalationLevel"] = max(row["escalationLevel"], 1)
 
     ledger = []
     overdue_count = 0
@@ -268,18 +351,30 @@ class AdminFeesOverviewView(APIView):
 
         from apps.academics.models import AcademicYear
         from apps.academics.queries.structure import list_batches
+        from apps.admissions.queries.enrollment import enrollments_in_batch
 
         academic_years = list(
             AcademicYear.objects.filter(branch_id=branch.pk, is_active=True).order_by("-start_date")
         )
         current_ay = next((y for y in academic_years if y.is_current), academic_years[0] if academic_years else None)
 
+        batches = []
+        for b in list_batches(branch.pk):
+            batches.append({
+                "id": str(b.id),
+                "label": _batch_label(b),
+                "studentCount": enrollments_in_batch(b.id).count(),
+            })
+
         return Response({
             "institutionType": branch.tenant.institution_type,
             "structures": [_structure(s) for s in struct_q.list_structures(branch.pk)],
             "concessionRules": [_concession_rule(r) for r in conc_q.list_concession_rules(branch.pk)],
+            "studentConcessions": [
+                _student_concession(r) for r in conc_q.list_student_concessions(branch.pk)
+            ],
             "concessionRequests": [
-                _concession_request(r) for r in conc_q.list_concession_requests(branch.pk)
+                _concession_request(r) for r in conc_q.list_student_concessions(branch.pk)
             ],
             "creditNotes": [_credit_note(c) for c in conc_q.list_credit_notes(branch.pk)],
             "refunds": [_refund(r) for r in ref_q.list_refunds(branch.pk)],
@@ -287,8 +382,9 @@ class AdminFeesOverviewView(APIView):
             "ledger": ledger,
             "collection": collection,
             "installmentSchedulesByStudent": _installment_schedules(branch),
-            "batches": [{"id": str(b.id), "label": _batch_label(b)} for b in list_batches(branch.pk)],
+            "batches": batches,
             "currentAcademicYearId": str(current_ay.id) if current_ay else None,
+            "currentAcademicYearLabel": current_ay.name if current_ay else None,
             "creditNoteRequests": [],
             "examFeeInvoices": [],
             "reconciliation": _reconciliation_list(branch),

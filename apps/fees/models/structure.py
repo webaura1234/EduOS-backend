@@ -3,6 +3,7 @@
 from django.db import models
 
 from apps.core.models import BaseModel
+from apps.fees.enums import FeeStructureStatus
 
 
 class FeeStructure(BaseModel):
@@ -23,6 +24,27 @@ class FeeStructure(BaseModel):
                                       related_name="fee_structures")
     name = models.CharField(max_length=150)
     components = models.JSONField(default=list, blank=True)
+    status = models.CharField(
+        max_length=12,
+        choices=FeeStructureStatus.choices,
+        default=FeeStructureStatus.DRAFT,
+        db_index=True,
+    )
+    published_at = models.DateTimeField(null=True, blank=True)
+    published_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="published_fee_structures",
+    )
+    parent_structure = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="child_versions",
+    )
 
     class Meta:
         db_table = "fees_fee_structure"

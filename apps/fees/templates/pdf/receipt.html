@@ -65,10 +65,22 @@
         <td style="text-align:right;">{% widthratio payment.amount_paise 100 1 %}</td>
       </tr>
       {% endfor %}
+      {% if payment.invoice.assignment.discount_lines %}
+      {% for d in payment.invoice.assignment.discount_lines %}
+      <tr>
+        <td>{{ d.label }} (concession)</td>
+        <td style="text-align:right;">− ₹ {% widthratio d.amount_paise 100 1 %}</td>
+      </tr>
+      {% endfor %}
+      {% endif %}
     </tbody>
     <tfoot>
       <tr class="total-row">
-        <td>Amount Paid</td>
+        <td>Invoice total (net)</td>
+        <td style="text-align:right;">₹ {% widthratio payment.invoice.total_paise 100 1 %}</td>
+      </tr>
+      <tr class="total-row">
+        <td>Amount paid (this receipt)</td>
         <td style="text-align:right;">₹ {% widthratio payment.amount_paise 100 1 %}</td>
       </tr>
       <tr>

@@ -4,17 +4,18 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from apps.fees.enums import ConcessionStatus
-from apps.fees.models import ConcessionRequest, ConcessionRule
+from apps.fees.enums import StudentConcessionStatus
+from apps.fees.models import ConcessionRule, StudentConcession
 from apps.fees.queries.concession import (
-    create_concession_request,
     create_concession_rule,
-    get_concession_request_for_update,
+    create_student_concession,
     get_concession_rule,
-    update_concession_request,
+    get_student_concession_for_update,
+    has_active_concession_for_profile,
+    update_concession_rule,
+    update_student_concession,
 )
-from apps.fees.helpers.concession import concession_amount_paise
-from apps.fees.queries.structure import list_assignments_for_student, update_assignment
+from apps.fees.services.concession_sync import assert_concession_modifiable, sync_student_concessions
 
 
 class CreateConcessionRuleInteractor:
@@ -29,6 +30,13 @@ class CreateConcessionRuleInteractor:
         self.user = user
 
     def execute(self) -> ConcessionRule:
+        self._validate()
+        return create_concession_rule(
+            branch=self.branch, name=self.name, amount_paise=self.amount_paise,
+            percent=self.percent, criteria=self.criteria, user=self.user,
+        )
+
+    def _validate(self) -> None:
         if not self.name or not self.name.strip():
             raise ValidationError("Rule name is required.")
         if self.amount_paise is None and self.percent is None:
@@ -40,81 +48,210 @@ class CreateConcessionRuleInteractor:
         if self.amount_paise is not None and self.amount_paise <= 0:
             raise ValidationError("Discount amount must be greater than zero.")
 
-        return create_concession_rule(
-            branch=self.branch, name=self.name, amount_paise=self.amount_paise,
-            percent=self.percent, criteria=self.criteria, user=self.user,
-        )
+
+class UpdateConcessionRuleInteractor:
+    """Updates an existing concession rule through validated interactor."""
+
+    def __init__(self, rule, name=None, amount_paise=None, percent=None, criteria=None, is_active=None, user=None):
+        self.rule = rule
+        self.name = name
+        self.amount_paise = amount_paise
+        self.percent = percent
+        self.criteria = criteria
+        self.is_active = is_active
+        self.user = user
+
+    def execute(self) -> ConcessionRule:
+        fields = {}
+        if self.name is not None:
+            fields["name"] = self.name
+        if self.amount_paise is not None:
+            fields["amount_paise"] = self.amount_paise
+        if self.percent is not None:
+            fields["percent"] = self.percent
+        if self.criteria is not None:
+            fields["criteria"] = self.criteria
+        if self.is_active is not None:
+            fields["is_active"] = self.is_active
+
+        name = fields.get("name", self.rule.name)
+        amount = fields.get("amount_paise", self.rule.amount_paise)
+        percent = fields.get("percent", self.rule.percent)
+        CreateConcessionRuleInteractor(
+            branch=self.rule.branch, name=name, amount_paise=amount, percent=percent,
+        )._validate()
+
+        return update_concession_rule(self.rule, fields, user=self.user)
 
 
-class CreateConcessionRequestInteractor:
-    """Creates a concession request for a student."""
+class ApplyStudentConcessionInteractor:
+    """Applies a concession rule directly to a student."""
 
-    def __init__(self, branch, student, rule_id, amount_paise, requested_by, note=""):
+    def __init__(self, branch, student, rule_id, reason, user):
         self.branch = branch
         self.student = student
         self.rule_id = rule_id
-        self.amount_paise = amount_paise
-        self.requested_by = requested_by
-        self.note = note
-
-    def execute(self) -> ConcessionRequest:
-        rule = None
-        if self.rule_id:
-            rule = get_concession_rule(self.branch.id, self.rule_id)
-            if rule is None:
-                raise ValidationError("Concession rule not found.")
-        if self.amount_paise <= 0:
-            if rule and rule.percent:
-                self.amount_paise = 1  # placeholder; resolved at approval from structure totals
-            else:
-                raise ValidationError("Concession amount must be greater than zero.")
-
-        return create_concession_request(
-            branch=self.branch, student=self.student, rule=rule, amount_paise=self.amount_paise,
-            requested_by=self.requested_by, note=self.note, user=self.requested_by,
-        )
-
-
-class ApproveConcessionRequestInteractor:
-    """Approves/rejects a concession request; on approval appends it to discount_lines."""
-
-    def __init__(self, request_id, status, approver_user):
-        self.request_id = request_id
-        self.status = status
-        self.approver_user = approver_user
+        self.reason = reason
+        self.user = user
 
     @transaction.atomic
-    def execute(self) -> ConcessionRequest:
-        if self.status not in [ConcessionStatus.APPROVED, ConcessionStatus.REJECTED]:
-            raise ValidationError("Invalid concession request status decision.")
+    def execute(self) -> StudentConcession:
+        if not self.reason or not str(self.reason).strip():
+            raise ValidationError("Reason is required.")
 
-        req = get_concession_request_for_update(self.request_id)
-        if not req:
-            raise ValidationError("Concession request not found.")
-        if req.status != ConcessionStatus.PENDING:
-            raise ValidationError("Concession request has already been decided.")
+        rule = get_concession_rule(self.branch.id, self.rule_id)
+        if rule is None:
+            raise ValidationError("Concession rule not found.")
+        if not rule.is_active:
+            raise ValidationError("Concession rule is inactive.")
 
-        update_concession_request(req, {
-            "status": self.status, "approver": self.approver_user, "decided_at": timezone.now(),
-        })
+        profile_id = self.student.student_profile_id
+        if StudentConcession.objects.select_for_update().filter(
+            branch_id=self.branch.id,
+            student__student_profile_id=profile_id,
+            rule_id=rule.id,
+            status=StudentConcessionStatus.ACTIVE,
+            is_active=True,
+        ).exists():
+            raise ValidationError("Student already has an active concession for this rule.")
 
-        if self.status == ConcessionStatus.APPROVED:
-            for assignment in list_assignments_for_student(req.student_id):
-                lines = list(assignment.discount_lines or [])
-                if not any(d.get("request_id") == str(req.id) for d in lines):
-                    components = assignment.structure_snapshot or []
-                    base_paise = sum(int(c.get("amount_paise", 0)) for c in components)
-                    amount = concession_amount_paise(req, base_paise=base_paise)
-                    if amount <= 0 and req.rule and req.rule.percent:
-                        amount = (base_paise * req.rule.percent) // 100
-                    if amount > 0:
-                        lines.append({
-                            "request_id": str(req.id),
-                            "label": req.rule.name if req.rule else "Concession",
-                            "amount_paise": amount,
-                        })
-                        update_assignment(assignment, {"discount_lines": lines})
-                        if req.amount_paise != amount:
-                            update_concession_request(req, {"amount_paise": amount})
+        assert_concession_modifiable(self.student.id)
 
-        return req
+        amount_paise = rule.amount_paise if rule.amount_paise else 1
+        now = timezone.now()
+        concession = create_student_concession(
+            branch=self.branch,
+            student=self.student,
+            rule=rule,
+            amount_paise=amount_paise,
+            requested_by=self.user,
+            approver=self.user,
+            decided_at=now,
+            note=self.reason.strip(),
+            status=StudentConcessionStatus.ACTIVE,
+            user=self.user,
+        )
+        sync_student_concessions(self.student.id, user=self.user)
+        return concession
+
+
+class BulkApplyStudentConcessionInteractor:
+    """Applies a rule to multiple students; collects per-student skip reasons."""
+
+    SKIP_ALREADY_ACTIVE = "Already has active concession"
+    SKIP_INVOICE_PAID = "Invoice fully paid"
+    SKIP_RULE_INACTIVE = "Rule inactive or not found"
+    SKIP_NOT_FOUND = "Student not found in branch"
+
+    def __init__(self, branch, student_ids, rule_id, reason, user):
+        self.branch = branch
+        self.student_ids = student_ids
+        self.rule_id = rule_id
+        self.reason = reason
+        self.user = user
+
+    def execute(self) -> dict:
+        from apps.fees.queries.structure import get_student_in_branch
+
+        rule = get_concession_rule(self.branch.id, self.rule_id)
+        if rule is None or not rule.is_active:
+            raise ValidationError("Concession rule not found or inactive.")
+        if not self.reason or not str(self.reason).strip():
+            raise ValidationError("Reason is required.")
+
+        applied = []
+        skipped = []
+        seen_profiles: set[str] = set()
+        for sid in self.student_ids:
+            student = get_student_in_branch(self.branch.id, sid)
+            if not student:
+                skipped.append({"studentId": str(sid), "reason": self.SKIP_NOT_FOUND})
+                continue
+            profile_key = str(student.student_profile_id)
+            if profile_key in seen_profiles:
+                skipped.append({"studentId": str(sid), "reason": self.SKIP_ALREADY_ACTIVE})
+                continue
+            seen_profiles.add(profile_key)
+            if has_active_concession_for_profile(
+                branch_id=self.branch.id,
+                profile_id=student.student_profile_id,
+                rule_id=rule.id,
+            ):
+                skipped.append({"studentId": str(sid), "reason": self.SKIP_ALREADY_ACTIVE})
+                continue
+            try:
+                assert_concession_modifiable(student.id)
+            except ValidationError:
+                skipped.append({"studentId": str(sid), "reason": self.SKIP_INVOICE_PAID})
+                continue
+            try:
+                conc = ApplyStudentConcessionInteractor(
+                    branch=self.branch,
+                    student=student,
+                    rule_id=rule.id,
+                    reason=self.reason,
+                    user=self.user,
+                ).execute()
+                applied.append(str(conc.id))
+            except ValidationError as exc:
+                skipped.append({"studentId": str(sid), "reason": "; ".join(exc.messages)})
+
+        return {"applied": applied, "skipped": skipped}
+
+
+class RevokeStudentConcessionInteractor:
+    """Revokes an active student concession."""
+
+    def __init__(self, concession_id, reason, user):
+        self.concession_id = concession_id
+        self.reason = reason
+        self.user = user
+
+    @transaction.atomic
+    def execute(self) -> StudentConcession:
+        if not self.reason or not str(self.reason).strip():
+            raise ValidationError("Reason is required.")
+
+        conc = get_student_concession_for_update(self.concession_id)
+        if not conc:
+            raise ValidationError("Student concession not found.")
+        if conc.status != StudentConcessionStatus.ACTIVE:
+            raise ValidationError("Only active concessions can be revoked.")
+
+        update_student_concession(conc, {
+            "status": StudentConcessionStatus.REVOKED,
+            "note": self.reason.strip(),
+            "decided_at": timezone.now(),
+            "approver": self.user,
+        }, user=self.user)
+        sync_student_concessions(conc.student_id, user=self.user)
+        return conc
+
+
+class EditStudentConcessionInteractor:
+    """Edits the amount on an active student concession."""
+
+    def __init__(self, concession_id, amount_paise, user):
+        self.concession_id = concession_id
+        self.amount_paise = amount_paise
+        self.user = user
+
+    @transaction.atomic
+    def execute(self) -> StudentConcession:
+        if self.amount_paise <= 0:
+            raise ValidationError("Concession amount must be greater than zero.")
+
+        conc = get_student_concession_for_update(self.concession_id)
+        if not conc:
+            raise ValidationError("Student concession not found.")
+        if conc.status != StudentConcessionStatus.ACTIVE:
+            raise ValidationError("Only active concessions can be edited.")
+
+        assert_concession_modifiable(conc.student_id)
+        update_student_concession(conc, {"amount_paise": self.amount_paise}, user=self.user)
+        sync_student_concessions(conc.student_id, user=self.user)
+        return conc
+
+
+# Backward-compatible alias for legacy imports only.
+CreateConcessionRequestInteractor = ApplyStudentConcessionInteractor

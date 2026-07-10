@@ -21,9 +21,21 @@ def list_open_invoices_for_student_user(student_user_id):
         )
         .filter(Q(student__is_active=True) | Q(total_paise__gt=F("paid_paise")))
         .exclude(assignment__isnull=True)
-        .prefetch_related("installments", "lines")
+        .prefetch_related("installments", "lines", "assignment")
         .order_by("due_date")
     )
+
+
+def _installment_label(assignment, sequence: int) -> str:
+    if not assignment:
+        return f"Installment {sequence}"
+    labels = []
+    for c in assignment.structure_snapshot or []:
+        if int(c.get("installment_no", 1)) == sequence:
+            lbl = c.get("label") or c.get("name")
+            if lbl:
+                labels.append(str(lbl))
+    return labels[0] if labels else f"Installment {sequence}"
 
 
 def _build_installment_schedule(invoices) -> list[dict]:
@@ -41,7 +53,7 @@ def _build_installment_schedule(invoices) -> list[dict]:
                 "invoiceId": str(inv.id),
                 "installmentId": str(inst.id),
                 "sequence": inst.sequence,
-                "label": f"Installment {inst.sequence}",
+                "label": _installment_label(inv.assignment, inst.sequence),
                 "dueDate": inst.due_date.isoformat() if inst.due_date else "",
                 "amount": amount,
                 "paid": paid,
@@ -49,6 +61,58 @@ def _build_installment_schedule(invoices) -> list[dict]:
                 "status": status,
             })
     return sorted(rows, key=lambda r: (r["dueDate"], r["sequence"]))
+
+
+def _concession_breakdown(invoices) -> dict:
+    gross_paise = 0
+    concession_paise = 0
+    lines: list[dict] = []
+    for inv in invoices:
+        assignment = getattr(inv, "assignment", None)
+        if not assignment:
+            continue
+        components = assignment.structure_snapshot or []
+        gross_paise += sum(int(c.get("amount_paise", 0)) for c in components)
+        for d in assignment.discount_lines or []:
+            amt = int(d.get("amount_paise", 0))
+            if amt <= 0:
+                continue
+            concession_paise += amt
+            lines.append({
+                "label": d.get("label") or "Concession",
+                "amount": round(amt / 100, 2),
+                "amountPaise": amt,
+            })
+    return {
+        "grossDue": round(gross_paise / 100, 2),
+        "concessionTotal": round(concession_paise / 100, 2),
+        "concessions": lines,
+    }
+
+
+def _concession_history(student_user_id) -> list[dict]:
+    from apps.fees.models import StudentConcession
+
+    rows = (
+        StudentConcession.objects.filter(
+            student__student_profile__user_id=student_user_id,
+            is_active=True,
+        )
+        .select_related("rule", "approver")
+        .order_by("-decided_at", "-created_at")[:20]
+    )
+    history = []
+    for c in rows:
+        history.append({
+            "id": str(c.id),
+            "ruleName": c.rule.name if c.rule_id else "Concession",
+            "amount": round(c.amount_paise / 100, 2),
+            "amountPaise": c.amount_paise,
+            "status": c.status,
+            "appliedAt": c.decided_at.isoformat() if c.decided_at else c.created_at.isoformat(),
+            "reason": c.note or "",
+        })
+    return history
 
 
 def _build_exam_fees(student_user_id) -> dict:
@@ -110,9 +174,18 @@ def build_portal_fees_payload(*, student_user_id, tenant) -> dict:
     paid = sum(i.paid_paise for i in invoices)
     balance = sum(i.balance_paise for i in invoices)
     today = datetime.date.today()
-    open_due_dates = [i.due_date for i in invoices if i.due_date and i.balance_paise > 0]
+    open_due_dates = []
+    installment_overdue = False
+    for inv in invoices:
+        for inst in inv.installments.all():
+            if inst.paid_paise < inst.amount_paise and inst.due_date:
+                open_due_dates.append(inst.due_date)
+                if inst.due_date < today:
+                    installment_overdue = True
+        if inv.balance_paise > 0 and inv.due_date:
+            open_due_dates.append(inv.due_date)
     next_due = min(open_due_dates).isoformat() if open_due_dates else None
-    is_overdue = any(d < today for d in open_due_dates)
+    is_overdue = installment_overdue or any(d < today for d in open_due_dates)
 
     payments = []
     for r in list_receipts_for_student(student_user_id):
@@ -134,6 +207,9 @@ def build_portal_fees_payload(*, student_user_id, tenant) -> dict:
             next_installment = row
             break
 
+    breakdown = _concession_breakdown(invoices)
+    history = _concession_history(student_user_id)
+
     return {
         "institutionType": inst,
         "ledger": {
@@ -142,7 +218,12 @@ def build_portal_fees_payload(*, student_user_id, tenant) -> dict:
             "balance": round(balance / 100, 2),
             "nextDueDate": next_installment["dueDate"] if next_installment else next_due,
             "isOverdue": is_overdue or any(r["status"] == "overdue" for r in schedule),
+            "grossDue": breakdown["grossDue"],
+            "concessionTotal": breakdown["concessionTotal"],
+            "netPayable": round(balance / 100, 2),
         },
+        "concessions": breakdown["concessions"],
+        "concessionHistory": history,
         "payments": payments,
         "razorpayKeyId": dj_settings.RAZORPAY_KEY_ID,
         "examFees": _build_exam_fees(student_user_id),

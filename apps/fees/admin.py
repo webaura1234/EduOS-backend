@@ -3,7 +3,6 @@
 from django.contrib import admin
 
 from apps.fees.models import (
-    ConcessionRequest,
     ConcessionRule,
     CreditNote,
     FeeInvoice,
@@ -14,6 +13,7 @@ from apps.fees.models import (
     Receipt,
     ReceiptCounter,
     Refund,
+    StudentConcession,
     WebhookEventLog,
 )
 
@@ -71,8 +71,8 @@ class ConcessionRuleAdmin(admin.ModelAdmin):
     list_display = ["id", "name", "branch", "amount_paise", "percent"]
 
 
-@admin.register(ConcessionRequest)
-class ConcessionRequestAdmin(admin.ModelAdmin):
+@admin.register(StudentConcession)
+class StudentConcessionAdmin(admin.ModelAdmin):
     list_display = ["id", "student", "rule", "amount_paise", "status", "requested_by", "approver", "decided_at"]
     list_filter = ["status"]
 

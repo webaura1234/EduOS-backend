@@ -2,8 +2,8 @@
 
 from django.db.models import Sum
 
-from apps.fees.enums import ConcessionStatus, RefundStatus
-from apps.fees.models import ConcessionRequest, FeeInvoice, Refund
+from apps.fees.enums import StudentConcessionStatus, RefundStatus
+from apps.fees.models import FeeInvoice, Refund, StudentConcession
 
 
 def invoice_totals(branch_id) -> tuple[int, int]:
@@ -21,6 +21,6 @@ def total_refunded(branch_id) -> int:
 
 
 def total_concessions(branch_id) -> int:
-    return ConcessionRequest.objects.filter(
-        branch_id=branch_id, status=ConcessionStatus.APPROVED, is_active=True
+    return StudentConcession.objects.filter(
+        branch_id=branch_id, status=StudentConcessionStatus.ACTIVE, is_active=True
     ).aggregate(t=Sum("amount_paise")).get("t") or 0

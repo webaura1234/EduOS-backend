@@ -27,7 +27,7 @@ class FeeLedgerExport(ExportDefinition):
         if params.get("status"):
             qs = qs.filter(status=params["status"])
         return qs.select_related(
-            "student__student_profile__user", "branch"
+            "student__student_profile__user", "branch", "assignment__fee_structure"
         ).order_by("created_at")
 
     def get_columns(self, params: dict) -> list[Column]:
@@ -35,7 +35,11 @@ class FeeLedgerExport(ExportDefinition):
             Column("invoice_id", "Invoice ID"),
             Column("student_name", "Student Name"),
             Column("branch", "Branch"),
-            Column("amount", "Total Amount (₹)", format="number"),
+            Column("structure_name", "Fee Structure"),
+            Column("structure_version", "Structure Version"),
+            Column("gross_amount", "Gross Amount (₹)", format="number"),
+            Column("concession", "Concession (₹)", format="number"),
+            Column("amount", "Net Amount (₹)", format="number"),
             Column("paid", "Paid (₹)", format="number"),
             Column("balance", "Balance (₹)", format="number"),
             Column("status", "Status"),
@@ -49,10 +53,36 @@ class FeeLedgerExport(ExportDefinition):
             student_name = invoice.student.user.full_name
         except Exception:  # noqa: BLE001
             pass
+        structure_name = ""
+        structure_version = ""
+        try:
+            if invoice.assignment_id and invoice.assignment.fee_structure_id:
+                fs = invoice.assignment.fee_structure
+                structure_name = fs.name
+                structure_version = fs.version
+        except Exception:  # noqa: BLE001
+            pass
+        gross_paise = 0
+        concession_paise = 0
+        try:
+            if invoice.assignment_id:
+                components = invoice.assignment.structure_snapshot or []
+                gross_paise = sum(int(c.get("amount_paise", 0)) for c in components)
+                concession_paise = sum(
+                    int(d.get("amount_paise", 0)) for d in (invoice.assignment.discount_lines or [])
+                )
+        except Exception:  # noqa: BLE001
+            pass
+        if gross_paise == 0:
+            gross_paise = invoice.total_paise + concession_paise
         return {
             "invoice_id": str(invoice.pk),
             "student_name": student_name,
             "branch": invoice.branch.name,
+            "structure_name": structure_name,
+            "structure_version": structure_version,
+            "gross_amount": round(gross_paise / 100, 2),
+            "concession": round(concession_paise / 100, 2),
             "amount": round(invoice.total_paise / 100, 2),
             "paid": round(invoice.paid_paise / 100, 2),
             "balance": round(invoice.balance_paise / 100, 2),
@@ -90,7 +120,7 @@ class FeeDefaultersExport(ExportDefinition):
         if branch_id:
             qs = qs.filter(branch_id=branch_id)
         return qs.select_related(
-            "student", "student__student_profile__user", "branch"
+            "student", "student__student_profile__user", "branch", "assignment__fee_structure"
         ).order_by("due_date")
 
     def get_columns(self, params: dict) -> list[Column]:
@@ -98,6 +128,8 @@ class FeeDefaultersExport(ExportDefinition):
             Column("invoice_id", "Invoice ID"),
             Column("student_name", "Student Name"),
             Column("branch", "Branch"),
+            Column("structure_name", "Fee Structure"),
+            Column("structure_version", "Structure Version"),
             Column("due_date", "Due Date", format="date"),
             Column("balance", "Balance (₹)", format="number"),
         ]
@@ -108,10 +140,21 @@ class FeeDefaultersExport(ExportDefinition):
             student_name = invoice.student.user.full_name
         except Exception:  # noqa: BLE001
             pass
+        structure_name = ""
+        structure_version = ""
+        try:
+            if invoice.assignment_id and invoice.assignment.fee_structure_id:
+                fs = invoice.assignment.fee_structure
+                structure_name = fs.name
+                structure_version = fs.version
+        except Exception:  # noqa: BLE001
+            pass
         return {
             "invoice_id": str(invoice.pk),
             "student_name": student_name,
             "branch": invoice.branch.name,
+            "structure_name": structure_name,
+            "structure_version": structure_version,
             "due_date": invoice.due_date.isoformat() if invoice.due_date else "",
             "balance": round(invoice.balance_paise / 100, 2),
         }

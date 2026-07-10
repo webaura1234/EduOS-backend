@@ -7,7 +7,11 @@ from django.utils import timezone
 from apps.fees.enums import CreditNoteStatus
 from apps.fees.models import CreditNote
 from apps.fees.queries.concession import create_credit_note, get_credit_note_for_update, update_credit_note
-from apps.fees.queries.invoice import apply_amount_to_invoice, get_invoice_for_student
+from apps.fees.queries.invoice import (
+    adjust_invoice_total,
+    get_invoice_for_student,
+    reduce_installment_totals,
+)
 
 
 class CreateCreditNoteInteractor:
@@ -66,6 +70,7 @@ class ApproveCreditNoteInteractor:
                 raise ValidationError("Credit note is not linked to an invoice.")
             amount = min(cn.amount_paise, invoice.balance_paise)
             if amount > 0:
-                apply_amount_to_invoice(invoice, amount)
+                adjust_invoice_total(invoice, -amount, user=self.approver_user)
+                reduce_installment_totals(invoice, amount, user=self.approver_user)
 
         return cn

@@ -133,6 +133,57 @@ def adjust_invoice_total(invoice: FeeInvoice, delta_paise: int, user=None) -> Fe
     return invoice
 
 
+def _recompute_installment_status(inst: Installment):
+    if inst.paid_paise >= inst.amount_paise:
+        inst.status = InvoiceStatus.PAID
+    elif inst.paid_paise > 0:
+        inst.status = InvoiceStatus.PARTIAL
+    else:
+        inst.status = InvoiceStatus.DUE
+
+
+def reduce_installment_totals(invoice: FeeInvoice, amount_paise: int, user=None) -> None:
+    """Lower installment billed amounts (newest first) after a credit or concession."""
+    remaining = amount_paise
+    for inst in invoice.installments.all().order_by("-sequence"):
+        if remaining <= 0:
+            break
+        reducible = max(0, inst.amount_paise - inst.paid_paise)
+        if reducible <= 0:
+            continue
+        cut = min(remaining, reducible)
+        inst.amount_paise -= cut
+        _recompute_installment_status(inst)
+        if user:
+            inst.updated_by = user
+        inst.save(update_fields=["amount_paise", "status", "updated_by", "updated_at"])
+        remaining -= cut
+
+
+def sync_open_invoice_with_assignment(assignment, user=None) -> None:
+    """Recalculate an open invoice when assignment discounts change after generation."""
+    try:
+        invoice = FeeInvoice.objects.select_for_update().prefetch_related("installments").get(
+            assignment_id=assignment.id,
+            is_active=True,
+            status__in=[InvoiceStatus.DUE, InvoiceStatus.PARTIAL],
+        )
+    except FeeInvoice.DoesNotExist:
+        return
+
+    components = assignment.structure_snapshot or []
+    discount_lines = assignment.discount_lines or []
+    total_components_paise = sum(int(c.get("amount_paise", 0)) for c in components)
+    total_discount_paise = sum(int(d.get("amount_paise", 0)) for d in discount_lines)
+    new_total_paise = max(total_components_paise - total_discount_paise, 0)
+    delta = new_total_paise - invoice.total_paise
+    if delta == 0:
+        return
+    adjust_invoice_total(invoice, delta, user=user)
+    if delta < 0:
+        reduce_installment_totals(invoice, -delta, user=user)
+
+
 def write_off_invoice(invoice: FeeInvoice, user=None) -> FeeInvoice:
     """Mark invoice and open installments as written off."""
     invoice.status = InvoiceStatus.WRITTEN_OFF

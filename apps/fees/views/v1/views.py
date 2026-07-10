@@ -5,15 +5,16 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import status, viewsets
+from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError, PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import IsAdminOrSuperAdmin, IsParent, IsStudent
-from apps.fees.enums import ConcessionStatus, CreditNoteStatus, InvoiceStatus, PaymentMethod, RefundStatus
+from apps.fees.enums import CreditNoteStatus, FeeStructureStatus, InvoiceStatus, PaymentMethod, RefundStatus, StudentConcessionStatus
 from apps.fees.serializers import (
-    ConcessionRequestSerializer,
+    BulkApplyStudentConcessionSerializer,
     ConcessionRuleSerializer,
     CreditNoteSerializer,
     FeeInvoiceSerializer,
@@ -21,20 +22,24 @@ from apps.fees.serializers import (
     PaymentSerializer,
     ReceiptSerializer,
     RefundSerializer,
+    StudentConcessionSerializer,
     StudentFeeAssignmentSerializer,
 )
 from apps.fees.interactors import (
-    ApproveConcessionRequestInteractor,
+    ApplyStudentConcessionInteractor,
     ApproveCreditNoteInteractor,
     ApproveRefundInteractor,
-    CreateConcessionRequestInteractor,
+    BulkApplyStudentConcessionInteractor,
     CreateConcessionRuleInteractor,
     CreateCreditNoteInteractor,
     CreatePaymentOrderInteractor,
+    EditStudentConcessionInteractor,
     GetCollectionDashboardInteractor,
     RecordOfflinePaymentInteractor,
     ReconcilePendingPaymentInteractor,
     RequestRefundInteractor,
+    RevokeStudentConcessionInteractor,
+    UpdateConcessionRuleInteractor,
     VerifyPaymentCaptureInteractor,
     create_fee_structure,
     generate_invoices_for_batch,
@@ -48,10 +53,11 @@ from apps.fees.queries import (
     list_receipts,
 )
 from apps.fees.queries.concession import (
+    list_active_concessions_for_student,
     list_approved_requests_for_student,
-    list_concession_requests,
     list_concession_rules,
     list_credit_notes,
+    list_student_concessions,
 )
 from apps.fees.queries.invoice import (
     get_invoice,
@@ -140,12 +146,13 @@ class StudentFeeAssignmentView(APIView):
             raise ValidationError({"nonFieldErrors": "Assignment already exists for this student and structure."})
 
         from apps.fees.helpers.concession import discount_line_for_request
-        approved_concessions = list_approved_requests_for_student(student.id)
+        from apps.fees.services.concession_sync import rebuild_assignment_discounts
+        active_concessions = list_active_concessions_for_student(student.id)
         components = structure.components or []
         base_paise = sum(int(c.get("amount_paise", 0)) for c in components)
         discount_lines = [
             discount_line_for_request(req, base_paise=base_paise)
-            for req in approved_concessions
+            for req in active_concessions
             if discount_line_for_request(req, base_paise=base_paise)["amount_paise"] > 0
         ]
 
@@ -156,6 +163,7 @@ class StudentFeeAssignmentView(APIView):
             discount_lines=discount_lines,
             user=request.user,
         )
+        rebuild_assignment_discounts(assignment, user=request.user)
 
         return Response(StudentFeeAssignmentSerializer(assignment).data, status=status.HTTP_201_CREATED)
 
@@ -181,6 +189,9 @@ class GenerateInvoicesView(APIView):
 
             if not batch or not structure or not ay:
                 raise ValidationError("Invalid batch, feeStructure, or academicYear ID.")
+
+            if getattr(structure, "status", FeeStructureStatus.PUBLISHED) != FeeStructureStatus.PUBLISHED:
+                raise ValidationError("Only published fee structures can generate invoices.")
         except (DjangoValidationError, ValueError, TypeError):
             raise ValidationError("Invalid batch, feeStructure, or academicYear ID.")
 
@@ -205,6 +216,7 @@ class GenerateInvoicesView(APIView):
 class ConcessionRuleViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
     serializer_class = ConcessionRuleSerializer
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
         branch = get_request_branch(self.request)
@@ -221,19 +233,42 @@ class ConcessionRuleViewSet(viewsets.ModelViewSet):
                 criteria=serializer.validated_data.get("criteria", {}),
                 user=self.request.user,
             )
-            interactor.execute()
+            rule = interactor.execute()
+            serializer.instance = rule
         except DjangoValidationError as exc:
             raise ValidationError(exc.messages)
 
+    def perform_update(self, serializer):
+        try:
+            interactor = UpdateConcessionRuleInteractor(
+                rule=self.get_object(),
+                name=serializer.validated_data.get("name"),
+                amount_paise=serializer.validated_data.get("amount_paise"),
+                percent=serializer.validated_data.get("percent"),
+                criteria=serializer.validated_data.get("criteria"),
+                is_active=serializer.validated_data.get("is_active"),
+                user=self.request.user,
+            )
+            rule = interactor.execute()
+            serializer.instance = rule
+        except DjangoValidationError as exc:
+            raise ValidationError(exc.messages)
 
-class ConcessionRequestViewSet(viewsets.ModelViewSet):
+    def perform_destroy(self, instance):
+        UpdateConcessionRuleInteractor(
+            rule=instance, is_active=False, user=self.request.user,
+        ).execute()
+
+
+class StudentConcessionViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
-    serializer_class = ConcessionRequestSerializer
+    serializer_class = StudentConcessionSerializer
+    http_method_names = ["get", "post", "patch", "head", "options"]
 
     def get_queryset(self):
         branch = get_request_branch(self.request)
         status_param = self.request.query_params.get("status")
-        return list_concession_requests(branch.id, status=status_param)
+        return list_student_concessions(branch.id, status=status_param)
 
     def perform_create(self, serializer):
         branch = get_request_branch(self.request)
@@ -242,34 +277,68 @@ class ConcessionRequestViewSet(viewsets.ModelViewSet):
         if not student:
             raise ValidationError({"student": "Student not found in this branch."})
 
+        reason = serializer.validated_data.get("note") or self.request.data.get("reason", "")
         try:
-            interactor = CreateConcessionRequestInteractor(
+            interactor = ApplyStudentConcessionInteractor(
                 branch=branch,
                 student=student,
-                rule_id=serializer.validated_data.get("rule_id"),
-                amount_paise=serializer.validated_data["amount_paise"],
-                requested_by=self.request.user,
-                note=serializer.initial_data.get("note", ""),
+                rule_id=serializer.validated_data["rule_id"],
+                reason=reason,
+                user=self.request.user,
             )
-            interactor.execute()
+            concession = interactor.execute()
+            serializer.instance = concession
         except DjangoValidationError as exc:
             raise ValidationError(exc.messages)
 
     def partial_update(self, request, *args, **kwargs):
-        dec = request.data.get("status")
-        if not dec or dec not in [ConcessionStatus.APPROVED, ConcessionStatus.REJECTED]:
-            raise ValidationError({"status": "Must approve or reject request."})
+        concession = self.get_object()
+        if request.data.get("status") == StudentConcessionStatus.REVOKED:
+            reason = request.data.get("reason") or request.data.get("note", "")
+            try:
+                conc = RevokeStudentConcessionInteractor(
+                    concession_id=concession.id,
+                    reason=reason,
+                    user=request.user,
+                ).execute()
+                return Response(StudentConcessionSerializer(conc).data)
+            except DjangoValidationError as exc:
+                raise ValidationError(exc.messages)
 
+        amount = request.data.get("amountPaise") or request.data.get("amount_paise")
+        if amount is not None:
+            try:
+                conc = EditStudentConcessionInteractor(
+                    concession_id=concession.id,
+                    amount_paise=int(amount),
+                    user=request.user,
+                ).execute()
+                return Response(StudentConcessionSerializer(conc).data)
+            except DjangoValidationError as exc:
+                raise ValidationError(exc.messages)
+
+        raise ValidationError({"nonFieldErrors": "Provide status=revoked with reason, or amountPaise to edit."})
+
+    @action(detail=False, methods=["post"], url_path="bulk-apply")
+    def bulk_apply(self, request):
+        branch = get_request_branch(request)
+        ser = BulkApplyStudentConcessionSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
         try:
-            interactor = ApproveConcessionRequestInteractor(
-                request_id=self.get_object().id,
-                status=dec,
-                approver_user=request.user,
-            )
-            req = interactor.execute()
-            return Response(ConcessionRequestSerializer(req).data)
+            result = BulkApplyStudentConcessionInteractor(
+                branch=branch,
+                student_ids=ser.validated_data["studentIds"],
+                rule_id=ser.validated_data["ruleId"],
+                reason=ser.validated_data["reason"],
+                user=request.user,
+            ).execute()
+            return Response(result, status=status.HTTP_200_OK)
         except DjangoValidationError as exc:
             raise ValidationError(exc.messages)
+
+
+# Deprecated alias — same ViewSet, old route name.
+ConcessionRequestViewSet = StudentConcessionViewSet
 
 
 class CreditNoteViewSet(viewsets.ModelViewSet):

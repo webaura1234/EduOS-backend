@@ -43,7 +43,7 @@ def test_overview_shape(env):
     for key in ("institutionType", "structures", "concessionRules", "concessionRequests",
                 "creditNotes", "creditNoteRequests", "examFeeInvoices",
                 "ledger", "collection", "refunds", "webhooks", "reconciliation",
-                "installmentSchedulesByStudent", "batches", "currentAcademicYearId"):
+                "installmentSchedulesByStudent", "batches", "currentAcademicYearId", "currentAcademicYearLabel"):
         assert key in body, f"missing {key}"
     assert "payments" not in body  # payments moved to a dedicated paginated endpoint
     assert set(body["collection"]) == {

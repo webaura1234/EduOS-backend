@@ -4,13 +4,11 @@ import datetime
 import pytest
 from django.core.exceptions import ValidationError
 
-from apps.fees.enums import ConcessionStatus, CreditNoteStatus, InvoiceStatus, PaymentMethod, PaymentStatus, RefundStatus
-from apps.fees.models import ConcessionRequest, CreditNote, FeeInvoice, FeeStructure, Payment, Receipt, Refund
+from apps.fees.enums import CreditNoteStatus, InvoiceStatus, PaymentMethod, PaymentStatus, RefundStatus, StudentConcessionStatus
+from apps.fees.models import CreditNote, FeeInvoice, FeeStructure, Payment, Receipt, Refund
 from apps.fees.interactors import (
-    ApproveConcessionRequestInteractor,
     ApproveCreditNoteInteractor,
     ApproveRefundInteractor,
-    CreateConcessionRequestInteractor,
     CreateConcessionRuleInteractor,
     CreateCreditNoteInteractor,
     CreatePaymentOrderInteractor,
@@ -137,23 +135,29 @@ def test_concessions_and_credit_notes(branch, student_profile, academic_year, ba
     )
     rule = rule_creator.execute()
 
-    # Request concession
-    req_creator = CreateConcessionRequestInteractor(
+    # Apply concession directly
+    from apps.fees.interactors.concession import ApplyStudentConcessionInteractor
+    from apps.fees.enums import StudentConcessionStatus
+
+    req = ApplyStudentConcessionInteractor(
         branch=branch,
         student=student_profile.enrollment,
         rule_id=rule.id,
-        amount_paise=500, # 10% of 5000
-        requested_by=admin,
-    )
-    req = req_creator.execute()
-    assert req.status == ConcessionStatus.PENDING
-
-    # Approve concession request
-    ApproveConcessionRequestInteractor(
-        request_id=req.id,
-        status=ConcessionStatus.APPROVED,
-        approver_user=admin,
+        reason="Merit scholarship",
+        user=admin,
     ).execute()
+    assert req.status == StudentConcessionStatus.ACTIVE
+
+    # Duplicate apply for same student+rule is blocked
+    from django.core.exceptions import ValidationError as DjangoValidationError
+    with pytest.raises(DjangoValidationError):
+        ApplyStudentConcessionInteractor(
+            branch=branch,
+            student=student_profile.enrollment,
+            rule_id=rule.id,
+            reason="Duplicate attempt",
+            user=admin,
+        ).execute()
 
     # Verify assignment picks it up
     fs = FeeStructure.objects.create(
@@ -185,7 +189,8 @@ def test_concessions_and_credit_notes(branch, student_profile, academic_year, ba
     ).execute()
 
     invoice.refresh_from_db()
-    assert invoice.paid_paise == 1000
+    assert invoice.paid_paise == 0
+    assert invoice.total_paise == 3500
     assert invoice.balance_paise == 3500
 
 

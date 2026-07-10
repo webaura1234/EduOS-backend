@@ -171,8 +171,19 @@ class VerifyPaymentCaptureInteractor:
         if payment.status == PaymentStatus.CAPTURED:
             return payment
 
-        # Verify against gateway.
+        # Verify checkout signature on the authenticated client-verify path.
         gateway = get_gateway()
+        if self.signature and self.razorpay_order_id:
+            if not gateway.verify_checkout_signature(
+                order_id=self.razorpay_order_id,
+                payment_id=self.razorpay_payment_id,
+                signature=self.signature,
+            ):
+                update_payment(payment, {"status": PaymentStatus.FAILED,
+                                         "razorpay_payment_id": self.razorpay_payment_id})
+                raise ValidationError("Invalid payment signature.")
+
+        # Verify against gateway.
         gw_payment = gateway.fetch_payment(self.razorpay_payment_id)
         if gw_payment.get("status") not in ("captured", "authorized"):
             update_payment(payment, {"status": PaymentStatus.FAILED,

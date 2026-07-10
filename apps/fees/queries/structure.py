@@ -81,7 +81,7 @@ def billing_guardian_for_student(student):
 # ── FeeStructure ──────────────────────────────────────────────────────────────
 def list_structures(branch_id, academic_year_id=None):
     qs = FeeStructure.objects.filter(branch_id=branch_id, is_active=True).select_related(
-        "batch", "batch__course", "academic_year",
+        "batch", "batch__course", "academic_year", "created_by", "published_by",
     )
     if academic_year_id:
         qs = qs.filter(academic_year_id=academic_year_id)
@@ -95,10 +95,12 @@ def get_structure(branch_id, structure_id) -> FeeStructure | None:
         return None
 
 
-def create_structure(*, branch_id, name, academic_year_id, batch_id=None, components, user=None) -> FeeStructure:
+def create_structure(*, branch_id, name, academic_year_id, batch_id=None, components, user=None,
+                     status="draft", parent_structure_id=None, version=1) -> FeeStructure:
     return FeeStructure.objects.create(
         branch_id=branch_id, name=name, academic_year_id=academic_year_id, batch_id=batch_id,
         components=components, created_by=user, updated_by=user,
+        status=status, parent_structure_id=parent_structure_id, version=version,
     )
 
 

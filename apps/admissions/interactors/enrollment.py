@@ -174,11 +174,15 @@ class ProvisionEnrollmentInteractor:
 
         # 7. Fee snapshot at enrollment (F-082 / F-150).
         if fee_structure:
-            create_assignment(
+            from apps.fees.services.concession_sync import rebuild_assignment_discounts
+            from apps.fees.queries.structure import create_assignment
+
+            assignment = create_assignment(
                 student=enrollment, fee_structure=fee_structure,
                 structure_snapshot=fee_structure.components or [], discount_lines=[],
                 user=self.user,
             )
+            rebuild_assignment_discounts(assignment, user=self.user)
 
         # 8. Mark application enrolled.
         if self.application:

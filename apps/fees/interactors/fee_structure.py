@@ -44,7 +44,8 @@ def validate_components(components):
 
 
 @transaction.atomic
-def create_fee_structure(*, branch_id, name, academic_year_id, batch_id=None, components, user=None) -> FeeStructure:
+def create_fee_structure(*, branch_id, name, academic_year_id, batch_id=None, components, user=None,
+                         status="draft") -> FeeStructure:
     """Creates a new FeeStructure after validating the name and components."""
     if not name or not name.strip():
         raise ValidationError("Structure name is required.")
@@ -58,23 +59,14 @@ def create_fee_structure(*, branch_id, name, academic_year_id, batch_id=None, co
         batch_id=batch_id,
         components=components,
         user=user,
+        status=status,
     )
 
 
 @transaction.atomic
 def update_fee_structure(*, structure: FeeStructure, name=None, components=None, user=None) -> FeeStructure:
     """Updates an existing FeeStructure, bumping its version."""
-    fields = {}
-    if name is not None:
-        if not name.strip():
-            raise ValidationError("Structure name cannot be blank.")
-        fields["name"] = name
-        
-    if components is not None:
-        validate_components(components)
-        fields["components"] = components
-        
-    if not fields:
-        return structure
-        
-    return update_structure(structure, fields, user=user)
+    from apps.fees.interactors.publish import update_fee_structure_guarded
+    return update_fee_structure_guarded(
+        structure=structure, name=name, components=components, user=user,
+    )

@@ -1,7 +1,10 @@
 from .concession import (
-    ApproveConcessionRequestInteractor,
-    CreateConcessionRequestInteractor,
+    ApplyStudentConcessionInteractor,
+    BulkApplyStudentConcessionInteractor,
     CreateConcessionRuleInteractor,
+    EditStudentConcessionInteractor,
+    RevokeStudentConcessionInteractor,
+    UpdateConcessionRuleInteractor,
 )
 from .creditnote import ApproveCreditNoteInteractor, CreateCreditNoteInteractor
 from .fee_structure import create_fee_structure, update_fee_structure
@@ -29,8 +32,11 @@ __all__ = [
     "RequestRefundInteractor",
     "ApproveRefundInteractor",
     "CreateConcessionRuleInteractor",
-    "CreateConcessionRequestInteractor",
-    "ApproveConcessionRequestInteractor",
+    "UpdateConcessionRuleInteractor",
+    "ApplyStudentConcessionInteractor",
+    "BulkApplyStudentConcessionInteractor",
+    "RevokeStudentConcessionInteractor",
+    "EditStudentConcessionInteractor",
     "CreateCreditNoteInteractor",
     "ApproveCreditNoteInteractor",
     "GetCollectionDashboardInteractor",

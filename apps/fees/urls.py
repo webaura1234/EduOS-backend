@@ -19,6 +19,7 @@ from apps.fees.views import (
     RazorpayWebhookView,
     RecordOfflinePaymentView,
     RefundViewSet,
+    StudentConcessionViewSet,
     StudentFeeAssignmentView,
     StudentPortalDuesView,
     StudentPortalFeesView,
@@ -27,6 +28,13 @@ from apps.fees.views import (
     WriteOffInvoiceView,
 )
 
+from apps.fees.views.fee_head import FeeHeadViewSet
+from apps.fees.views.structure_actions import (
+    FeeStructureArchiveView,
+    FeeStructureImpactView,
+    FeeStructureNewVersionView,
+    FeeStructurePublishView,
+)
 from apps.fees.views.admin_overview import AdminFeesOverviewView
 from apps.fees.views.admin_tab_overview import (
     AdminFeesCollectionsTabView,
@@ -48,8 +56,10 @@ from apps.fees.views.self_export import StudentFeeStatementExportView
 app_name = "fees"
 
 router = DefaultRouter()
+router.register("fee-heads", FeeHeadViewSet, basename="fee-heads")
 router.register("structures", FeeStructureViewSet, basename="structures")
 router.register("concession-rules", ConcessionRuleViewSet, basename="concession-rules")
+router.register("student-concessions", StudentConcessionViewSet, basename="student-concessions")
 router.register("concession-requests", ConcessionRequestViewSet, basename="concession-requests")
 router.register("credit-notes", CreditNoteViewSet, basename="credit-notes")
 router.register("refunds", RefundViewSet, basename="refunds")
@@ -72,6 +82,11 @@ urlpatterns = [
     path("admin-payments/summary/", AdminPaymentsSummaryView.as_view(), name="admin-payments-summary"),
     path("payments/offline-by-student/", AdminRecordPaymentByStudentView.as_view(), name="offline-by-student"),
     path("reconciliation/run/", AdminReconcilePaymentsView.as_view(), name="reconciliation-run"),
+
+    path("structures/<uuid:structure_id>/impact/", FeeStructureImpactView.as_view(), name="structure-impact"),
+    path("structures/<uuid:structure_id>/publish/", FeeStructurePublishView.as_view(), name="structure-publish"),
+    path("structures/<uuid:structure_id>/archive/", FeeStructureArchiveView.as_view(), name="structure-archive"),
+    path("structures/<uuid:structure_id>/new-version/", FeeStructureNewVersionView.as_view(), name="structure-new-version"),
 
     # Invoices & Assignments
     path("assignments/", StudentFeeAssignmentView.as_view(), name="assignments"),
