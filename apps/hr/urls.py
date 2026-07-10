@@ -3,6 +3,14 @@
 from django.urls import path
 
 from apps.hr.views.overview import AdminHROverviewView
+from apps.hr.views.admin_tab_overview import (
+    AdminHRDocumentsTabView,
+    AdminHREmployeesTabView,
+    AdminHRLeaveTabView,
+    AdminHRPayrollTabView,
+    AdminHRReportsTabView,
+    AdminHRTemplatesTabView,
+)
 from apps.hr.views.employee import (
     BranchAssignView,
     EmployeeDeactivateView,
@@ -33,6 +41,12 @@ app_name = "hr"
 urlpatterns = [
     # Admin aggregate overview (HrData shape)
     path("admin-overview/", AdminHROverviewView.as_view(), name="admin-overview"),
+    path("admin-overview/employees/", AdminHREmployeesTabView.as_view(), name="admin-employees-tab"),
+    path("admin-overview/leave/", AdminHRLeaveTabView.as_view(), name="admin-leave-tab"),
+    path("admin-overview/payroll/", AdminHRPayrollTabView.as_view(), name="admin-payroll-tab"),
+    path("admin-overview/templates/", AdminHRTemplatesTabView.as_view(), name="admin-templates-tab"),
+    path("admin-overview/reports/", AdminHRReportsTabView.as_view(), name="admin-reports-tab"),
+    path("admin-overview/documents/", AdminHRDocumentsTabView.as_view(), name="admin-documents-tab"),
 
     # Employees
     path("employees/", EmployeeListCreateView.as_view(), name="employee-list"),

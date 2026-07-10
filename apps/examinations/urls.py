@@ -66,11 +66,21 @@ from apps.examinations.views.internal import (
 )
 from apps.examinations.views.invigilation import FacultyInvigilationView
 from apps.examinations.views.admin_overview import AdminExaminationsOverviewView
+from apps.examinations.views.admin_tab_overview import (
+    AdminExaminationsInvigilationTabView,
+    AdminExaminationsResultsTabView,
+    AdminExaminationsScheduleTabView,
+    AdminExaminationsSeatingTabView,
+)
 
 app_name = "examinations"
 
 urlpatterns = [
     path("admin-overview/", AdminExaminationsOverviewView.as_view(), name="admin-overview"),
+    path("admin-overview/schedule/", AdminExaminationsScheduleTabView.as_view(), name="admin-schedule-tab"),
+    path("admin-overview/seating/", AdminExaminationsSeatingTabView.as_view(), name="admin-seating-tab"),
+    path("admin-overview/invigilation/", AdminExaminationsInvigilationTabView.as_view(), name="admin-invigilation-tab"),
+    path("admin-overview/results/", AdminExaminationsResultsTabView.as_view(), name="admin-results-tab"),
     path("grade-scales/", GradeScaleListCreateView.as_view(), name="grade-scale-list"),
     path("grade-scales/<uuid:scale_id>/", GradeScaleDetailView.as_view(), name="grade-scale-detail"),
     path("exams/", ExamListCreateView.as_view(), name="exam-list"),

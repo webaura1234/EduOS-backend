@@ -28,6 +28,17 @@ from apps.fees.views import (
 )
 
 from apps.fees.views.admin_overview import AdminFeesOverviewView
+from apps.fees.views.admin_tab_overview import (
+    AdminFeesCollectionsTabView,
+    AdminFeesConcessionsTabView,
+    AdminFeesDefaultersTabView,
+    AdminFeesInstallmentsTabView,
+    AdminFeesInvoicesTabView,
+    AdminFeesReconciliationTabView,
+    AdminFeesRefundsTabView,
+    AdminFeesScholarshipsTabView,
+    AdminFeesStructureTabView,
+)
 from apps.fees.views.admin_payment import AdminRecordPaymentByStudentView
 from apps.fees.views.admin_payments_list import AdminPaymentsListView, AdminPaymentsSummaryView
 from apps.fees.views.admin_reconciliation import AdminReconcilePaymentsView
@@ -48,6 +59,15 @@ urlpatterns = [
 
     # Admin aggregate (FeesData shape) + record-payment-by-student
     path("admin-overview/", AdminFeesOverviewView.as_view(), name="admin-overview"),
+    path("admin-overview/structure/", AdminFeesStructureTabView.as_view(), name="admin-structure-tab"),
+    path("admin-overview/concessions/", AdminFeesConcessionsTabView.as_view(), name="admin-concessions-tab"),
+    path("admin-overview/collections/", AdminFeesCollectionsTabView.as_view(), name="admin-collections-tab"),
+    path("admin-overview/defaulters/", AdminFeesDefaultersTabView.as_view(), name="admin-defaulters-tab"),
+    path("admin-overview/installments/", AdminFeesInstallmentsTabView.as_view(), name="admin-installments-tab"),
+    path("admin-overview/reconciliation/", AdminFeesReconciliationTabView.as_view(), name="admin-reconciliation-tab"),
+    path("admin-overview/refunds/", AdminFeesRefundsTabView.as_view(), name="admin-refunds-tab"),
+    path("admin-overview/scholarships/", AdminFeesScholarshipsTabView.as_view(), name="admin-scholarships-tab"),
+    path("admin-overview/invoices/", AdminFeesInvoicesTabView.as_view(), name="admin-invoices-tab"),
     path("admin-payments/", AdminPaymentsListView.as_view(), name="admin-payments-list"),
     path("admin-payments/summary/", AdminPaymentsSummaryView.as_view(), name="admin-payments-summary"),
     path("payments/offline-by-student/", AdminRecordPaymentByStudentView.as_view(), name="offline-by-student"),

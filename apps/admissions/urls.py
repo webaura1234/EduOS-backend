@@ -24,6 +24,13 @@ from apps.admissions.views import (
     WaitlistPromoteView,
 )
 from apps.admissions.views.admin_overview import AdminAdmissionsOverviewView
+from apps.admissions.views.admin_tab_overview import (
+    AdminAdmissionsEnquiriesTabView,
+    AdminAdmissionsNotificationsTabView,
+    AdminAdmissionsOverviewTabView,
+    AdminAdmissionsPipelineTabView,
+    AdminAdmissionsWaitlistTabView,
+)
 from apps.admissions.views.admin_enroll import AdminEnrollFromApplicationView
 
 app_name = "admissions"
@@ -31,6 +38,11 @@ app_name = "admissions"
 urlpatterns = [
     # Admin aggregate (AdmissionsData shape) + one-click enroll-from-application
     path("admin-overview/", AdminAdmissionsOverviewView.as_view(), name="admin-overview"),
+    path("admin-overview/overview/", AdminAdmissionsOverviewTabView.as_view(), name="admin-overview-tab"),
+    path("admin-overview/enquiries/", AdminAdmissionsEnquiriesTabView.as_view(), name="admin-enquiries-tab"),
+    path("admin-overview/pipeline/", AdminAdmissionsPipelineTabView.as_view(), name="admin-pipeline-tab"),
+    path("admin-overview/notifications/", AdminAdmissionsNotificationsTabView.as_view(), name="admin-notifications-tab"),
+    path("admin-overview/waitlist/", AdminAdmissionsWaitlistTabView.as_view(), name="admin-waitlist-tab"),
     path("applications/<uuid:application_id>/enroll-from-application/",
          AdminEnrollFromApplicationView.as_view(), name="enroll-from-application"),
 
