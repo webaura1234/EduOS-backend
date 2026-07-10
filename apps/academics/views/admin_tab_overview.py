@@ -43,6 +43,19 @@ def _branch_context(request):
     return branch, tenant, is_college, current_year, current_period
 
 
+def _bell_schedule(branch) -> list[dict]:
+    return [
+        {
+            "id": str(s.id),
+            "name": s.name,
+            "sequence": s.sequence,
+            "startTime": s.start_time.strftime("%H:%M"),
+            "endTime": s.end_time.strftime("%H:%M"),
+        }
+        for s in tt_q.list_period_slots(branch.pk)
+    ]
+
+
 def _faculty_list(tenant, branch):
     return [
         {"userId": str(u.id), "name": u.full_name}
@@ -234,6 +247,7 @@ class AdminAcademicsTimetableTabView(APIView):
                 _timetable_slot(e) for e in tt_q.list_active_entries_for_branch(branch.pk)
             ],
             "clashes": clashes,
+            "bellSchedule": _bell_schedule(branch),
             "adminReviewQueue": _review_queue(
                 branch.pk, academic_period_id=current_period.pk if current_period else None,
             ),

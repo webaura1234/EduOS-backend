@@ -448,3 +448,55 @@ def test_overview_includes_staffing_fields(env):
     assert "classTeachers" in body
     assert "subjectTeachers" in body
     assert "currentPeriodId" in body
+
+
+def _bell_periods(count=7):
+    periods = []
+    for i in range(1, count + 1):
+        start_h = 7 + (i - 1)
+        end_h = start_h
+        end_m = 45 if start_h < 14 else 30
+        periods.append({
+            "sequence": i,
+            "name": f"Period {i}",
+            "startTime": f"{start_h:02d}:00",
+            "endTime": f"{end_h:02d}:{end_m:02d}",
+        })
+    return periods
+
+
+def test_save_bell_schedule_creates_periods(env):
+    resp = _post(env, {"action": "save_bell_schedule", "payload": {"periods": _bell_periods(7)}})
+    assert resp.status_code == 200, resp.content
+    body = _data(resp)
+    assert body["ok"] is True
+    assert len(body["bellSchedule"]) == 7
+    assert body["bellSchedule"][0]["startTime"] == "07:00"
+
+    tab = _data(_client(env["admin"]).get(reverse("academics:admin-timetable-tab")))
+    assert len(tab["bellSchedule"]) == 7
+
+
+def test_save_bell_schedule_updates_period_times(env):
+    _post(env, {"action": "save_bell_schedule", "payload": {"periods": _bell_periods(3)}})
+    updated = _bell_periods(3)
+    updated[2] = {
+        "sequence": 3,
+        "name": "Period 3",
+        "startTime": "10:15",
+        "endTime": "11:00",
+    }
+    resp = _post(env, {"action": "save_bell_schedule", "payload": {"periods": updated}})
+    assert resp.status_code == 200, resp.content
+    row = [p for p in _data(resp)["bellSchedule"] if p["sequence"] == 3][0]
+    assert row["startTime"] == "10:15"
+    assert row["endTime"] == "11:00"
+
+
+def test_save_bell_schedule_rejects_overlapping_times(env):
+    resp = _post(env, {"action": "save_bell_schedule", "payload": {"periods": [
+        {"sequence": 1, "name": "P1", "startTime": "09:00", "endTime": "10:00"},
+        {"sequence": 2, "name": "P2", "startTime": "09:30", "endTime": "10:30"},
+    ]}})
+    assert resp.status_code == 400, resp.content
+    assert "overlap" in _action_errors(resp)["error"].lower()

@@ -49,6 +49,40 @@ def _time(value):
         return datetime.time(int(h), int(m or 0))
 
 
+def _bell_period(slot) -> dict:
+    return {
+        "id": str(slot.id),
+        "name": slot.name,
+        "sequence": slot.sequence,
+        "startTime": slot.start_time.strftime("%H:%M"),
+        "endTime": slot.end_time.strftime("%H:%M"),
+    }
+
+
+def _validate_bell_schedule_periods(periods: list) -> str | None:
+    parsed: list[tuple[int, datetime.time, datetime.time]] = []
+    for p in periods:
+        seq = int(p.get("sequence") or 0)
+        start = _time(p.get("startTime"))
+        end = _time(p.get("endTime"))
+        if not seq or start is None or end is None:
+            return "Each period must have a number, start time, and end time."
+        if start >= end:
+            return f"Period {seq}: start time must be before end time."
+        parsed.append((seq, start, end))
+
+    sequences = [row[0] for row in parsed]
+    if len(sequences) != len(set(sequences)):
+        return "Duplicate period numbers are not allowed."
+
+    parsed.sort(key=lambda row: row[0])
+    for i, (_, start_a, end_a) in enumerate(parsed):
+        for _, start_b, end_b in parsed[i + 1:]:
+            if start_a < end_b and start_b < end_a:
+                return "Period times must not overlap."
+    return None
+
+
 def _resolve_period_slot(branch, period_index, start_time, end_time, user):
     """Find a period slot by sequence, or create one from the slot's index + times."""
     slot = tt_q.list_period_slots(branch.pk).filter(sequence=period_index).first()
@@ -499,6 +533,64 @@ class AdminAcademicsActionView(APIView):
                     return Response({"error": str(exc.detail)}, status=status.HTTP_400_BAD_REQUEST)
                 raise
             return Response({"ok": True})
+
+        if action == "save_bell_schedule":
+            periods = payload.get("periods") or []
+            if not periods:
+                return Response(
+                    {"error": "At least one period is required."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            err = _validate_bell_schedule_periods(periods)
+            if err:
+                return Response({"error": err}, status=status.HTTP_400_BAD_REQUEST)
+
+            from django.db.models import Max
+            from apps.academics.models import TimetableEntry
+
+            max_used = (
+                TimetableEntry.objects.filter(
+                    timetable__batch__course__department__branch_id=branch.pk,
+                    is_active=True,
+                )
+                .aggregate(m=Max("period_slot__sequence"))["m"]
+            )
+            max_submitted = max(int(p.get("sequence") or 0) for p in periods)
+            if max_used and max_submitted < max_used:
+                return Response(
+                    {
+                        "error": (
+                            f"Cannot remove periods in use. Timetable uses up to period {max_used}."
+                        ),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            for p in periods:
+                seq = int(p["sequence"])
+                start = _time(p["startTime"])
+                end = _time(p["endTime"])
+                name = (p.get("name") or f"Period {seq}").strip()
+                existing = tt_q.list_period_slots(branch.pk).filter(sequence=seq).first()
+                if existing:
+                    tt_i.update_period_slot(
+                        existing,
+                        fields={"name": name, "start_time": start, "end_time": end},
+                        user=user,
+                    )
+                else:
+                    tt_i.create_period_slot(
+                        branch.pk,
+                        name=name,
+                        sequence=seq,
+                        start_time=start,
+                        end_time=end,
+                        user=user,
+                    )
+            return Response({
+                "ok": True,
+                "bellSchedule": [_bell_period(s) for s in tt_q.list_period_slots(branch.pk)],
+            })
 
         if action == "save_timetable_slot":
             batch = struct_q.get_batch(branch.pk, payload.get("classSectionId"))

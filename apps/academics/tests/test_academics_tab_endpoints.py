@@ -74,6 +74,29 @@ def test_admin_timetable_tab_includes_clashes(env):
     assert "adminReviewQueue" in body
     assert "subjectTeachers" in body
     assert isinstance(body["subjectTeachers"], list)
+    assert "bellSchedule" in body
+    assert isinstance(body["bellSchedule"], list)
+
+
+def test_admin_timetable_tab_bell_schedule_shape(env):
+    import datetime
+    from apps.academics.models import PeriodSlot
+
+    PeriodSlot.objects.create(
+        branch=env["branch"],
+        name="Period 1",
+        sequence=1,
+        start_time=datetime.time(8, 0),
+        end_time=datetime.time(8, 45),
+    )
+    body = _body(_client(env["admin"]).get(reverse("academics:admin-timetable-tab")))
+    assert len(body["bellSchedule"]) == 1
+    row = body["bellSchedule"][0]
+    assert row["sequence"] == 1
+    assert row["startTime"] == "08:00"
+    assert row["endTime"] == "08:45"
+    assert "id" in row
+    assert row["name"] == "Period 1"
 
 
 def test_resolve_review_dismisses_queue_item(env):
