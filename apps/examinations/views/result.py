@@ -197,6 +197,24 @@ class ExamResultsExportView(APIView):
             branch_id=branch.pk,
             class_section_id=class_section_id,
         )
+
+        import csv
+        import io
+
+        from apps.analytics.enums import ReportType
+        from apps.core.exports.sync import log_instant_csv_export
+
+        rows = list(csv.DictReader(io.StringIO(csv_text)))
+        log_instant_csv_export(
+            tenant=request.user.tenant,
+            branch=branch,
+            report_type=ReportType.EXAM_CLASS_RESULTS,
+            params={"examId": str(exam.pk), "classSectionId": class_section_id},
+            requested_by=request.user,
+            rows=rows,
+            csv_bytes=csv_text.encode("utf-8"),
+        )
+
         from django.http import HttpResponse
 
         filename = f"{exam.name.replace(' ', '-')}-{class_section_id}-results.csv"

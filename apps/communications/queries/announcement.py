@@ -36,11 +36,28 @@ def list_for_branch(branch_id):
     )
 
 
-def list_for_student(branch_id, batch_id=None):
-    """Announcements a student should see: everyone, their batch, or role=student."""
+def _department_batch_ids(branch_id, department_id) -> list[str]:
+    from apps.academics.models import Batch
+
+    return [
+        str(bid) for bid in Batch.objects.filter(
+            course__department_id=department_id,
+            course__department__branch_id=branch_id,
+            is_active=True,
+        ).values_list("id", flat=True)
+    ]
+
+
+def list_for_student(branch_id, batch_id=None, department_id=None):
+    """Announcements a student should see: everyone, their batch, department, or role=student."""
     visible = Q(target_type="all") | Q(target_type="role", target_value="student")
     if batch_id:
         visible |= Q(target_type="batch", target_value=str(batch_id))
+    if department_id:
+        dept_batch_ids = _department_batch_ids(branch_id, department_id)
+        if dept_batch_ids:
+            visible |= Q(target_type="department", target_value=str(department_id))
+            visible |= Q(target_type="batch", target_value__in=dept_batch_ids)
     return (
         Announcement.objects.filter(branch_id=branch_id, is_active=True)
         .filter(visible)
@@ -49,10 +66,11 @@ def list_for_student(branch_id, batch_id=None):
     )
 
 
-def list_for_faculty(branch_id, faculty_user_id=None):
+def list_for_faculty(branch_id, faculty_user_id=None, department_ids=None):
     """Announcements a faculty member should see:
       - everyone, or role=faculty/staff, plus
-      - batch-targeted announcements for any class where they are the class teacher.
+      - batch-targeted announcements for any class where they are the class teacher,
+      - department-targeted announcements for their departments.
     """
     from apps.academics.models import Batch
 
@@ -61,20 +79,37 @@ def list_for_faculty(branch_id, faculty_user_id=None):
         | Q(target_type="role", target_value__in=["faculty", "staff"])
     )
     if faculty_user_id:
-        teacher_batch_ids = [
-            str(bid) for bid in Batch.objects.filter(
-                course__department__branch_id=branch_id,
-                class_teacher_id=faculty_user_id, is_active=True,
-            ).values_list("id", flat=True)
-        ]
+        teacher_batches = Batch.objects.filter(
+            course__department__branch_id=branch_id,
+            class_teacher_id=faculty_user_id, is_active=True,
+        )
+        teacher_batch_ids = [str(bid) for bid in teacher_batches.values_list("id", flat=True)]
         if teacher_batch_ids:
             visible |= Q(target_type="batch", target_value__in=teacher_batch_ids)
-
+        dept_ids = department_ids or list(
+            teacher_batches.values_list("course__department_id", flat=True).distinct()
+        )
+        for dept_id in dept_ids:
+            if dept_id:
+                visible |= Q(target_type="department", target_value=str(dept_id))
     return (
         Announcement.objects.filter(branch_id=branch_id, is_active=True)
         .filter(visible)
         .select_related("branch")
         .order_by("-created_at")
+    )
+
+
+def recent_read_for_user(user_id, announcement_ids, limit=5) -> list:
+    """Return up to ``limit`` announcement ids most recently read by the user."""
+    if not announcement_ids:
+        return []
+    return list(
+        AnnouncementRead.objects.filter(
+            user_id=user_id, announcement_id__in=announcement_ids, is_active=True,
+        )
+        .order_by("-read_at")
+        .values_list("announcement_id", flat=True)[:limit]
     )
 
 

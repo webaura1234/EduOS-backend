@@ -1,35 +1,13 @@
-"""Celery tasks — large report exports (OD-2) + nightly cleanup.
-
-Serializes the report's request-time snapshot to CSV and uploads it via the S3 adapter
-(sandbox in tests/dev, live at deploy). Runs eagerly in tests (CELERY_TASK_ALWAYS_EAGER).
-"""
-
-import csv
-import io
+"""Celery tasks — large report exports (OD-2) + nightly cleanup."""
 
 from celery import shared_task
 from django.utils.timezone import now
 
 from apps.analytics.enums import ReportStatus
 from apps.analytics.queries import report as report_q
+from apps.core.exports.base import AggregationExportDefinition
+from apps.core.exports.csv import queryset_to_csv_bytes, rows_to_csv_bytes as csv_rows_to_bytes
 from apps.integrations.adapters.s3 import get_s3_adapter
-
-
-def _rows_to_csv(rows: list[dict]) -> bytes:
-    if not rows:
-        return b""
-    buf = io.StringIO()
-    fieldnames = sorted({k for r in rows for k in r.keys()})
-    writer = csv.DictWriter(buf, fieldnames=fieldnames)
-    writer.writeheader()
-    for r in rows:
-        writer.writerow(r)
-    return buf.getvalue().encode("utf-8-sig")  # BOM for Excel compatibility
-
-
-def rows_to_csv_bytes(rows: list[dict]) -> bytes:
-    """Public helper for views and Celery tasks."""
-    return _rows_to_csv(rows)
 
 
 @shared_task(
@@ -39,7 +17,7 @@ def rows_to_csv_bytes(rows: list[dict]) -> bytes:
     retry_kwargs={"max_retries": 3},
 )
 def generate_export_task(self, export_id):
-    """Build a CSV from the frozen snapshot and upload it to S3; set the signed URL."""
+    """Build a CSV from the frozen snapshot or stream definition queryset; upload to S3."""
     export = report_q.get_export_by_id(export_id)
     if export is None:
         return
@@ -48,14 +26,27 @@ def generate_export_task(self, export_id):
         "celery_task_id": self.request.id or "",
     })
     try:
-        # Check if a definition exists in the registry for streaming large exports.
-        # Falls back to snapshot-based generation for legacy report types.
         definition = _try_get_definition(export.report_type)
-        if definition is not None:
-            content = _stream_definition_to_csv(definition, export)
+        params = export.params or {}
+
+        if definition is not None and isinstance(definition, AggregationExportDefinition):
+            rows = (export.snapshot or {}).get("rows")
+            if rows is None:
+                from apps.organizations.models import Branch
+                branch = Branch.objects.filter(pk=export.branch_id).first() if export.branch_id else None
+                rows = definition.resolve_rows(tenant=export.tenant, branch=branch, params=params)
+            columns = definition.get_columns(params)
+            content = csv_rows_to_bytes(rows, columns)
+        elif definition is not None:
+            qs = definition.get_queryset_for_export(
+                tenant_id=export.tenant_id,
+                branch_id=export.branch_id,
+                params=params,
+            )
+            content, _ = queryset_to_csv_bytes(definition, qs, params)
         else:
             rows = (export.snapshot or {}).get("rows", [])
-            content = rows_to_csv_bytes(rows)
+            content = csv_rows_to_bytes(rows, None)
 
         s3 = get_s3_adapter()
         key = f"exports/{export.tenant_id}/{export.pk}.csv"
@@ -74,29 +65,17 @@ def generate_export_task(self, export_id):
         raise
 
 
+def rows_to_csv_bytes(rows: list[dict]) -> bytes:
+    """Public helper for views and legacy snapshot exports."""
+    return csv_rows_to_bytes(rows, None)
+
+
 def _try_get_definition(report_type: str):
-    """Return the ExportDefinition for this report_type, or None if not registered."""
     try:
         from apps.core.exports.registry import get_definition
         return get_definition(report_type)
     except (ImportError, ValueError):
         return None
-
-
-def _stream_definition_to_csv(definition, export) -> bytes:
-    """Stream rows from a definition's queryset directly to CSV bytes (constant memory)."""
-    qs = definition.get_queryset_for_export(
-        tenant_id=export.tenant_id,
-        branch_id=export.branch_id,
-        params=export.params or {},
-    )
-    columns = definition.get_columns(export.params or {})
-    buf = io.StringIO()
-    csv.writer(buf).writerow([c.label for c in columns])  # friendly header row
-    writer = csv.DictWriter(buf, fieldnames=[c.key for c in columns], extrasaction="ignore")
-    for obj in qs.iterator(chunk_size=2000):
-        writer.writerow(definition.get_row(obj))
-    return buf.getvalue().encode("utf-8-sig")
 
 
 @shared_task
@@ -113,6 +92,6 @@ def purge_expired_exports():
         if export.file_key:
             try:
                 s3.delete(key=export.file_key)
-            except Exception:  # noqa: BLE001 — best-effort, don't block row deletion
+            except Exception:  # noqa: BLE001
                 pass
     expired.delete()

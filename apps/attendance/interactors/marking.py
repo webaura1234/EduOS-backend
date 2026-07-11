@@ -172,4 +172,6 @@ def mark_session(*, branch, session, marks: list[dict], user=None):
 
     session_q.update_session(session, {"status": SessionStatus.COMPLETED}, user=user)
     live_i.invalidate_live_cache(branch.pk, session.date)
+    from apps.communications.interactors.triggers.attendance import notify_absent_records
+    notify_absent_records(branch=branch, session=session, records=records, user=user)
     return records

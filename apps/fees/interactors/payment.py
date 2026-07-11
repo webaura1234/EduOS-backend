@@ -211,6 +211,8 @@ class VerifyPaymentCaptureInteractor:
             apply_amount_to_invoice(invoice, amount_to_apply)
 
         _issue_receipt(invoice, payment)
+        from apps.communications.interactors.triggers.fees import notify_payment_received
+        notify_payment_received(invoice, payment, created_by=self.requesting_user)
         return payment
 
 
@@ -269,4 +271,6 @@ class RecordOfflinePaymentInteractor:
             apply_amount_to_invoice(invoice, amount_to_apply, user=self.user)
 
         _issue_receipt(invoice, payment, user=self.user)
+        from apps.communications.interactors.triggers.fees import notify_payment_received
+        notify_payment_received(invoice, payment, created_by=self.user)
         return payment

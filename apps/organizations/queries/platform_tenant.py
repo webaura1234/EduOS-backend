@@ -97,7 +97,12 @@ def create_tenant(*, name, subdomain, institution_type, city, state,
 
 
 def create_settings(tenant, user=None) -> TenantSettings:
-    return TenantSettings.objects.create(tenant=tenant, created_by=user, updated_by=user)
+    return TenantSettings.objects.create(
+        tenant=tenant,
+        fee_reminder_days=[7, 5, 3, 1],
+        created_by=user,
+        updated_by=user,
+    )
 
 
 def create_subscription(tenant, plan, limits: dict, user=None) -> PlanSubscription:

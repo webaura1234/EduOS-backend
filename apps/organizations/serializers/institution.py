@@ -33,14 +33,21 @@ class UpdateAttendanceSettingsSerializer(serializers.Serializer):
     attendanceMode = serializers.ChoiceField(choices=["day", "session"], required=False)
     attendanceThresholdPercent = serializers.IntegerField(required=False, min_value=0, max_value=100)
     examDayCountsTowardAttendance = serializers.BooleanField(required=False)
+    feeReminderDays = serializers.ListField(
+        child=serializers.IntegerField(min_value=1, max_value=90),
+        required=False,
+        allow_empty=True,
+    )
 
 
 def attendance_settings_dict(s) -> dict:
     """Present a TenantSettings as the camelCase attendance config payload."""
+    days = s.fee_reminder_days or []
     return {
         "attendanceMode": s.attendance_mode,
         "attendanceThresholdPercent": s.attendance_threshold_percent,
         "examDayCountsTowardAttendance": s.exam_day_counts_toward_attendance,
+        "feeReminderDays": days,
     }
 
 

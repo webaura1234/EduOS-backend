@@ -88,7 +88,10 @@ class FacultyDashboardView(APIView):
 
         # Announcements + holidays
         try:
-            announcements = [_announcement(a) for a in ann_q.list_for_faculty(branch.pk)[:5]]
+            announcements = [
+                _announcement(a)
+                for a in ann_q.list_for_faculty(branch.pk, faculty_user_id=user.pk)[:5]
+            ]
         except Exception:
             announcements = []
         try:

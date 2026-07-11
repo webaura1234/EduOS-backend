@@ -74,6 +74,8 @@ class ApplicationStatusView(APIView):
             )
 
         updated = app_q.update_application(application, {"status": new_status}, user=request.user)
+        from apps.communications.interactors.triggers.admissions import notify_application_status_updated
+        notify_application_status_updated(application=updated, new_status=new_status, user=request.user)
         return Response({"application": ApplicationSerializer(updated).data})
 
 

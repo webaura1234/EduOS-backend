@@ -24,6 +24,8 @@ class ReportExport(BaseModel):
         related_name="report_exports",
     )
     report_type = models.CharField(max_length=30, choices=ReportType.choices)
+    module = models.CharField(max_length=30, blank=True, default="")
+    title = models.CharField(max_length=120, blank=True, default="")
     params = models.JSONField(default=dict, blank=True)
     status = models.CharField(
         max_length=15, choices=ReportStatus.choices, default=ReportStatus.QUEUED, db_index=True

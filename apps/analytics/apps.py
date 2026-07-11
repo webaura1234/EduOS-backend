@@ -8,4 +8,4 @@ class AnalyticsConfig(AppConfig):
     verbose_name = "Analytics & Audit"
 
     def ready(self):
-        pass  # TODO: import apps.analytics.signals when created
+        import apps.analytics.exports  # noqa: F401 — registers aggregation report definitions

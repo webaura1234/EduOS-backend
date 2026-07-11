@@ -361,3 +361,42 @@ def test_report_card_download_after_publish(result_env):
     payload = _data(card)["reportCard"]
     assert payload["canDownload"] is True
     assert payload["content"]
+
+
+def test_class_results_csv_export_unchanged_and_logged(result_env):
+    """Legacy GET export URL, CSV shape, and permissions — plus ReportExport history row."""
+    from apps.analytics.enums import ReportStatus, ReportType
+    from apps.analytics.models import ReportExport
+
+    admin = _client(result_env["admin"])
+    exam_id, _ = _setup_exam_with_submitted_marks(result_env)
+    batch_id = str(result_env["batch"].id)
+
+    resp = admin.get(
+        reverse("examinations:exam-results-export", kwargs={"exam_id": exam_id}),
+        {"classSectionId": batch_id},
+    )
+    assert resp.status_code == 200, resp.content
+    assert resp["Content-Type"].startswith("text/csv")
+    body = resp.content.decode("utf-8")
+    lines = body.strip().splitlines()
+    assert lines[0] == "Student ID,Student Name,Maths"
+    assert len(lines) >= 2
+
+    export = ReportExport.objects.filter(
+        tenant=result_env["tenant"],
+        report_type=ReportType.EXAM_CLASS_RESULTS,
+        requested_by=result_env["admin"],
+    ).order_by("-created_at").first()
+    assert export is not None
+    assert export.status == ReportStatus.READY
+    assert export.row_count == 1
+    assert export.module == "examinations"
+    assert export.title == "Class Results"
+
+    student = _client(result_env["student"].user)
+    denied = student.get(
+        reverse("examinations:exam-results-export", kwargs={"exam_id": exam_id}),
+        {"classSectionId": batch_id},
+    )
+    assert denied.status_code == 403

@@ -12,9 +12,13 @@ from apps.analytics.views.dashboard import (
 from apps.analytics.views.results_comparison import SuperAdminResultsComparisonView
 from apps.analytics.views.report import (
     NaacExportView,
+    ReportCatalogView,
     ReportDetailView,
     ReportDownloadView,
     ReportExportsView,
+    ReportPreviewView,
+    SavedReportFilterDetailView,
+    SavedReportFiltersView,
 )
 
 app_name = "analytics"
@@ -36,6 +40,14 @@ urlpatterns = [
     path("audit/verify/", AuditVerifyView.as_view(), name="audit-verify"),
 
     # Reports
+    path("reports/catalog/", ReportCatalogView.as_view(), name="report-catalog"),
+    path("reports/preview/", ReportPreviewView.as_view(), name="report-preview"),
+    path("reports/saved-filters/", SavedReportFiltersView.as_view(), name="report-saved-filters"),
+    path(
+        "reports/saved-filters/<uuid:filter_id>/",
+        SavedReportFilterDetailView.as_view(),
+        name="report-saved-filter-detail",
+    ),
     path("reports/", ReportExportsView.as_view(), name="report-exports"),
     path("reports/naac/", NaacExportView.as_view(), name="report-naac"),
     path("reports/<uuid:export_id>/", ReportDetailView.as_view(), name="report-detail"),

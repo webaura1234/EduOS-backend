@@ -17,6 +17,7 @@ class ReportType(models.TextChoices):
     FEE_COLLECTION = "fee_collection", "Fees — Collection"
     ADMISSION_FUNNEL = "admission_funnel", "Admissions — Funnel"
     HR_LEAVE_SUMMARY = "hr_leave_summary", "HR — Leave Summary"
+    HR_HEADCOUNT = "hr_headcount", "HR — Headcount"
     NAAC = "naac", "NAAC / NIRF"
     # Extended types — unified export framework
     FEE_LEDGER = "fee_ledger", "Fees — Ledger"
@@ -31,3 +32,8 @@ class ReportType(models.TextChoices):
     STUDENT_EXAM_RESULTS = "student_exam_results", "Student — My Exam Results"
     # Super-admin — tenant-wide cross-branch export
     BRANCH_SUMMARY = "branch_summary", "Branches — Summary"
+    # Sync CSV reports (instant delivery, logged to ReportExport)
+    EXAM_SEATING = "exam_seating", "Examinations — Seating Plan"
+    EXAM_CLASS_RESULTS = "exam_class_results", "Examinations — Class Results"
+    COLLEGE_NAAC = "college_naac", "College — NAAC Export"
+    COLLEGE_NIRF = "college_nirf", "College — NIRF Export"

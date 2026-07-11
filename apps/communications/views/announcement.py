@@ -12,11 +12,13 @@ from apps.accounts.models.user import Role, User
 from apps.accounts.permissions import IsAdminOrSuperAdmin, IsStudent
 from apps.attendance.permissions import IsFacultyOrAdmin
 from apps.admissions.queries.enrollment import get_active_enrollment_for_profile
+from apps.communications.models import AnnouncementTargetType
 from apps.communications.queries import announcement as ann_q
 
 _CHANNELS = ("in_app", "sms", "email")
 _TARGET_LABELS = {"all": "Everyone", "role": "By role", "batch": "Class/Batch",
                   "department": "Department"}
+_VALID_TARGET_TYPES = {c.value for c in AnnouncementTargetType}
 
 
 def _announcement(a) -> dict:
@@ -87,6 +89,8 @@ class AdminAnnouncementsView(APIView):
             raise ValidationError({"title": "Title and body are required."})
 
         target_type = request.data.get("targetType", "all")
+        if target_type not in _VALID_TARGET_TYPES:
+            raise ValidationError({"targetType": f"Invalid target type '{target_type}'."})
         target_value = str(request.data.get("targetValue", "") or "")
         channels = [c for c in (request.data.get("channels") or []) if c in _CHANNELS]
 
@@ -97,6 +101,8 @@ class AdminAnnouncementsView(APIView):
             recipient_count=_recipient_count(branch, target_type, target_value),
             user=request.user,
         )
+        from apps.communications.interactors.announcement_emit import emit_announcement_notifications
+        emit_announcement_notifications(announcement, created_by=request.user)
         return Response({"announcement": _announcement(announcement)},
                         status=http.HTTP_201_CREATED)
 
@@ -105,9 +111,16 @@ def _student_notices(request):
     """All notices visible to the logged-in student (newest first)."""
     branch = resolve_branch(request)
     profile = getattr(request.user, "student_profile", None)
-    enrollment = get_active_enrollment_for_profile(profile.pk) if profile else None
+    if not profile:
+        return list(ann_q.list_for_student(branch.pk))
+    enrollment = get_active_enrollment_for_profile(profile.pk)
     batch_id = enrollment.batch_id if enrollment else None
-    return list(ann_q.list_for_student(branch.pk, batch_id=batch_id))
+    department_id = None
+    if enrollment and enrollment.batch_id and enrollment.batch.course_id:
+        department_id = enrollment.batch.course.department_id
+    return list(ann_q.list_for_student(
+        branch.pk, batch_id=batch_id, department_id=department_id,
+    ))
 
 
 class StudentAnnouncementsView(APIView):
@@ -117,11 +130,13 @@ class StudentAnnouncementsView(APIView):
 
     def get(self, request) -> Response:
         rows = _student_notices(request)
-        read_ids = ann_q.read_ids_for_user(request.user.pk, [a.pk for a in rows])
+        row_ids = [a.pk for a in rows]
+        read_ids = ann_q.read_ids_for_user(request.user.pk, row_ids)
         unread = [a for a in rows if a.pk not in read_ids]
-        read = [a for a in rows if a.pk in read_ids]
-        # Show every unread notice, but only the 5 most recent read ones.
-        visible = sorted(unread + read[:5], key=lambda a: a.created_at, reverse=True)
+        recent_read_ids = ann_q.recent_read_for_user(request.user.pk, row_ids, limit=5)
+        read_by_id = {a.pk: a for a in rows if a.pk in read_ids}
+        recent_read = [read_by_id[aid] for aid in recent_read_ids if aid in read_by_id]
+        visible = sorted(unread + recent_read, key=lambda a: a.created_at, reverse=True)
 
         def item(a):
             return {**_announcement(a), "read": a.pk in read_ids}

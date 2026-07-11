@@ -87,7 +87,7 @@ def enrollments_in_batch(batch_id):
         StudentEnrollment.objects.filter(
             batch_id=batch_id, status=EnrollmentStatus.ACTIVE, is_active=True
         )
-        .select_related("student_profile__user", "batch", "academic_year")
+        .select_related("student_profile__user", "batch", "academic_year", "batch__course", "batch__academic_year")
         .order_by("student_profile__user__first_name")
     )
 

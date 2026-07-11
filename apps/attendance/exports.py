@@ -8,7 +8,7 @@ user's attendance by tampering with the request body.
 
 from apps.accounts.models.user import Role
 from apps.analytics.enums import ReportType
-from apps.core.exports.base import Column, ExportDefinition
+from apps.core.exports.base import Column, ExportDefinition, FilterSpec
 from apps.core.exports.registry import register
 
 
@@ -17,9 +17,16 @@ class FacultySubjectAttendanceExport(ExportDefinition):
 
     report_type = ReportType.FACULTY_SUBJECT_ATTENDANCE
     title = "My Subject Attendance"
+    module = "attendance"
+    description = "Attendance for classes you teach"
     allowed_roles = [Role.FACULTY]
     formats = ["csv"]
     sync_threshold = 500
+    estimated_runtime = "instant"
+    filters = [
+        FilterSpec("fromDate", "From Date", type="date"),
+        FilterSpec("toDate", "To Date", type="date"),
+    ]
 
     def get_queryset(self, *, tenant_id, branch_id, params: dict):
         from apps.academics.models import BatchFaculty
@@ -79,9 +86,16 @@ class StudentAttendanceExport(ExportDefinition):
 
     report_type = ReportType.STUDENT_ATTENDANCE
     title = "My Attendance"
+    module = "attendance"
+    description = "Your attendance records"
     allowed_roles = [Role.STUDENT]
     formats = ["csv"]
     sync_threshold = 2000
+    estimated_runtime = "instant"
+    filters = [
+        FilterSpec("fromDate", "From Date", type="date"),
+        FilterSpec("toDate", "To Date", type="date"),
+    ]
 
     def get_queryset(self, *, tenant_id, branch_id, params: dict):
         from apps.attendance.models import AttendanceRecord

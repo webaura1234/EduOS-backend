@@ -290,6 +290,24 @@ def test_large_report_runs_celery_and_uploads_to_s3(env):
     assert export.file_key in SandboxS3.SINK  # the CSV was "uploaded"
 
 
+def test_s3_backed_report_download_streams_csv(env):
+    create_enquiry(branch=env["branch"], source="walk_in", applicant_name="Asha")
+    export = report_i.generate_report(
+        tenant=env["tenant"], branch=env["branch"], report_type=ReportType.ADMISSION_FUNNEL,
+        params={}, requester=env["admin"], threshold=0,
+    )
+    export.download_url = "https://gallery.eduerp.in/exports/fake.csv"
+    export.save(update_fields=["download_url"])
+
+    resp = _client(env["admin"]).get(
+        reverse("analytics:report-download", kwargs={"export_id": export.pk}),
+    )
+    assert resp.status_code == 200
+    assert resp["Content-Type"].startswith("text/csv")
+    assert b"Content-Disposition" not in resp.content  # header, not body
+    assert resp.content == SandboxS3.SINK[export.file_key]
+
+
 def test_report_snapshot_is_frozen(env):
     create_enquiry(branch=env["branch"], source="walk_in", applicant_name="Asha")
     export = report_i.generate_report(

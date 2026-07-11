@@ -234,6 +234,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.analytics.tasks.purge_expired_exports",
         "schedule": 86400,  # 24 h; crontab(hour=2, minute=0) when django-celery-beat DB scheduler is seeded
     },
+    "daily-notification-scans": {
+        "task": "apps.communications.tasks.run_daily_notification_scans",
+        "schedule": 86400,
+    },
 }
 
 # ──────────────────────────────────────────────

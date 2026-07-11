@@ -50,6 +50,11 @@ class TenantSettings(BaseModel):
     # Notifications
     sms_enabled = models.BooleanField(default=True)
     email_enabled = models.BooleanField(default=True)
+    fee_reminder_days = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Days before due date to send fee reminders, e.g. [7, 5, 3, 1].",
+    )
 
     class Meta:
         db_table = "organizations_tenant_settings"

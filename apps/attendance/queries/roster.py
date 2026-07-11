@@ -26,7 +26,7 @@ def all_active_students_in_branch(branch_id):
             status=EnrollmentStatus.ACTIVE,
             is_active=True,
         )
-        .select_related("student_profile__user", "batch")
+        .select_related("student_profile__user", "batch", "batch__course", "batch__academic_year")
         .order_by("student_profile__user__first_name")
     )
 

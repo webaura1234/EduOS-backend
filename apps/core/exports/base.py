@@ -22,6 +22,15 @@ class Column:
     format: str = "text"  # "text" | "number" | "date" | "currency_paise"
 
 
+@dataclass
+class FilterSpec:
+    key: str
+    label: str
+    type: str = "text"  # date | date_range | select | number | text | batch_id | exam_id
+    required: bool = False
+    options_source: str | None = None
+
+
 class ExportDefinition(ABC):
     """Abstract base for all export types across the ERP.
 
@@ -33,8 +42,18 @@ class ExportDefinition(ABC):
     report_type: str        # must match a ReportType enum value
     title: str
     allowed_roles: list = []
-    formats: list = ["csv"]  # ["csv"] or ["csv", "pdf"]
+    formats: list = ["csv"]
     sync_threshold: int = 200  # ≤ this: inline; > this: Celery task
+
+    # Report catalog metadata
+    module: str = ""
+    description: str = ""
+    filters: list = []
+    supports_preview: bool = False
+    supports_search: bool = False
+    default_sort: tuple = ("", "asc")
+    estimated_runtime: str = "instant"  # "instant" | "background"
+    catalog_visible: bool = True
 
     @abstractmethod
     def get_queryset(self, *, tenant_id, branch_id, params: dict):
@@ -59,3 +78,21 @@ class ExportDefinition(ABC):
         return self.get_queryset(
             tenant_id=tenant_id, branch_id=branch_id, params=params
         ).using(_read_db())
+
+    @property
+    def is_aggregation(self) -> bool:
+        return isinstance(self, AggregationExportDefinition)
+
+
+class AggregationExportDefinition(ExportDefinition):
+    """Pivot / grouped reports that produce list[dict] rows (not one ORM row each)."""
+
+    @abstractmethod
+    def resolve_rows(self, *, tenant, branch, params: dict) -> list[dict]:
+        ...
+
+    def get_queryset(self, *, tenant_id, branch_id, params: dict):
+        raise NotImplementedError("Aggregation reports use resolve_rows(), not get_queryset().")
+
+    def get_row(self, instance) -> dict:
+        raise NotImplementedError("Aggregation reports use resolve_rows(), not get_row().")

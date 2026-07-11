@@ -8,4 +8,4 @@ class HrConfig(AppConfig):
     verbose_name = "HR & Payroll"
 
     def ready(self):
-        pass  # TODO: import apps.hr.signals when created
+        import apps.hr.exports  # noqa: F401 — registers export definitions

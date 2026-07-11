@@ -443,6 +443,15 @@ def publish_results(exam, *, branch, tenant, confirm_token: str | None, note: st
             result_status=ResultStatus.PUBLISHED,
             user=user,
         )
+        from apps.communications.interactors.triggers.examinations import notify_results_published
+        notify_results_published(
+            exam=locked,
+            branch=branch,
+            tenant=tenant,
+            publication_id=publication.pk,
+            student_results=student_results,
+            user=user,
+        )
         cache.delete(_cache_key(locked.pk))
         return {
             "publication": {

@@ -116,7 +116,23 @@ class SeatingBulkExportView(APIView):
                         "studentName": seat["studentName"],
                     })
 
-        content = buf.getvalue().encode("utf-8-sig")
+        csv_text = buf.getvalue()
+        content = csv_text.encode("utf-8-sig")
+        rows = list(csv.DictReader(io.StringIO(csv_text)))
+
+        from apps.analytics.enums import ReportType
+        from apps.core.exports.sync import log_instant_csv_export
+        log_instant_csv_export(
+            tenant=request.user.tenant,
+            branch=branch,
+            report_type=ReportType.EXAM_SEATING,
+            params={"examSlotIds": slot_ids},
+            requested_by=request.user,
+            rows=rows,
+            module="examinations",
+            title="Seating Plan",
+        )
+
         response = HttpResponse(content, content_type="text/csv")
         response["Content-Disposition"] = 'attachment; filename="seating-plans.csv"'
         return response

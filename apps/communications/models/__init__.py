@@ -5,9 +5,11 @@ from .announcement import (
     AnnouncementTargetType,
 )
 from .notification import NotificationPreference
+from .notification_inbox import Notification
 
 __all__ = [
     "NotificationPreference",
+    "Notification",
     "Announcement",
     "AnnouncementRead",
     "AnnouncementScope",

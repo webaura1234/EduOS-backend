@@ -132,6 +132,11 @@ class AttendanceSettingsView(APIView):
             fields["attendance_threshold_percent"] = data["attendanceThresholdPercent"]
         if "examDayCountsTowardAttendance" in data:
             fields["exam_day_counts_toward_attendance"] = data["examDayCountsTowardAttendance"]
+        if "feeReminderDays" in data:
+            fields["fee_reminder_days"] = sorted(
+                {int(d) for d in data["feeReminderDays"] if int(d) > 0},
+                reverse=True,
+            )
 
         settings = inst_q.get_or_create_tenant_settings(tenant)
         settings = inst_q.update_tenant_settings(settings, fields)

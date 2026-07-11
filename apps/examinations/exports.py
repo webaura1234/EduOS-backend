@@ -7,7 +7,7 @@ never trusted from client-supplied params.
 
 from apps.accounts.models.user import Role
 from apps.analytics.enums import ReportType
-from apps.core.exports.base import Column, ExportDefinition
+from apps.core.exports.base import AggregationExportDefinition, Column, ExportDefinition, FilterSpec
 from apps.core.exports.registry import register
 
 
@@ -16,9 +16,15 @@ class FacultyClassResultsExport(ExportDefinition):
 
     report_type = ReportType.FACULTY_CLASS_RESULTS
     title = "My Class Results"
+    module = "examinations"
+    description = "Marks you have entered for your classes"
     allowed_roles = [Role.FACULTY]
     formats = ["csv"]
     sync_threshold = 500
+    estimated_runtime = "instant"
+    filters = [
+        FilterSpec("examId", "Exam", type="exam_id"),
+    ]
 
     def get_queryset(self, *, tenant_id, branch_id, params: dict):
         from apps.academics.models import BatchFaculty
@@ -79,9 +85,12 @@ class StudentExamResultsExport(ExportDefinition):
 
     report_type = ReportType.STUDENT_EXAM_RESULTS
     title = "My Exam Results"
+    module = "examinations"
+    description = "Your published exam results"
     allowed_roles = [Role.STUDENT]
     formats = ["csv"]
     sync_threshold = 500
+    estimated_runtime = "instant"
 
     def get_queryset(self, *, tenant_id, branch_id, params: dict):
         from apps.examinations.models.results import StudentResult
@@ -118,9 +127,67 @@ class StudentExamResultsExport(ExportDefinition):
         return "my-exam-results"
 
 
+class ExamSeatingExport(AggregationExportDefinition):
+    """Seating plan CSV — generated synchronously from the Examinations module."""
+
+    report_type = ReportType.EXAM_SEATING
+    title = "Seating Plan"
+    module = "examinations"
+    description = "Exam seating allocations (export from Examinations → Seating)"
+    allowed_roles = [Role.ADMIN, Role.SUPER_ADMIN]
+    catalog_visible = False
+    estimated_runtime = "instant"
+    sync_threshold = 10000
+
+    def get_columns(self, params: dict) -> list[Column]:
+        return [
+            Column("classLabel", "Class"),
+            Column("subjectName", "Subject"),
+            Column("roomName", "Room"),
+            Column("seatNo", "Seat"),
+            Column("studentName", "Student"),
+        ]
+
+    def resolve_rows(self, *, tenant, branch, params: dict) -> list[dict]:
+        return []
+
+
+class ExamClassResultsExport(AggregationExportDefinition):
+    """Class-wide marks CSV — generated synchronously from Examinations → Results.
+
+    CSV headers include dynamic subject columns per exam; sync logging preserves the
+    exact legacy bytes via log_instant_csv_export(csv_bytes=...).
+    """
+
+    report_type = ReportType.EXAM_CLASS_RESULTS
+    title = "Class Results"
+    module = "examinations"
+    description = "Marks for one class across all subjects in an exam"
+    allowed_roles = [Role.ADMIN, Role.SUPER_ADMIN]
+    catalog_visible = False
+    estimated_runtime = "instant"
+    sync_threshold = 10000
+    filters = [
+        FilterSpec("examId", "Exam", type="exam_id", required=True),
+        FilterSpec("classSectionId", "Class", type="batch_id", required=True),
+    ]
+
+    def get_columns(self, params: dict) -> list[Column]:
+        # Base columns only — subject columns are dynamic per exam/class.
+        return [
+            Column("Student ID", "Student ID"),
+            Column("Student Name", "Student Name"),
+        ]
+
+    def resolve_rows(self, *, tenant, branch, params: dict) -> list[dict]:
+        return []
+
+
 def register_all() -> None:
     register(FacultyClassResultsExport())
     register(StudentExamResultsExport())
+    register(ExamSeatingExport())
+    register(ExamClassResultsExport())
 
 
 register_all()

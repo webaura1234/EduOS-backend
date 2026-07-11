@@ -24,7 +24,7 @@ def _percent(student_id, *, date_from, date_to, exclude_exam, batch_subject_id=N
 
 
 def _percent_map(students, *, date_from, date_to, exclude_exam):
-    """{ student_pk: (percent, total) } for many students in a single query (no N+1)."""
+    """{ student_pk: (percent, total, present_like, excused) } for many students."""
     counts = record_q.aggregate_counts_by_student(
         [sp.pk for sp in students], date_from=date_from, date_to=date_to,
         exclude_exam_days=exclude_exam,
@@ -32,7 +32,7 @@ def _percent_map(students, *, date_from, date_to, exclude_exam):
     out = {}
     for sp in students:
         present_like, excused, total = counts.get(sp.pk, (0, 0, 0))
-        out[sp.pk] = (attendance_percent(present_like, excused, total), total)
+        out[sp.pk] = (attendance_percent(present_like, excused, total), total, present_like, excused)
     return out
 
 
@@ -60,16 +60,42 @@ def _attendance_rows(
 
     rows = []
     for sp in students:
-        pct, total = percents[sp.pk]
+        pct, total, present_like, excused = percents[sp.pk]
         if below_threshold_only:
             if total <= 0 or not is_below_threshold(pct, threshold):
                 continue
+                
+        # Status calculation
+        status_label = "Good"
+        if total > 0:
+            if is_below_threshold(pct, threshold):
+                status_label = "Shortage"
+            elif is_below_threshold(pct, threshold + 5):
+                status_label = "Warning"
+                
+        present_days = present_like + excused
+        absent_days = total - present_days
+
+        # Safe attribute access since we select_related batch, course, academic_year
+        class_name = sp.batch.course.name if sp.batch_id and sp.batch.course_id else ""
+        section_name = sp.batch.name if sp.batch_id else ""
+        academic_year = sp.batch.academic_year.name if sp.batch_id and getattr(sp.batch, 'academic_year_id', None) else ""
+        admission_no = sp.student_profile.admission_number if sp.student_profile_id else ""
+
         rows.append({
-            "studentId": str(sp.student_profile_id),
+            "studentId": str(sp.student_profile_id), # Keep for internal use if needed
+            "admissionNo": admission_no,
             "name": sp.user.full_name,
+            "class": class_name,
+            "section": section_name,
+            "academicYear": academic_year,
             "batchId": str(sp.current_batch_id) if sp.current_batch_id else None,
             "percent": pct,
             "sessions": total,
+            "present": present_days,
+            "absent": absent_days,
+            "status": status_label,
+            "branchName": branch.name,
         })
     rows.sort(key=lambda r: r["percent"])
     return {
