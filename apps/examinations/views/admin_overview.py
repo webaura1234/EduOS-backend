@@ -186,6 +186,8 @@ class AdminExaminationsOverviewView(APIView):
             "students": students,
             "seatingPlans": seating_plans,
             "invigilation": invigilation,
+            # Active faculty only — same source as auto-assign / duty writes.
+            "faculty": inv_q.faculty_options_for_branch(branch.tenant_id, branch.pk),
             "resultStatusByExam": result_status_by_exam,
             "publishedResults": published_results,
         })

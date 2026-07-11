@@ -3,7 +3,7 @@ Security and authentication models.
 
   - LoginAttempt          → tracks every login attempt for brute-force protection.
   - AuthAuditLog          → immutable append-only log of significant auth events.
-  - StudentIDCounter      → gap-free sequential student ID per branch per year.
+  - SequentialIdCounter   → gap-free sequential student/faculty IDs per branch.
   - PendingIdentityChange → stores phone/email change OTP pending user verification.
 """
 
@@ -133,35 +133,56 @@ class AuthAuditLog(BaseModel):
         return f"AuthAuditLog({self.event}, user={self.user_id}) @ {self.created_at}"
 
 
-class StudentIDCounter(BaseModel):
-    """
-    Gap-free sequential student ID counter per branch per academic year.
+class IdPurpose(models.TextChoices):
+    """Which population a sequential-ID counter serves."""
 
-    Used by generate_student_id() to produce deterministic, collision-free
-    custom_login_id values for new students (e.g. "ABCS/2025/00142").
-    A row-level lock (SELECT FOR UPDATE) prevents duplicates under concurrent admits.
+    STUDENT = "student", "Student"
+    FACULTY = "faculty", "Faculty"
+
+
+class SequentialIdCounter(BaseModel):
+    """
+    Gap-free sequential ID counter per (branch, purpose, period).
+
+    Drives generate_user_id() to produce deterministic, collision-free
+    custom_login_id values (e.g. "ABCS/2025/00142", "ABCS-FAC-0042").
+    A row-level lock (SELECT FOR UPDATE) prevents duplicates under concurrency.
+
+    - Students: ``academic_year`` = "2025-2026" → the sequence resets each year.
+    - Faculty:  ``academic_year`` = "" (empty)  → the sequence runs continuously.
     """
 
     branch = models.ForeignKey(
         "organizations.Branch",
         on_delete=models.CASCADE,
-        related_name="student_id_counters",
+        related_name="id_counters",
         db_index=True,
+    )
+    purpose = models.CharField(
+        max_length=16,
+        choices=IdPurpose.choices,
+        default=IdPurpose.STUDENT,
+        help_text="Which population this counter numbers (student / faculty).",
     )
     academic_year = models.CharField(
         max_length=9,
-        help_text="Format: '2025-2026'",
+        blank=True,
+        default="",
+        help_text="'2025-2026' for year-scoped counters; '' for continuous.",
     )
     last_sequence = models.BigIntegerField(default=0)
 
     class Meta:
         db_table = "accounts_student_id_counter"
-        verbose_name = "Student ID Counter"
-        verbose_name_plural = "Student ID Counters"
-        unique_together = [("branch", "academic_year")]
+        verbose_name = "Sequential ID Counter"
+        verbose_name_plural = "Sequential ID Counters"
+        unique_together = [("branch", "purpose", "academic_year")]
 
     def __str__(self):
-        return f"StudentIDCounter(branch={self.branch_id}, year={self.academic_year}, seq={self.last_sequence})"
+        return (
+            f"SequentialIdCounter(branch={self.branch_id}, purpose={self.purpose}, "
+            f"year={self.academic_year!r}, seq={self.last_sequence})"
+        )
 
 
 class PendingIdentityChange(BaseModel):

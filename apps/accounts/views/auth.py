@@ -134,7 +134,12 @@ class RefreshView(APIView):
     Public endpoint — no authentication required.
     """
     permission_classes = [AllowAny]
-    throttle_scope = "auth"
+    # NOT the "auth" (login brute-force) scope: refresh is a legitimate high-frequency
+    # operation — a single page load can fan out several, plus multi-tab. Sharing login's
+    # 10/min bucket meant a normal token-expiry burst got 429'd, which the BFF used to read
+    # as a dead session → forced logout. Refresh is already secured by single-use rotation +
+    # family replay detection, so it gets its own generous bucket instead.
+    throttle_scope = "token_refresh"
 
     def post(self, request) -> Response[TokenPairDTO]:
         serializer = RefreshSerializer(data=request.data)

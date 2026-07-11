@@ -32,6 +32,31 @@ class TenantSettings(BaseModel):
         help_text='Label shown on login page for faculty ID. e.g. "Employee ID", "Staff Code".',
     )
 
+    # ── Auto-generated ID formats ────────────────────────────────────────────
+    # Templates rendered by accounts.id_generation.generate_user_id().
+    # Tokens: {BRANCH} branch code · {YEAR} 4-digit start year · {YY} 2-digit ·
+    #         {ROLE} STU/FAC · {SEQ} zero-padded running number.
+    student_id_format = models.CharField(
+        max_length=64,
+        default="{BRANCH}/{YEAR}/{SEQ}",
+        help_text="Template for student admission/roll IDs. Tokens: {BRANCH} {YEAR} {YY} {ROLE} {SEQ}.",
+    )
+    faculty_id_format = models.CharField(
+        max_length=64,
+        default="{BRANCH}-FAC-{SEQ}",
+        help_text="Template for faculty employee IDs. Tokens: {BRANCH} {YEAR} {YY} {ROLE} {SEQ}.",
+    )
+    student_id_seq_width = models.PositiveSmallIntegerField(
+        default=5, help_text="Zero-padding width for the {SEQ} token in student IDs.",
+    )
+    faculty_id_seq_width = models.PositiveSmallIntegerField(
+        default=4, help_text="Zero-padding width for the {SEQ} token in faculty IDs.",
+    )
+    student_id_reset_yearly = models.BooleanField(
+        default=True,
+        help_text="Reset the student sequence each academic year (vs. run continuously).",
+    )
+
     # Attendance thresholds
     attendance_threshold_percent = models.PositiveSmallIntegerField(
         default=75,

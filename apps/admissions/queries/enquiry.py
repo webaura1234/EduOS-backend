@@ -32,11 +32,13 @@ def list_enquiries(branch_id, *, status=None, statuses=None, source=None, create
 
 
 def create_enquiry(*, branch, source, applicant_name, course=None, date_of_birth=None,
-                   phone="", email="", captured_by=None, notes="", user=None) -> Enquiry:
+                   phone="", email="", captured_by=None, notes="", user=None,
+                   custom_fields=None, is_public_submission=False) -> Enquiry:
     return Enquiry.objects.create(
         branch=branch, source=source, applicant_name=applicant_name, course=course,
         date_of_birth=date_of_birth, phone=phone, email=email, captured_by=captured_by,
         notes=notes, created_by=user, updated_by=user,
+        custom_fields=custom_fields or {}, is_public_submission=is_public_submission,
     )
 
 

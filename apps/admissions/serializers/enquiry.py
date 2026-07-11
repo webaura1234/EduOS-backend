@@ -18,6 +18,8 @@ class EnquirySerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=EnquiryStatus.choices, read_only=True)
     capturedById = serializers.UUIDField(source="captured_by_id", read_only=True, allow_null=True)
     notes = serializers.CharField(allow_blank=True, required=False, default="")
+    customFields = serializers.JSONField(source="custom_fields", read_only=True)
+    isPublicSubmission = serializers.BooleanField(source="is_public_submission", read_only=True)
     version = serializers.IntegerField(read_only=True)
     createdAt = serializers.DateTimeField(source="created_at", read_only=True)
     updatedAt = serializers.DateTimeField(source="updated_at", read_only=True)
@@ -32,6 +34,7 @@ class CreateEnquirySerializer(serializers.Serializer):
     phone = serializers.CharField(required=False, allow_blank=True, default="")
     email = serializers.EmailField(required=False, allow_blank=True, default="")
     notes = serializers.CharField(required=False, allow_blank=True, default="")
+    customFields = serializers.JSONField(required=False, default=dict)
 
 
 class UpdateEnquirySerializer(serializers.Serializer):

@@ -218,9 +218,11 @@ class InvigilatorDuty(BaseModel):
         verbose_name = "Invigilator Duty"
         verbose_name_plural = "Invigilator Duties"
         constraints = [
+            # Soft-deleted rows must not block re-assignment of the same faculty.
             models.UniqueConstraint(
                 fields=["schedule_slot", "faculty"],
-                name="unique_invigilator_per_slot",
+                condition=models.Q(is_active=True),
+                name="unique_active_invigilator_per_slot",
             ),
         ]
 

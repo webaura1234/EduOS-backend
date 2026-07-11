@@ -1,6 +1,6 @@
 from .guardian import StudentGuardianLink
 from .profile import FacultyProfile, GuardianProfile, StudentProfile
-from .security import AuthAuditLog, LoginAttempt, PendingIdentityChange, StudentIDCounter
+from .security import AuthAuditLog, LoginAttempt, PendingIdentityChange, SequentialIdCounter
 from .token import InviteToken, MFAToken, OTPRecord, RefreshToken
 from .user import Role, User
 from .walkthrough import WalkthroughCompletion
@@ -18,7 +18,7 @@ __all__ = [
     "MFAToken",
     "LoginAttempt",
     "AuthAuditLog",
-    "StudentIDCounter",
+    "SequentialIdCounter",
     "PendingIdentityChange",
     "WalkthroughCompletion",
 ]

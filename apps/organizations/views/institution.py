@@ -19,10 +19,22 @@ from apps.organizations.queries import institution as inst_q
 from apps.organizations.serializers.institution import (
     GoLiveSerializer,
     UpdateAttendanceSettingsSerializer,
+    UpdateIdFormatSettingsSerializer,
     UpdateInstitutionSettingsSerializer,
     attendance_settings_dict,
+    id_format_settings_dict,
     institution_settings_dict,
 )
+
+_ID_FORMAT_FIELD_MAP = {
+    "studentIdFormat": "student_id_format",
+    "facultyIdFormat": "faculty_id_format",
+    "studentIdSeqWidth": "student_id_seq_width",
+    "facultyIdSeqWidth": "faculty_id_seq_width",
+    "studentIdResetYearly": "student_id_reset_yearly",
+    "studentIdLabel": "student_id_label",
+    "facultyIdLabel": "faculty_id_label",
+}
 
 _SUBDOMAIN_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$")
 
@@ -141,6 +153,39 @@ class AttendanceSettingsView(APIView):
         settings = inst_q.get_or_create_tenant_settings(tenant)
         settings = inst_q.update_tenant_settings(settings, fields)
         return Response(attendance_settings_dict(settings))
+
+
+class IdFormatSettingsView(APIView):
+    """
+    GET   /api/v1/organizations/id-format-settings/  → student/faculty ID scheme
+    PATCH /api/v1/organizations/id-format-settings/  → update formats/widths/labels
+    Super-admin only. Drives accounts.id_generation.generate_user_id().
+    """
+    permission_classes = [IsAuthenticated, IsSuperAdmin]
+
+    def get(self, request) -> Response:
+        tenant = inst_q.get_tenant(request.user.tenant_id)
+        if tenant is None:
+            return Response({"error": "Institution not found."}, status=status.HTTP_404_NOT_FOUND)
+        settings = inst_q.get_or_create_tenant_settings(tenant)
+        return Response(id_format_settings_dict(settings))
+
+    def patch(self, request) -> Response:
+        tenant = inst_q.get_tenant(request.user.tenant_id)
+        if tenant is None:
+            return Response({"error": "Institution not found."}, status=status.HTTP_404_NOT_FOUND)
+        serializer = UpdateIdFormatSettingsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        fields = {
+            model_field: data[key]
+            for key, model_field in _ID_FORMAT_FIELD_MAP.items()
+            if key in data
+        }
+        settings = inst_q.get_or_create_tenant_settings(tenant)
+        settings = inst_q.update_tenant_settings(settings, fields)
+        return Response(id_format_settings_dict(settings))
 
 
 class SubdomainCheckView(APIView):

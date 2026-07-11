@@ -96,4 +96,6 @@ pass
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {  # noqa: F405
     "tenant": "1000/minute",
     "auth": "60/minute",
+    "token_refresh": "600/minute",
+    "public_enquiry": "60/hour",
 }

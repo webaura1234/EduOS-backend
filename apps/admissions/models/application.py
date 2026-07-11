@@ -42,6 +42,10 @@ class Enquiry(BaseModel):
         related_name="captured_enquiries",
     )
     notes = models.TextField(blank=True, default="")
+    # Answers to the branch's admin-defined custom form fields, keyed by field `key`.
+    custom_fields = models.JSONField(default=dict, blank=True)
+    # True when submitted through the public shareable form (vs. staff-captured).
+    is_public_submission = models.BooleanField(default=False)
 
     class Meta:
         db_table = "admissions_enquiry"

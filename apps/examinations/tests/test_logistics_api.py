@@ -275,6 +275,27 @@ def test_multi_invigilator_add_replace_remove(logistics_env):
     remaining = InvigilatorDuty.objects.get(schedule_slot_id=slot_id, is_active=True)
     assert remaining.faculty_id == logistics_env["faculty2"].id
 
+    # Soft-removed faculty can be re-added without unique-constraint 500s.
+    readd = client.post(
+        reverse("examinations:exam-invigilators", kwargs={"exam_id": exam_id}),
+        {
+            "examSlotId": slot_id,
+            "facultyId": str(logistics_env["faculty1"].id),
+            "mode": "add",
+        },
+        format="json",
+    )
+    assert readd.status_code == 201, readd.content
+    assert InvigilatorDuty.objects.filter(schedule_slot_id=slot_id, is_active=True).count() == 2
+    assert (
+        InvigilatorDuty.objects.filter(
+            schedule_slot_id=slot_id,
+            faculty_id=logistics_env["faculty1"].id,
+            is_active=True,
+        ).count()
+        == 1
+    )
+
 
 def test_auto_assign_fills_required_count(logistics_env):
     client = _client(logistics_env["admin"])

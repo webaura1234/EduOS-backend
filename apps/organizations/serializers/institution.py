@@ -40,6 +40,43 @@ class UpdateAttendanceSettingsSerializer(serializers.Serializer):
     )
 
 
+class UpdateIdFormatSettingsSerializer(serializers.Serializer):
+    """Per-institution auto-generated ID scheme for students & faculty."""
+
+    studentIdFormat = serializers.CharField(max_length=64, required=False, allow_blank=False)
+    facultyIdFormat = serializers.CharField(max_length=64, required=False, allow_blank=False)
+    studentIdSeqWidth = serializers.IntegerField(required=False, min_value=1, max_value=12)
+    facultyIdSeqWidth = serializers.IntegerField(required=False, min_value=1, max_value=12)
+    studentIdResetYearly = serializers.BooleanField(required=False)
+    studentIdLabel = serializers.CharField(max_length=50, required=False, allow_blank=False)
+    facultyIdLabel = serializers.CharField(max_length=50, required=False, allow_blank=False)
+
+    def validate_studentIdFormat(self, value):
+        return _validate_id_format(value, "{SEQ}")
+
+    def validate_facultyIdFormat(self, value):
+        return _validate_id_format(value, "{SEQ}")
+
+
+def _validate_id_format(value: str, required_token: str) -> str:
+    if required_token not in value:
+        raise serializers.ValidationError(f"Format must contain the {required_token} token.")
+    return value
+
+
+def id_format_settings_dict(s) -> dict:
+    """Present a TenantSettings as the camelCase ID-format config payload."""
+    return {
+        "studentIdFormat": s.student_id_format,
+        "facultyIdFormat": s.faculty_id_format,
+        "studentIdSeqWidth": s.student_id_seq_width,
+        "facultyIdSeqWidth": s.faculty_id_seq_width,
+        "studentIdResetYearly": s.student_id_reset_yearly,
+        "studentIdLabel": s.student_id_label,
+        "facultyIdLabel": s.faculty_id_label,
+    }
+
+
 def attendance_settings_dict(s) -> dict:
     """Present a TenantSettings as the camelCase attendance config payload."""
     days = s.fee_reminder_days or []

@@ -10,8 +10,8 @@ from apps.accounts.models import (
     LoginAttempt,
     OTPRecord,
     RefreshToken,
+    SequentialIdCounter,
     StudentGuardianLink,
-    StudentIDCounter,
     StudentProfile,
     User,
 )
@@ -220,9 +220,9 @@ class AuthAuditLogAdmin(admin.ModelAdmin):
         return False
 
 
-@admin.register(StudentIDCounter)
-class StudentIDCounterAdmin(admin.ModelAdmin):
-    list_display = ("branch", "academic_year", "last_sequence", "created_at")
-    list_filter = ("academic_year",)
+@admin.register(SequentialIdCounter)
+class SequentialIdCounterAdmin(admin.ModelAdmin):
+    list_display = ("branch", "purpose", "academic_year", "last_sequence", "created_at")
+    list_filter = ("purpose", "academic_year")
     search_fields = ("branch__name", "academic_year")
     readonly_fields = ("id", "created_at", "updated_at")

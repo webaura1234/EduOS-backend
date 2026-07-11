@@ -43,7 +43,13 @@ class EnquiryListCreateView(APIView):
             course = get_course(branch.pk, data["courseId"])
         elif data.get("courseName"):
             course = get_course_by_name(branch.pk, data["courseName"])
-            
+
+        # Validate any custom answers against the branch's configured form schema.
+        from apps.admissions.interactors import enquiry_form as form_i
+
+        form = form_i.get_or_create_form(branch)
+        custom_fields = form_i.validate_submission(form, data.get("customFields") or {})
+
         enquiry = enquiry_i.capture_enquiry(
             branch=branch,
             source=data["source"],
@@ -54,6 +60,7 @@ class EnquiryListCreateView(APIView):
             email=data.get("email", ""),
             captured_by=request.user,
             notes=data.get("notes", ""),
+            custom_fields=custom_fields,
         )
         return Response({"enquiry": EnquirySerializer(enquiry).data}, status=status.HTTP_201_CREATED)
 

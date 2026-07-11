@@ -1,6 +1,9 @@
 """
-Seed the database with the two reference institutions the frontend mock-data
-assumes: Greenfield Academy (school) and Horizon Engineering College (college).
+Seed the database with reference institutions for local frontend testing:
+
+- Greenfield Academy (school) — default NEXT_PUBLIC_DEFAULT_TENANT
+- Horizon Engineering College (college)
+- Riverside Institute of Technology (college)
 
 Each tenant is provisioned end-to-end: primary branch, TenantSettings,
 PlanSubscription, TenantQuota counters, a super-admin, an admin, a faculty and a
@@ -59,6 +62,15 @@ def _ensure_password(user: User) -> None:
         user.save(update_fields=["password"])
 
 
+def _demo_email(*, role: str, subdomain: str, custom_login_id: str | None = None) -> str:
+    """Deterministic inbox for local MFA / email-OTP login (printed to Django console)."""
+    if custom_login_id:
+        local = custom_login_id.lower().replace("_", "-")
+    else:
+        local = role.replace("_", "-")
+    return f"{local}@{subdomain}.eduos.local"
+
+
 def _seed_user(*, role, tenant, branch, first_name, last_name,
                phone=None, custom_login_id=None) -> User:
     lookup = {"role": role, "tenant": tenant}
@@ -66,18 +78,33 @@ def _seed_user(*, role, tenant, branch, first_name, last_name,
         lookup["custom_login_id"] = custom_login_id
     else:
         lookup["phone"] = phone
+    email = _demo_email(
+        role=role,
+        subdomain=tenant.subdomain,
+        custom_login_id=custom_login_id,
+    )
     user, created = User.objects.get_or_create(
         **lookup,
         defaults=dict(
             first_name=first_name, last_name=last_name, branch=branch,
-            phone=phone, custom_login_id=custom_login_id,
+            phone=phone, custom_login_id=custom_login_id, email=email,
             must_change_password=False, is_active=True,
         ),
     )
     _ensure_password(user)
+    # Existing seed rows may predate email OTP — always keep a usable email.
+    updates = []
+    if not user.email:
+        user.email = email
+        updates.append("email")
+    if phone and user.phone != phone:
+        user.phone = phone
+        updates.append("phone")
+    if updates:
+        user.save(update_fields=[*updates, "updated_at"] if hasattr(user, "updated_at") else updates)
     tag = "created" if created else "exists"
     ident = custom_login_id or phone
-    print(f"  - {role:<13} {ident:<16} [{tag}]  (pass: {DEFAULT_PASSWORD})")
+    print(f"  - {role:<13} {ident:<16} [{tag}]  email={user.email}  (pass: {DEFAULT_PASSWORD})")
     if role == Role.STUDENT:
         StudentProfile.objects.get_or_create(
             user=user,
@@ -322,19 +349,29 @@ def seed():
         student_id_label="Admission Number", faculty_id_label="Staff Code",
         parent_access_enabled=False, phone_prefix="+9197654321",
     )
+    seed_tenant(
+        subdomain="riverside", name="Riverside Institute of Technology", institution_type="college",
+        plan="standard", city="Hyderabad", state="Telangana",
+        student_id_label="Admission Number", faculty_id_label="Staff Code",
+        parent_access_enabled=False, phone_prefix="+9196543210",
+    )
 
     # Platform owner (SaaS operator) — no tenant. Matches frontend mock login hint.
     po, created = User.objects.get_or_create(
         role=Role.PLATFORM_OWNER, phone=PLATFORM_OWNER_PHONE,
         defaults=dict(first_name="Gopal", last_name="Platform Owner",
-                      tenant=None, branch=None, must_change_password=False, is_active=True),
+                      tenant=None, branch=None, email="owner@platform.eduos.local",
+                      must_change_password=False, is_active=True),
     )
+    if not po.email:
+        po.email = "owner@platform.eduos.local"
+        po.save(update_fields=["email"])
     if not po.has_usable_password() or not po.check_password(PLATFORM_OWNER_PASSWORD):
         po.set_password(PLATFORM_OWNER_PASSWORD)
         po.save(update_fields=["password"])
     print(
         f"\nPlatform Owner {PLATFORM_OWNER_PHONE} "
-        f"[{'created' if created else 'exists'}]  (pass: {PLATFORM_OWNER_PASSWORD})"
+        f"[{'created' if created else 'exists'}]  email={po.email}  (pass: {PLATFORM_OWNER_PASSWORD})"
     )
 
     print("\nSeeding completed successfully!")

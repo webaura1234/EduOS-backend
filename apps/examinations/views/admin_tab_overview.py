@@ -116,6 +116,7 @@ def _exam_bundle(branch):
         "students": students,
         "seatingPlans": seating_plans,
         "invigilation": invigilation,
+        "faculty": inv_q.faculty_options_for_branch(branch.tenant_id, branch.pk),
         "resultStatusByExam": result_status_by_exam,
         "publishedResults": published_results,
     }
@@ -159,6 +160,8 @@ class AdminExaminationsInvigilationTabView(APIView):
             "institutionType": b["institutionType"],
             "slots": b["slots"],
             "invigilation": b["invigilation"],
+            # Active faculty only — assignment UI must not invent its own roster.
+            "faculty": b["faculty"],
         })
 
 

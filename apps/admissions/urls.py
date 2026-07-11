@@ -32,6 +32,11 @@ from apps.admissions.views.admin_tab_overview import (
     AdminAdmissionsWaitlistTabView,
 )
 from apps.admissions.views.admin_enroll import AdminEnrollFromApplicationView
+from apps.admissions.views.enquiry_form import (
+    EnquiryFormView,
+    PublicEnquiryFormView,
+    PublicEnquirySubmitView,
+)
 
 app_name = "admissions"
 
@@ -47,6 +52,11 @@ urlpatterns = [
          AdminEnrollFromApplicationView.as_view(), name="enroll-from-application"),
 
     # Enquiries
+    # Configurable enquiry form (admin management + public shareable form)
+    path("enquiry-form/", EnquiryFormView.as_view(), name="enquiry-form"),
+    path("public/enquiry-form/", PublicEnquiryFormView.as_view(), name="public-enquiry-form"),
+    path("public/enquiry/", PublicEnquirySubmitView.as_view(), name="public-enquiry-submit"),
+
     path("enquiries/", EnquiryListCreateView.as_view(), name="enquiry-list-create"),
     path("enquiries/<uuid:enquiry_id>/", EnquiryDetailView.as_view(), name="enquiry-detail"),
     path("enquiries/<uuid:enquiry_id>/convert/", EnquiryConvertView.as_view(), name="enquiry-convert"),

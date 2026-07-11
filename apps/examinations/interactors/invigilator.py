@@ -33,6 +33,10 @@ def _resolve_faculty(*, tenant_id, faculty_id, branch):
     faculty = require_faculty(tenant_id, faculty_id)
     if faculty.branch_id != branch.pk:
         raise ValidationError({"facultyId": "Faculty must belong to this branch."})
+    if faculty.must_change_password:
+        raise ValidationError({
+            "facultyId": "Faculty account is not fully activated and cannot be assigned.",
+        })
     return faculty
 
 
@@ -97,7 +101,7 @@ def replace_invigilator(
 @transaction.atomic
 def remove_invigilator(*, exam, slot, branch, tenant_id, faculty_id, user=None) -> None:
     _check_slot_belongs_to_exam(exam, slot)
-    _resolve_faculty(tenant_id=tenant_id, faculty_id=faculty_id, branch=branch)
+    # Allow clearing duties even if the faculty was later deactivated.
     if not inv_q.duty_exists(slot.pk, faculty_id):
         raise ValidationError({"facultyId": "Faculty not assigned to this slot."})
     inv_q.soft_delete_duty(slot.pk, faculty_id, user=user)

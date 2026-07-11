@@ -14,12 +14,24 @@ from apps.core.pagination import paginate_queryset
 from apps.organizations.queries.branch import get_branch
 
 
+def _parse_optional_bool(raw: str | None) -> bool | None:
+    if raw is None or raw == "":
+        return None
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes"}:
+        return True
+    if value in {"0", "false", "no"}:
+        return False
+    return None
+
+
 class UserManagementView(APIView):
     """GET → { users: {count, next, previous, results}, pending_invites, multi_role_policy,
     branchId, branchName, branchScope }.
 
-    `users` is server-side paginated/filtered/searched (`?page=&page_size=&role=&search=`)
-    — the full tenant roster is never materialized in Python for this endpoint.
+    `users` is server-side paginated/filtered/searched
+    (`?page=&page_size=&role=&search=&is_active=`) — the full tenant roster is never
+    materialized in Python for this endpoint.
     """
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
 
@@ -29,8 +41,15 @@ class UserManagementView(APIView):
         branch_id = branch.pk if branch else None
         role = request.query_params.get("role") or None
         search = request.query_params.get("search") or None
+        is_active = _parse_optional_bool(request.query_params.get("is_active"))
 
-        users_qs = list_managed_users(tenant_id, branch_id=branch_id, role=role, search=search)
+        users_qs = list_managed_users(
+            tenant_id,
+            branch_id=branch_id,
+            role=role,
+            search=search,
+            is_active=is_active,
+        )
 
         # Pending invites map by user id — only needed for the users on the current
         # page, but the invites table itself is small/bounded (unused tokens only)

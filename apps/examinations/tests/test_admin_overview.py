@@ -164,6 +164,38 @@ def test_admin_overview_scopes_to_current_year_and_batches_everything(env):
     assert body["publishedResults"][0]["examSlotId"] == slot_id
     assert body["publishedResults"][0]["revisionNo"] == 1
 
+    assert "faculty" in body
+    assert {f["userId"] for f in body["faculty"]} == {str(env["faculty"].id)}
+
+
+def test_invigilation_tab_faculty_excludes_inactive_and_unactivated(env):
+    """Assignable invigilators come from the backend and skip inactive / invite-pending faculty."""
+    client = _client(env["admin"])
+    inactive = UserFactory(
+        role=Role.FACULTY,
+        tenant=env["tenant"],
+        branch=env["branch"],
+        custom_login_id="FAC-INACTIVE",
+        must_change_password=False,
+        is_active=False,
+    )
+    invite_pending = UserFactory(
+        role=Role.FACULTY,
+        tenant=env["tenant"],
+        branch=env["branch"],
+        custom_login_id="FAC-PENDING",
+        must_change_password=True,
+        is_active=True,
+    )
+
+    resp = client.get(reverse("examinations:admin-invigilation-tab"))
+    assert resp.status_code == 200, resp.content
+    body = _data(resp)
+    faculty_ids = {f["userId"] for f in body["faculty"]}
+    assert str(env["faculty"].id) in faculty_ids
+    assert str(inactive.id) not in faculty_ids
+    assert str(invite_pending.id) not in faculty_ids
+
 
 def test_admin_overview_query_count_does_not_scale_with_exam_count(env):
     """Baseline must be a single exam, not zero: Django's ``field__in=[]``

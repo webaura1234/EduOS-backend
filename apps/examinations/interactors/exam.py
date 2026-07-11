@@ -48,8 +48,12 @@ def _check_clashes(branch_id, *, room_id, batch_id, start_at, end_at, exclude_id
 
 
 def _holiday_warnings(branch_id, date) -> list[dict]:
-    if hol_q.is_holiday(branch_id, date):
-        return [{"type": "holiday", "message": f"{date.isoformat()} is a holiday."}]
+    holiday = hol_q.get_holiday_by_date(branch_id, date)
+    if holiday:
+        return [{
+            "type": "holiday",
+            "message": f"{date.isoformat()} is a holiday ({holiday.name}).",
+        }]
     return []
 
 
@@ -222,3 +226,13 @@ def update_schedule_slot(
     )
     slot = exam_q.update_schedule_slot(slot, fields, user=user)
     return slot, warnings, False
+
+
+@transaction.atomic
+def delete_schedule_slot(slot, *, user=None) -> None:
+    """Soft-delete a schedule slot and cascade to duties / seating for that slot."""
+    inv_q.soft_delete_duties_for_slot(slot.pk, user=user)
+    from apps.examinations.queries import seating as seat_q
+
+    seat_q.soft_delete_seatings_for_slot(slot.pk, user=user)
+    exam_q.soft_delete_schedule_slot(slot, user=user)

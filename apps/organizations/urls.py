@@ -9,6 +9,7 @@ from django.urls import path
 from apps.organizations.views.branch import BranchActionsView, BranchListCreateView, BranchSettingsView
 from apps.organizations.views.institution import (
     AttendanceSettingsView,
+    IdFormatSettingsView,
     InstitutionSettingsView,
     SubdomainCheckView,
 )
@@ -63,6 +64,7 @@ urlpatterns = [
     # Super-admin — institution settings
     path("institution-settings/", InstitutionSettingsView.as_view(), name="institution-settings"),
     path("attendance-settings/", AttendanceSettingsView.as_view(), name="attendance-settings"),
+    path("id-format-settings/", IdFormatSettingsView.as_view(), name="id-format-settings"),
 
     # Super-admin — plan
     path("plan/", PlanView.as_view(), name="plan"),

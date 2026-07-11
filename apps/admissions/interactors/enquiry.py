@@ -10,13 +10,15 @@ from apps.admissions.queries import enquiry as enquiry_q
 
 @transaction.atomic
 def capture_enquiry(*, branch, source, applicant_name, course=None, date_of_birth=None,
-                    phone="", email="", captured_by=None, notes=""):
+                    phone="", email="", captured_by=None, notes="",
+                    custom_fields=None, is_public_submission=False):
     if not applicant_name or not applicant_name.strip():
         raise ValidationError({"applicantName": "Applicant name is required."})
     return enquiry_q.create_enquiry(
         branch=branch, source=source, applicant_name=applicant_name.strip(), course=course,
         date_of_birth=date_of_birth, phone=phone, email=email, captured_by=captured_by,
         notes=notes, user=captured_by,
+        custom_fields=custom_fields, is_public_submission=is_public_submission,
     )
 
 

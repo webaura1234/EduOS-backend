@@ -202,3 +202,14 @@ class ExamScheduleDetailView(APIView):
         if requires_override:
             return Response({"warnings": warnings, "requiresOverride": True}, status=status.HTTP_200_OK)
         return Response({"slot": ExamScheduleSlotSerializer(slot).data, "warnings": warnings})
+
+    def delete(self, request, exam_id, slot_id) -> Response:
+        branch = resolve_branch(request)
+        exam = exam_q.get_exam(branch.pk, exam_id)
+        if not exam:
+            return Response({"error": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        slot = exam_q.get_schedule_slot(exam.pk, slot_id)
+        if not slot:
+            return Response({"error": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        exam_i.delete_schedule_slot(slot, user=request.user)
+        return Response(status=status.HTTP_204_NO_CONTENT)

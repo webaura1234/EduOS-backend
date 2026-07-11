@@ -197,6 +197,10 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "tenant": "100/minute",
         "auth": "10/minute",
+        # Refresh is high-frequency + coalesced by the BFF; keep it generous so normal
+        # token-expiry bursts (incl. multi-tab) never 429 into a logout.
+        "token_refresh": "120/minute",
+        "public_enquiry": "60/hour",
     },
     "DEFAULT_SCHEMA_CLASS": "rest_framework.schemas.openapi.AutoSchema",
 }

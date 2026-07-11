@@ -479,11 +479,13 @@ def record_login_attempt(
 # Admin user-management screen
 # ─────────────────────────────────────────────────────────────────────────────
 
-def list_managed_users(tenant_id, *, branch_id=None, role=None, search=None):
+def list_managed_users(tenant_id, *, branch_id=None, role=None, search=None, is_active=None):
     """Manageable users in a tenant, optionally scoped to one branch/role, with search.
 
-    Role and search are applied server-side so the caller can paginate the result
-    without ever materializing the full tenant roster in Python.
+    Role, search, and active-state filters are applied server-side so the caller can
+    paginate the result without ever materializing the full tenant roster in Python.
+
+    ``is_active``: ``True`` / ``False`` to filter; ``None`` returns both (admin roster).
     """
     from django.db.models import Q
     from apps.accounts.models.user import Role
@@ -496,6 +498,8 @@ def list_managed_users(tenant_id, *, branch_id=None, role=None, search=None):
         qs = qs.filter(branch_id=branch_id)
     if role:
         qs = qs.filter(role=role)
+    if is_active is not None:
+        qs = qs.filter(is_active=is_active)
     if search:
         qs = qs.filter(
             Q(first_name__icontains=search)

@@ -55,10 +55,25 @@ def get_faculty_user(tenant_id, faculty_id) -> User | None:
 
 
 def require_faculty(tenant_id, faculty_id, field_name: str = "facultyId") -> User:
+    """Return an active faculty user or raise a field ValidationError."""
     user = get_faculty_user(tenant_id, faculty_id)
-    if user is None:
-        raise ValidationError({field_name: "Faculty user not found in your institution."})
-    return user
+    if user is not None:
+        return user
+
+    # Distinguish inactive vs missing so admins get an actionable message.
+    inactive = (
+        User.objects.filter(
+            pk=faculty_id,
+            tenant_id=tenant_id,
+            role=Role.FACULTY,
+            is_active=False,
+        ).first()
+        if faculty_id
+        else None
+    )
+    if inactive is not None:
+        raise ValidationError({field_name: "Faculty account is inactive and cannot be assigned."})
+    raise ValidationError({field_name: "Faculty user not found in your institution."})
 
 
 def date_to_iso_weekday(d: datetime.date) -> int:

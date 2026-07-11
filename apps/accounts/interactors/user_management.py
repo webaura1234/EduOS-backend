@@ -265,10 +265,19 @@ def create_user(
                 existing.linked_user_group_id = group_id
                 existing.save(update_fields=["linked_user_group_id"])
 
+    # Auto-generate a per-institution ID through the single shared generator, so a user
+    # added here gets the SAME scheme as one added via the invite flow (no more random slugs).
     custom_login_id = None
     if role in {Role.FACULTY, Role.STUDENT}:
-        prefix = "FAC" if role == Role.FACULTY else "STU"
-        custom_login_id = f"{prefix}-{str(uuid.uuid4())[:6].upper()}"
+        from apps.organizations.models import Branch
+        from apps.accounts.id_generation import generate_user_id
+
+        branch_obj = Branch.objects.filter(pk=target_branch_id).first()
+        if branch_obj is not None:
+            academic_year = batch.academic_year if role == Role.STUDENT and batch else None
+            custom_login_id = generate_user_id(branch_obj, role, academic_year)
+        if not custom_login_id:
+            raise ValidationError("Could not generate an ID — branch is not configured.")
 
     user = uq.create_invited_user(
         first_name=first,

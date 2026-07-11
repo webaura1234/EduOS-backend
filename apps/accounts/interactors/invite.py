@@ -101,19 +101,24 @@ def create_and_send_invite(
     # Validate identifier presence
     if role in {Role.PARENT, Role.ADMIN} and not phone:
         raise ValidationError("Phone number is required for this role.")
-    if role == Role.FACULTY and not custom_login_id:
-        raise ValidationError("Employee ID is required for faculty.")
-    # Students: auto-generate custom_login_id when not provided (requires branch_id + academic_year)
-    if role == Role.STUDENT and not custom_login_id:
-        academic_year = _get_current_academic_year(branch_id)
-        if academic_year and branch_id:
+    # Faculty & students: auto-generate a per-institution custom_login_id when the
+    # admin doesn't supply one. Both funnel through the single generate_user_id().
+    if role in {Role.FACULTY, Role.STUDENT} and not custom_login_id:
+        if branch_id:
             from apps.organizations.models import Branch
-            from apps.accounts.student_id import generate_student_id
+            from apps.accounts.id_generation import generate_user_id
             branch_obj = Branch.objects.filter(pk=branch_id).first()
             if branch_obj:
-                custom_login_id = generate_student_id(branch_obj, academic_year)
+                academic_year = (
+                    _get_current_academic_year(branch_id) if role == Role.STUDENT else None
+                )
+                custom_login_id = generate_user_id(branch_obj, role, academic_year)
         if not custom_login_id:
-            raise ValidationError("Student ID (Roll Number / Admission No) is required.")
+            raise ValidationError(
+                "Employee ID is required for faculty."
+                if role == Role.FACULTY
+                else "Student ID (Roll Number / Admission No) is required."
+            )
 
     # EC-AUTH-13: detect link-eligible existing accounts on this phone in the same tenant.
     existing_on_phone = (

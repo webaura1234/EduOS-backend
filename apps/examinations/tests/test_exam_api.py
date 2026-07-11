@@ -192,3 +192,23 @@ def test_holiday_warning_requires_override(env):
 
     created = client.post(url, _slot_payload(env, override=True), format="json")
     assert created.status_code == 201
+
+
+def test_schedule_slot_delete(env):
+    client = _client(env["admin"])
+    exam_id = _create_exam(env, client)
+    list_url = reverse("examinations:exam-schedule-list", kwargs={"exam_id": exam_id})
+    created = client.post(list_url, _slot_payload(env), format="json")
+    assert created.status_code == 201, created.content
+    slot_id = _data(created)["slot"]["id"]
+
+    detail_url = reverse(
+        "examinations:exam-schedule-detail",
+        kwargs={"exam_id": exam_id, "slot_id": slot_id},
+    )
+    deleted = client.delete(detail_url)
+    assert deleted.status_code == 204
+
+    listed = client.get(list_url)
+    assert listed.status_code == 200
+    assert _data(listed)["slots"] == []
