@@ -12,6 +12,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     # ── API v1 ──────────────────────────────────
     path("api/v1/auth/", include("apps.accounts.urls", namespace="accounts")),
+    path("api/v1/parent/", include("apps.accounts.urls_parent", namespace="parent")),
     path("api/v1/organizations/", include("apps.organizations.urls", namespace="organizations")),
     path("api/v1/academics/", include("apps.academics.urls", namespace="academics")),
     path("api/v1/admissions/", include("apps.admissions.urls", namespace="admissions")),

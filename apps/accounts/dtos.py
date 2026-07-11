@@ -213,6 +213,7 @@ class UserProfileDTO:
     linked_user_group_id: uuid.UUID | None = None
     institution_type: str | None = None
     tenant_subdomain: str | None = None
+    avatar_url: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -229,5 +230,6 @@ class UserProfileDTO:
             "linked_user_group_id": str(self.linked_user_group_id) if self.linked_user_group_id else None,
             "institution_type": self.institution_type,
             "tenant_subdomain": self.tenant_subdomain,
+            "avatarUrl": self.avatar_url,
         }
 

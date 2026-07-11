@@ -201,6 +201,7 @@ class MeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request) -> Response[UserProfileDTO]:
+        from apps.accounts.services.avatar import avatar_url_for_user
         from apps.organizations.branding import branch_theme, tenant_theme
 
         user = request.user
@@ -219,6 +220,7 @@ class MeView(APIView):
             linked_user_group_id=user.linked_user_group_id,
             institution_type=tenant.institution_type if tenant else None,
             tenant_subdomain=tenant.subdomain if tenant else None,
+            avatar_url=avatar_url_for_user(user),
         )
         # Resolved branding for the user's branch (override → tenant fallback) so the
         # authed app can re-theme per branch without an extra round-trip.

@@ -7,6 +7,7 @@ from rest_framework.views import APIView
 
 from apps.academics.scoping import resolve_branch
 from apps.accounts.permissions import IsFaculty
+from apps.accounts.services.avatar import avatar_url_for_user
 
 
 def _form(user, profile) -> dict:
@@ -18,6 +19,7 @@ def _form(user, profile) -> dict:
         "designation": (profile.designation if profile else "") or "",
         "department": (profile.department if profile else "") or "",
         "editableFields": ["name", "ownPhone"],
+        "avatarUrl": avatar_url_for_user(user),
     }
 
 

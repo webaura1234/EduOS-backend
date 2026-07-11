@@ -77,7 +77,8 @@ class User(AbstractBaseUser, PermissionsMixin):
     # Email is unique PER TENANT, not globally — the same person may exist in
     # multiple institutions (e.g. parent at School A, faculty at School B).
     email = models.EmailField(blank=True, null=True)
-    avatar = models.ImageField(upload_to="avatars/", blank=True, null=True)
+    # S3/R2 object key for profile photo (replaces legacy unused ImageField avatar).
+    avatar_s3_key = models.CharField(max_length=500, blank=True, default="")
 
     # ── Login identifiers ────────────────────────────────────────────
     # Phone: used by super_admin, admin, parent to log in + ALL roles for OTP reset

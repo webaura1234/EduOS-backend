@@ -8,6 +8,7 @@ from rest_framework.views import APIView
 from apps.academics.scoping import resolve_branch
 from apps.accounts.permissions import IsStudent
 from apps.admissions.queries.enrollment import get_active_enrollment_for_profile
+from apps.accounts.services.avatar import avatar_url_for_user
 
 
 def _class_label(enrollment) -> str:
@@ -29,6 +30,7 @@ def _form(user, profile, enrollment) -> dict:
         "classLabel": _class_label(enrollment),
         "rollNumber": user.custom_login_id,
         "editableFields": ["name", "ownPhone"],
+        "avatarUrl": avatar_url_for_user(user),
     }
 
 
