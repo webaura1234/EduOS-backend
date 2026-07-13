@@ -28,8 +28,7 @@ from apps.examinations.queries import internal as int_q
 from apps.examinations.queries import marks as marks_q
 
 
-def _class_label(student_profile) -> str:
-    enrollment = get_active_enrollment_for_profile(student_profile.pk)
+def _class_label(enrollment) -> str:
     if enrollment and enrollment.batch_id:
         batch = enrollment.batch
         if batch.course_id:
@@ -40,9 +39,9 @@ def _class_label(student_profile) -> str:
 
 def _row(m) -> dict:
     return {
-        "studentId": str(m.student_profile_id),
-        "studentName": m.student_profile.user.full_name,
-        "classLabel": _class_label(m.student_profile),
+        "studentId": str(m.student.student_profile_id),
+        "studentName": m.student.user.full_name,
+        "classLabel": _class_label(m.student),
         "subjectId": str(m.subject_id),
         "subjectName": m.subject.name,
         "marks": float(m.marks) if m.marks is not None else None,
@@ -194,7 +193,9 @@ class FacultyInternalMarkSaveView(APIView):
 
         enrollment = get_active_enrollment_for_profile(profile.pk)
         is_admin = IsAdminOrSuperAdmin().has_permission(request, self)
-        if enrollment and enrollment.batch_id and not is_admin:
+        if enrollment is None:
+            raise ValidationError({"studentId": "Student has no active enrollment in this branch."})
+        if enrollment.batch_id and not is_admin:
             if not ft_q.faculty_teaches_batch_subject(
                 branch.pk, request.user.pk, enrollment.batch_id, subject_id,
             ):
@@ -210,7 +211,7 @@ class FacultyInternalMarkSaveView(APIView):
 
         marks = request.data.get("marks")
         obj = int_q.upsert(
-            branch=branch, student_profile=profile, subject=subject,
+            branch=branch, student=enrollment, subject=subject,
             marks=marks, max_marks=request.data.get("maxMarks", 100),
             hard_deadline_at=existing.hard_deadline_at if existing else None,
             user=request.user,

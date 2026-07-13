@@ -30,8 +30,8 @@ class UserManagementView(APIView):
     branchId, branchName, branchScope }.
 
     `users` is server-side paginated/filtered/searched
-    (`?page=&page_size=&role=&search=&is_active=`) — the full tenant roster is never
-    materialized in Python for this endpoint.
+    (`?page=&page_size=&role=&search=&is_active=&courseId=&batchId=`) — the full tenant
+    roster is never materialized in Python for this endpoint.
     """
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
 
@@ -42,6 +42,8 @@ class UserManagementView(APIView):
         role = request.query_params.get("role") or None
         search = request.query_params.get("search") or None
         is_active = _parse_optional_bool(request.query_params.get("is_active"))
+        course_id = request.query_params.get("courseId") or None
+        batch_id = request.query_params.get("batchId") or None
 
         users_qs = list_managed_users(
             tenant_id,
@@ -49,6 +51,8 @@ class UserManagementView(APIView):
             role=role,
             search=search,
             is_active=is_active,
+            course_id=course_id,
+            batch_id=batch_id,
         )
 
         # Pending invites map by user id — only needed for the users on the current

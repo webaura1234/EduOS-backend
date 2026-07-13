@@ -6,9 +6,9 @@ from django.conf import settings as dj_settings
 from django.db.models import F, Q
 
 from apps.examinations.models import ExamRegistration
-from apps.fees.enums import FeeComponentKind, InvoiceStatus, PaymentStatus
+from apps.fees.enums import CarryForwardState, FeeComponentKind, InvoiceStatus, PaymentStatus
 from apps.fees.models import FeeInvoice
-from apps.fees.queries.invoice import list_dues_for_student_user
+from apps.fees.queries.invoice import is_collectible_outstanding, list_dues_for_student_user
 from apps.fees.queries.portal import list_receipts_for_student
 
 
@@ -18,6 +18,7 @@ def list_open_invoices_for_student_user(student_user_id):
         FeeInvoice.objects.filter(
             student__student_profile__user_id=student_user_id,
             is_active=True,
+            carry_forward_state=CarryForwardState.NORMAL,
         )
         .filter(Q(student__is_active=True) | Q(total_paise__gt=F("paid_paise")))
         .exclude(assignment__isnull=True)
@@ -168,7 +169,10 @@ def build_portal_fees_payload(*, student_user_id, tenant) -> dict:
             lines__kind=FeeComponentKind.EXAM,
         ).values_list("pk", flat=True)
     )
-    invoices = [i for i in list(list_dues_for_student_user(student_user_id)) if i.pk not in exam_invoice_ids]
+    invoices = [
+        i for i in list(list_dues_for_student_user(student_user_id))
+        if i.pk not in exam_invoice_ids and is_collectible_outstanding(i)
+    ]
 
     total_due = sum(i.total_paise for i in invoices)
     paid = sum(i.paid_paise for i in invoices)

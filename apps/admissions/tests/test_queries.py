@@ -1,5 +1,5 @@
 import pytest
-from apps.admissions.enums import EnquiryStatus, ApplicationStatus
+from apps.admissions.enums import EnquiryStatus, ApplicationStatus, EnrollmentStatus
 from apps.admissions.queries import enquiry as enquiry_q
 from apps.admissions.queries import application as app_q
 from apps.admissions.queries import enrollment as enr_q
@@ -94,3 +94,66 @@ def test_enrollment_queries():
     # roster
     roster = enr_q.enrollments_in_batch(enr.batch.pk)
     assert enr in roster
+
+
+def test_enrollment_include_inactive_reaches_prior_year_enrollment():
+    """After rollover the prior-year enrollment is soft-deactivated (is_active=False).
+    It must stay hidden by default but be reachable via include_inactive=True — the
+    historical read path (audit P1.1)."""
+    enr = StudentEnrollmentFactory()
+    profile_id = enr.student_profile_id
+    year_id = enr.academic_year_id
+    branch_id = enr.branch_id
+
+    # Simulate the rollover deactivation of the source-year enrollment.
+    enr.is_active = False
+    enr.save(update_fields=["is_active"])
+
+    # Default (current-only) semantics unchanged — prior-year enrollment is hidden.
+    assert enr_q.get_active_enrollment_for_profile(profile_id, academic_year_id=year_id) is None
+    assert enr_q.get_enrollment_by_id(enr.pk) is None
+    assert enr not in list(enr_q.list_enrollments(branch_id))
+
+    # Historical read path — reachable only when explicitly opted in.
+    assert (
+        enr_q.get_active_enrollment_for_profile(
+            profile_id, academic_year_id=year_id, include_inactive=True
+        )
+        == enr
+    )
+    assert enr_q.get_enrollment_by_id(enr.pk, include_inactive=True) == enr
+    assert enr in list(enr_q.list_enrollments(branch_id, include_inactive=True))
+
+
+def test_enrollment_for_profile_in_branch_active_vs_inactive():
+    enr = StudentEnrollmentFactory()
+    profile_id = enr.student_profile_id
+    branch_id = enr.branch_id
+
+    assert enr_q.get_enrollment_for_profile_in_branch(profile_id, branch_id) == enr
+    assert enr_q.get_enrollment_for_profile_in_branch(profile_id, branch_id, include_inactive=False) == enr
+
+    enr.is_active = False
+    enr.status = EnrollmentStatus.GRADUATED
+    enr.save(update_fields=["is_active", "status"])
+
+    assert enr_q.get_enrollment_for_profile_in_branch(profile_id, branch_id) is None
+    assert (
+        enr_q.get_enrollment_for_profile_in_branch(profile_id, branch_id, include_inactive=True)
+        == enr
+    )
+
+
+def test_resolve_enrollment_for_profile_falls_back_to_terminal_enrollment():
+    enr = StudentEnrollmentFactory()
+    profile = enr.student_profile
+    profile.current_batch = None
+    profile.current_enrollment = enr
+    profile.save(update_fields=["current_batch", "current_enrollment"])
+
+    enr.is_active = False
+    enr.status = EnrollmentStatus.GRADUATED
+    enr.save(update_fields=["is_active", "status"])
+
+    resolved = enr_q.resolve_enrollment_for_profile(profile, create=False)
+    assert resolved == enr

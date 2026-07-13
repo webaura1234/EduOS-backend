@@ -57,4 +57,34 @@ TEMPLATES: dict[str, dict] = {
         "priority": NotificationPriority.NORMAL,
         "required": {"title", "announcement_id", "body_preview"},
     },
+    "academics.promotion_completed": {
+        "title": "Promotion completed",
+        "message": "{student_name} has been promoted to {to_class} for {target_year}.",
+        "priority": NotificationPriority.HIGH,
+        "required": {"student_name", "to_class", "target_year"},
+    },
+    "academics.promotion_retained": {
+        "title": "Retained for new academic year",
+        "message": "{student_name} has been retained in {to_class} for {target_year}.",
+        "priority": NotificationPriority.NORMAL,
+        "required": {"student_name", "to_class", "target_year"},
+    },
+    "academics.promotion_graduated": {
+        "title": "Graduation completed",
+        "message": "{student_name} has graduated from {from_class}.",
+        "priority": NotificationPriority.HIGH,
+        "required": {"student_name", "from_class"},
+    },
+    "academics.promotion_transferred": {
+        "title": "Transfer recorded",
+        "message": "{student_name} has been marked as transferred from {from_class}.",
+        "priority": NotificationPriority.HIGH,
+        "required": {"student_name", "from_class"},
+    },
+    "academics.promotion_withdrawn": {
+        "title": "Withdrawal recorded",
+        "message": "{student_name} has been marked as withdrawn from {from_class}.",
+        "priority": NotificationPriority.HIGH,
+        "required": {"student_name", "from_class"},
+    },
 }

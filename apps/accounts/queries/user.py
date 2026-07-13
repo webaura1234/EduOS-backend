@@ -479,16 +479,30 @@ def record_login_attempt(
 # Admin user-management screen
 # ─────────────────────────────────────────────────────────────────────────────
 
-def list_managed_users(tenant_id, *, branch_id=None, role=None, search=None, is_active=None):
+def list_managed_users(
+    tenant_id,
+    *,
+    branch_id=None,
+    role=None,
+    search=None,
+    is_active=None,
+    course_id=None,
+    batch_id=None,
+):
     """Manageable users in a tenant, optionally scoped to one branch/role, with search.
 
-    Role, search, and active-state filters are applied server-side so the caller can
-    paginate the result without ever materializing the full tenant roster in Python.
+    Role, active-state, class/section, and search filters are applied server-side so
+    the caller can paginate without materializing the full tenant roster in Python.
+
+    When ``batch_id`` or ``course_id`` is set, results are limited to student accounts
+    with an active enrollment in that section or class (current year for course scope).
 
     ``is_active``: ``True`` / ``False`` to filter; ``None`` returns both (admin roster).
     """
     from django.db.models import Q
     from apps.accounts.models.user import Role
+    from apps.admissions.enums import EnrollmentStatus
+    from apps.admissions.models import StudentEnrollment
 
     qs = User.objects.filter(
         tenant_id=tenant_id,
@@ -508,6 +522,25 @@ def list_managed_users(tenant_id, *, branch_id=None, role=None, search=None, is_
             | Q(phone__icontains=search)
             | Q(custom_login_id__icontains=search)
         )
+    if batch_id or course_id:
+        enrollment_qs = StudentEnrollment.objects.filter(
+            status=EnrollmentStatus.ACTIVE,
+            is_active=True,
+            student_profile__user__tenant_id=tenant_id,
+        )
+        if branch_id:
+            enrollment_qs = enrollment_qs.filter(branch_id=branch_id)
+        if batch_id:
+            enrollment_qs = enrollment_qs.filter(batch_id=batch_id)
+        elif course_id:
+            enrollment_qs = enrollment_qs.filter(batch__course_id=course_id)
+            if branch_id:
+                from apps.academics.queries.calendar import get_current_year
+                current_year = get_current_year(branch_id)
+                if current_year:
+                    enrollment_qs = enrollment_qs.filter(academic_year_id=current_year.pk)
+        student_ids = enrollment_qs.values_list("student_profile__user_id", flat=True).distinct()
+        qs = qs.filter(role=Role.STUDENT, pk__in=student_ids)
     return qs.order_by("role", "first_name", "last_name")
 
 

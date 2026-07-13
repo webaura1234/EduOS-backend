@@ -405,6 +405,19 @@ def test_assign_and_unassign_class_teacher(env):
     assert all(ct["classSectionId"] != batch_id for ct in overview["classTeachers"])
 
 
+def test_assign_class_teacher_rejects_frozen_academic_year(env):
+    frozen_year = AcademicYearFactory(branch=env["branch"], is_current=False, is_frozen=True)
+    batch = BatchFactory(course__department__branch=env["branch"], academic_year=frozen_year)
+    resp = _post(env, {"action": "assign_class_teacher", "payload": {
+        "classSectionId": str(batch.id),
+        "teacherUserId": str(env["faculty"].id),
+    }})
+    assert resp.status_code == 400, resp.content
+    body = resp.json()
+    message = body.get("message") or body.get("data", {}).get("message") or _action_errors(resp).get("error", "")
+    assert "frozen academic year" in str(message).lower()
+
+
 def test_assign_replace_and_unassign_subject_teacher(env):
     batch_id, subject_id, period_id = _staffing_fixture(env)
     substitute = UserFactory(

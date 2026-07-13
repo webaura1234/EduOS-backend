@@ -11,7 +11,7 @@ from apps.accounts.models.profile import StudentProfile
 from apps.accounts.permissions import IsAdminOrSuperAdmin
 from apps.admissions.queries.enrollment import get_active_enrollment_for_profile
 from apps.fees.interactors.payment import RecordOfflinePaymentInteractor
-from apps.fees.queries.invoice import list_dues_for_student
+from apps.fees.queries.invoice import outstanding_invoices_qs
 
 # FE method → backend PaymentMethod (offline only; cash stays cash, rest = bank transfer).
 _METHOD = {"cash": "cash", "cheque": "cheque", "upi": "bank_transfer",
@@ -44,9 +44,10 @@ class AdminRecordPaymentByStudentView(APIView):
         if enrollment is None:
             raise ValidationError({"studentId": "No active enrollment for this student."})
 
-        invoice = next(
-            (inv for inv in list_dues_for_student(enrollment.id) if inv.balance_paise > 0),
-            None,
+        invoice = (
+            outstanding_invoices_qs(enrollment_id=enrollment.id)
+            .order_by("due_date", "created_at")
+            .first()
         )
         if invoice is None:
             raise ValidationError("This student has no open dues to apply a payment to.")

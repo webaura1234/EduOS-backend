@@ -1,5 +1,21 @@
 from .calendar import AcademicPeriod, AcademicYear, Holiday, HolidayType, PeriodType
 from .rollover import AcademicRolloverRun, RolloverRunStatus
+from .promotion import (
+    AcademicPromotionClassMapping,
+    AcademicPromotionDecision,
+    AcademicPromotionExecutionLog,
+    AcademicPromotionExecutionRun,
+    AcademicPromotionOverrideLog,
+    AcademicPromotionPreparationLog,
+    AcademicPromotionSession,
+    ExecutionLogStatus,
+    ExecutionReadiness,
+    PreparationLogEvent,
+    PreparationStatus,
+    PromotionAction,
+    PromotionExecutionStatus,
+    PromotionSessionStatus,
+)
 from .curriculum import BatchFaculty, BatchFacultyRole, BatchSubject, Subject, SubjectType
 from .structure import Batch, Course, Department, DepartmentType
 from .timetable import (
@@ -50,6 +66,20 @@ __all__ = [
     "TimetableEntryStatus",
     "AcademicRolloverRun",
     "RolloverRunStatus",
+    "AcademicPromotionSession",
+    "AcademicPromotionDecision",
+    "AcademicPromotionOverrideLog",
+    "AcademicPromotionClassMapping",
+    "AcademicPromotionPreparationLog",
+    "AcademicPromotionExecutionRun",
+    "AcademicPromotionExecutionLog",
+    "PromotionAction",
+    "PromotionSessionStatus",
+    "PromotionExecutionStatus",
+    "ExecutionLogStatus",
+    "PreparationStatus",
+    "ExecutionReadiness",
+    "PreparationLogEvent",
     "AcademicSubstitution",
     "AdminReviewDismissal",
     "SubstitutionStatus",

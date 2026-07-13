@@ -48,6 +48,15 @@ def build_action_url(
             return f"/admin/admissions/{app_id}"
         return "/admin/admissions"
 
+    if notification_type.startswith("academics.promotion_"):
+        if role == Role.PARENT:
+            return f"/parent/account{child_qs}"
+        if role == Role.STUDENT:
+            return "/student/account"
+        if role in (Role.ADMIN, Role.SUPER_ADMIN):
+            return "/admin/academic-management"
+        return "/student/account"
+
     if notification_type == "announcement.published":
         ann_id = variables.get("announcement_id", "")
         if role == Role.STUDENT and ann_id:

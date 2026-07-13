@@ -28,13 +28,26 @@ def test_waitlist_creation():
     assert wl.rank > 0
 
 
-def test_enrollment_unique_constraint():
+def test_enrollment_unique_constraint_active_only():
     enr1 = StudentEnrollmentFactory()
-    # Attempting to create another enrollment for same profile and academic year should fail due to uniqueness constraint
     with pytest.raises(IntegrityError):
         StudentEnrollmentFactory(
             student_profile=enr1.student_profile,
             academic_year=enr1.academic_year,
             branch=enr1.branch,
-            batch=enr1.batch
+            batch=enr1.batch,
         )
+
+
+def test_inactive_enrollment_allows_new_active_same_year():
+    enr1 = StudentEnrollmentFactory()
+    enr1.is_active = False
+    enr1.save(update_fields=["is_active", "updated_at"])
+    enr2 = StudentEnrollmentFactory(
+        student_profile=enr1.student_profile,
+        academic_year=enr1.academic_year,
+        branch=enr1.branch,
+        batch=enr1.batch,
+    )
+    assert enr2.is_active is True
+    assert enr2.pk != enr1.pk

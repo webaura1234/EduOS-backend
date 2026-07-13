@@ -1,35 +1,45 @@
 """Celery tasks for academics."""
 
 from celery import shared_task
+from django.utils import timezone
 
-from apps.academics.interactors.rollover import _execute_rollover_sync
-from apps.academics.models import RolloverRunStatus
-from apps.academics.queries import rollover as rol_q
+from apps.academics.models.promotion import PromotionExecutionStatus
+from apps.academics.queries import promotion_execution as exec_q
+from apps.academics.queries import promotion_preparation as prep_q
 
 
 @shared_task(bind=True, max_retries=0)
 def execute_rollover_task(self, run_id: str):
-    """Background rollover commit for large student populations."""
-    run = rol_q.get_run_by_id(run_id)
+    """Background rollover commit for large student populations (retired)."""
+    from apps.academics.exceptions import RolloverDirectExecutionDisabledError
+
+    raise RolloverDirectExecutionDisabledError()
+
+
+@shared_task(bind=True, max_retries=0)
+def execute_promotion_task(self, run_id: str):
+    """Background promotion execution."""
+    from apps.academics.interactors import promotion_execution as exec_i
+
+    run = exec_q.get_run_by_id(run_id)
     if run is None:
         return {"error": "run_not_found"}
-
-    branch = run.branch
-    tenant = branch.tenant
     user = run.executed_by or run.created_by
-
     try:
-        return _execute_rollover_sync(
-            branch=branch,
-            tenant=tenant,
-            expected_version=run.preview_version,
-            user=user,
-            existing_run=run,
-        )
+        return exec_i.run_execution(run_id=run_id, user=user)
     except Exception as exc:
-        rol_q.update_rollover_run(
+        exec_q.update_run(
             run,
-            {"status": RolloverRunStatus.FAILED, "error_message": str(exc)},
+            {
+                "status": PromotionExecutionStatus.FAILED,
+                "error_message": str(exc),
+                "completed_at": timezone.now(),
+            },
+            user=user,
+        )
+        prep_q.update_session(
+            run.session,
+            {"execution_status": PromotionExecutionStatus.FAILED},
             user=user,
         )
         raise

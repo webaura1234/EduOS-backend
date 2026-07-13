@@ -30,17 +30,38 @@ from apps.examinations.serializers.exam import ExamScheduleSlotSerializer
 from apps.examinations.serializers.registration import ExamRegistrationSerializer
 
 
-def _current_academic_year_id(branch_id):
-    """The branch's current academic year id, falling back to the most recent
-    one if none is explicitly marked current; None (no scoping) if the branch
-    has no academic year configured yet."""
-    years = list(
+def _branch_years(branch_id) -> list:
+    """The branch's academic years, newest first (reused for scoping + the picker)."""
+    return list(
         AcademicYear.objects.filter(branch_id=branch_id, is_active=True).order_by("-start_date")
     )
+
+
+def _default_year_id(years: list):
+    """Current year id, falling back to the most recent; None if none configured."""
     if not years:
         return None
     current = next((y for y in years if y.is_current), years[0])
     return current.id
+
+
+def _resolve_year_id(years: list, requested_id):
+    """Use the requested academic year only if it belongs to the branch; otherwise
+    fall back to the current year. Prevents cross-branch id probing and lets the
+    admin view a prior year's exams/results without changing the default (audit P1.2)."""
+    if requested_id:
+        for y in years:
+            if str(y.id) == str(requested_id):
+                return y.id
+    return _default_year_id(years)
+
+
+def _current_academic_year_id(branch_id):
+    """The branch's current academic year id, falling back to the most recent
+    one if none is explicitly marked current; None (no scoping) if the branch
+    has no academic year configured yet. Retained for other importers
+    (e.g. admin_tab_overview)."""
+    return _default_year_id(_branch_years(branch_id))
 
 
 def _result_status(exam) -> str:
@@ -88,7 +109,8 @@ class AdminExaminationsOverviewView(APIView):
     def get(self, request) -> Response:
         branch = resolve_branch(request)
 
-        year_id = _current_academic_year_id(branch.pk)
+        years = _branch_years(branch.pk)
+        year_id = _resolve_year_id(years, request.query_params.get("academicYearId"))
         exams = list(exam_q.list_exams_for_year(branch.pk, academic_year_id=year_id))
         exam_ids = [e.id for e in exams]
 
@@ -190,4 +212,12 @@ class AdminExaminationsOverviewView(APIView):
             "faculty": inv_q.faculty_options_for_branch(branch.tenant_id, branch.pk),
             "resultStatusByExam": result_status_by_exam,
             "publishedResults": published_results,
+            # Academic-year picker: lets the admin view a prior year's exams and
+            # results after a rollover (audit P1.2). Omitting the param keeps the
+            # current-year default unchanged.
+            "academicYears": [
+                {"id": str(y.id), "name": y.name, "isCurrent": y.is_current}
+                for y in years
+            ],
+            "selectedAcademicYearId": str(year_id) if year_id else None,
         })

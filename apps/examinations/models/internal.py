@@ -1,4 +1,8 @@
-"""InternalMark — continuous/internal assessment score for a student in a subject (F-253)."""
+"""InternalMark — continuous/internal assessment score for a student in a subject (F-253).
+
+# ENROLLMENT SEAM — student FK targets StudentEnrollment (Stage 5 / OD-1 A).
+API `studentId` remains a StudentProfile id; views/queries resolve enrollment.
+"""
 
 from django.db import models
 
@@ -9,8 +13,8 @@ class InternalMark(BaseModel):
     branch = models.ForeignKey(
         "organizations.Branch", on_delete=models.CASCADE, related_name="internal_marks",
     )
-    student_profile = models.ForeignKey(
-        "accounts.StudentProfile", on_delete=models.CASCADE, related_name="internal_marks",
+    student = models.ForeignKey(
+        "admissions.StudentEnrollment", on_delete=models.CASCADE, related_name="internal_marks",
     )
     subject = models.ForeignKey(
         "academics.Subject", on_delete=models.CASCADE, related_name="internal_marks",
@@ -31,7 +35,7 @@ class InternalMark(BaseModel):
         db_table = "examinations_internal_mark"
         constraints = [
             models.UniqueConstraint(
-                fields=["student_profile", "subject"],
+                fields=["student", "subject"],
                 condition=models.Q(is_active=True),
                 name="unique_internal_mark_per_student_subject",
             ),
@@ -39,4 +43,4 @@ class InternalMark(BaseModel):
         indexes = [models.Index(fields=["branch", "subject"])]
 
     def __str__(self):
-        return f"InternalMark({self.student_profile_id}, {self.subject_id}, {self.marks})"
+        return f"InternalMark({self.student_id}, {self.subject_id}, {self.marks})"

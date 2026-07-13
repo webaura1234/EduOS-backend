@@ -1,56 +1,51 @@
-"""Views — Academic year rollover."""
+"""Views — Academic year rollover (retired — use Promotion execution)."""
 
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.academics.interactors import rollover as rol_i
+from apps.academics.exceptions import (
+    PROMOTION_WORKSPACE_PATH,
+    RolloverDirectExecutionDisabledError,
+)
 from apps.academics.permissions import IsAdminOrSuperAdmin
-from apps.academics.scoping import resolve_branch
-from apps.academics.serializers.rollover import RolloverExecuteSerializer, RolloverPreviewSerializer
+
+
+def _rollover_disabled_response() -> Response:
+    return Response(
+        {
+            "detail": RolloverDirectExecutionDisabledError.default_detail,
+            "code": RolloverDirectExecutionDisabledError.default_code,
+            "promotionPath": PROMOTION_WORKSPACE_PATH,
+        },
+        status=status.HTTP_410_GONE,
+    )
 
 
 class RolloverPreviewView(APIView):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
 
-    def post(self, request) -> Response:
-        branch = resolve_branch(request, request.data.get("branchId") if request.data else None)
-        serializer = RolloverPreviewSerializer(data=request.data or {})
-        serializer.is_valid(raise_exception=True)
-        preview = rol_i.build_preview(branch.pk, request.user.tenant)
-        return Response(preview.to_dict())
+    def post(self, request):
+        return _rollover_disabled_response()
 
 
 class RolloverExecuteView(APIView):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
 
-    def post(self, request) -> Response:
-        branch = resolve_branch(request, request.data.get("branchId"))
-        serializer = RolloverExecuteSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        data = serializer.validated_data
-        result = rol_i.execute_rollover(
-            branch=branch,
-            tenant=request.user.tenant,
-            expected_version=data["expectedVersion"],
-            user=request.user,
-        )
-        return Response(result, status=status.HTTP_202_ACCEPTED if result.get("async") else status.HTTP_200_OK)
+    def post(self, request):
+        return _rollover_disabled_response()
 
 
 class RolloverUndoView(APIView):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
 
-    def post(self, request) -> Response:
-        branch = resolve_branch(request, request.data.get("branchId") if request.data else None)
-        result = rol_i.undo_rollover(branch_id=branch.pk, user=request.user)
-        return Response(result)
+    def post(self, request):
+        return _rollover_disabled_response()
 
 
 class RolloverStatusView(APIView):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
 
-    def get(self, request) -> Response:
-        branch = resolve_branch(request)
-        return Response(rol_i.get_rollover_status(branch.pk))
+    def get(self, request):
+        return _rollover_disabled_response()

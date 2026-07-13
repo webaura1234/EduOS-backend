@@ -64,7 +64,8 @@ class StudentEnrollment(BaseModel):
         constraints = [
             models.UniqueConstraint(
                 fields=["student_profile", "academic_year"],
-                name="unique_enrollment_per_student_year",
+                condition=models.Q(is_active=True),
+                name="unique_active_enrollment_per_student_year",
             )
         ]
         indexes = [

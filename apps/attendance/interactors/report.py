@@ -36,7 +36,15 @@ def _percent_map(students, *, date_from, date_to, exclude_exam):
     return out
 
 
-def _students_for_report(branch, batch_id=None):
+def _students_for_report(branch, batch_id=None, *, academic_year_id=None, include_inactive=False):
+    # Explicit academic-year scoping routes through the year-aware roster so a prior
+    # (frozen) year's students stay reportable after a rollover (audit P1.3). With no
+    # academic_year_id the default live-roster behavior is unchanged.
+    if academic_year_id is not None:
+        return list(roster_q.enrollments_for_report(
+            branch.pk, batch_id=batch_id, academic_year_id=academic_year_id,
+            include_inactive=include_inactive,
+        ))
     if batch_id:
         return list(roster_q.students_in_batch(batch_id))
     return list(roster_q.all_active_students_in_branch(branch.pk))
@@ -50,12 +58,16 @@ def _attendance_rows(
     batch_id=None,
     threshold=None,
     below_threshold_only=False,
+    academic_year_id=None,
+    include_inactive=False,
 ) -> dict:
     cfg_threshold, exam_counts = roster_q.attendance_config(branch)
     threshold = threshold if threshold is not None else cfg_threshold
     exclude_exam = not exam_counts
 
-    students = _students_for_report(branch, batch_id)
+    students = _students_for_report(
+        branch, batch_id, academic_year_id=academic_year_id, include_inactive=include_inactive
+    )
     percents = _percent_map(students, date_from=date_from, date_to=date_to, exclude_exam=exclude_exam)
 
     rows = []
@@ -80,7 +92,11 @@ def _attendance_rows(
         class_name = sp.batch.course.name if sp.batch_id and sp.batch.course_id else ""
         section_name = sp.batch.name if sp.batch_id else ""
         academic_year = sp.batch.academic_year.name if sp.batch_id and getattr(sp.batch, 'academic_year_id', None) else ""
-        admission_no = sp.student_profile.admission_number if sp.student_profile_id else ""
+        # Admission/roll number lives on the user as custom_login_id — provisioning
+        # sets it there (ProvisionEnrollmentInteractor). The old `admission_number`
+        # attribute on StudentProfile no longer exists and hard-crashed every report
+        # that had students.
+        admission_no = (sp.user.custom_login_id or "") if sp.student_profile_id else ""
 
         rows.append({
             "studentId": str(sp.student_profile_id), # Keep for internal use if needed
@@ -208,10 +224,14 @@ def student_summary(branch, student, *, date_from=_WIDE_FROM, date_to=_WIDE_TO) 
     }
 
 
-def ranking_report(branch, *, date_from, date_to, batch_id=None) -> dict:
+def ranking_report(
+    branch, *, date_from, date_to, batch_id=None, academic_year_id=None, include_inactive=False
+) -> dict:
     """All students ranked by attendance % for a date range (admin shortage table)."""
     return _attendance_rows(
-        branch, date_from=date_from, date_to=date_to, batch_id=batch_id, below_threshold_only=False
+        branch, date_from=date_from, date_to=date_to, batch_id=batch_id,
+        below_threshold_only=False,
+        academic_year_id=academic_year_id, include_inactive=include_inactive,
     )
 
 
@@ -222,6 +242,8 @@ def shortage_report(
     batch_id=None,
     date_from=None,
     date_to=None,
+    academic_year_id=None,
+    include_inactive=False,
 ) -> dict:
     """Students below the attendance threshold (F-105/114/115)."""
     date_from = date_from or _WIDE_FROM
@@ -233,6 +255,8 @@ def shortage_report(
         batch_id=batch_id,
         threshold=threshold,
         below_threshold_only=True,
+        academic_year_id=academic_year_id,
+        include_inactive=include_inactive,
     )
 
 
@@ -242,9 +266,14 @@ def detention_report(
     batch_id=None,
     date_from=None,
     date_to=None,
+    academic_year_id=None,
+    include_inactive=False,
 ) -> dict:
     """Auto-generated detention list = shortage at the configured threshold (F-115)."""
-    return shortage_report(branch, batch_id=batch_id, date_from=date_from, date_to=date_to)
+    return shortage_report(
+        branch, batch_id=batch_id, date_from=date_from, date_to=date_to,
+        academic_year_id=academic_year_id, include_inactive=include_inactive,
+    )
 
 
 def monthly_report(branch, *, year, month, batch_id=None) -> dict:

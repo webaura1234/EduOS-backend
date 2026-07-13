@@ -181,6 +181,7 @@ class AdminAcademicsStaffingTabView(APIView):
                 for s in subjects if s.is_active
             ],
             "currentPeriodId": str(current_period.pk) if current_period else None,
+            "currentAcademicYearId": str(current_year.pk) if current_year else None,
             "adminReviewQueue": _review_queue(
                 branch.pk, academic_period_id=current_period.pk if current_period else None,
             ),

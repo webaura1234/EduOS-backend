@@ -35,14 +35,18 @@ def _data(resp):
 
 
 def _assign_subject_teacher(batch, faculty):
-    period = AcademicPeriod.objects.create(
-        academic_year=batch.academic_year,
-        period_type=PeriodType.TERM,
-        sequence=1,
-        name="T1",
-        start_date=datetime.date(2026, 1, 1),
-        end_date=datetime.date(2026, 12, 1),
-    )
+    period = AcademicPeriod.objects.filter(
+        academic_year=batch.academic_year, sequence=1, is_active=True,
+    ).first()
+    if period is None:
+        period = AcademicPeriod.objects.create(
+            academic_year=batch.academic_year,
+            period_type=PeriodType.TERM,
+            sequence=1,
+            name="T1",
+            start_date=datetime.date(2026, 1, 1),
+            end_date=datetime.date(2026, 12, 1),
+        )
     bs = BatchSubject.objects.create(batch=batch, subject=batch._test_subject, academic_period=period)
     BatchFaculty.objects.create(
         batch_subject=bs,
@@ -177,8 +181,9 @@ def test_class_teacher_sees_homeroom_exam_marks_read_only(college_env):
 
 def test_deadline_blocks_faculty_but_admin_overrides(college_env):
     env = college_env
+    enrollment = env["profile"].enrollments.first()
     InternalMark.objects.create(
-        branch=env["branch"], student_profile=env["profile"], subject=env["subject"],
+        branch=env["branch"], student=enrollment, subject=env["subject"],
         marks=10, max_marks=20, recorded_by=env["faculty"],
         hard_deadline_at=timezone.now() - datetime.timedelta(days=1),
     )
@@ -202,8 +207,9 @@ def test_deadline_blocks_faculty_but_admin_overrides(college_env):
 
 
 def test_school_faculty_marks_list_omits_internal(env):
+    enrollment = env["profile"].enrollments.first()
     InternalMark.objects.create(
-        branch=env["branch"], student_profile=env["profile"], subject=env["subject"],
+        branch=env["branch"], student=enrollment, subject=env["subject"],
         marks=12, max_marks=20, recorded_by=env["faculty"],
     )
     body = _data(_client(env["faculty"]).get(MARKS_URL))

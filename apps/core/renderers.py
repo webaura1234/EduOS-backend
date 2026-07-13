@@ -73,8 +73,8 @@ class StandardJSONRenderer(JSONRenderer):
             errors = None
 
             if isinstance(data, dict):
-                # Single-message errors from DRF use the "detail" key.
-                message = data.pop("detail", message)
+                # Single-message errors from DRF use the "detail" key; gap actions use "error".
+                message = data.pop("detail", data.pop("error", message))
                 # Whatever remains are field-level validation errors.
                 if data:
                     errors = data

@@ -1,7 +1,51 @@
 """Queries — FeeInvoice, FeeInvoiceLine, and Installment."""
 
-from apps.fees.enums import InvoiceStatus
+from django.db.models import F
+
+from apps.fees.enums import CarryForwardState, InvoiceStatus
 from apps.fees.models import FeeInvoice, FeeInvoiceLine, Installment
+
+COLLECTIBLE_STATUSES = [InvoiceStatus.DUE, InvoiceStatus.PARTIAL]
+
+
+def is_collectible_outstanding(invoice: FeeInvoice) -> bool:
+    """True when an invoice still counts toward collectible outstanding balance."""
+    return (
+        invoice.is_active
+        and invoice.carry_forward_state == CarryForwardState.NORMAL
+        and invoice.status in COLLECTIBLE_STATUSES
+        and invoice.balance_paise > 0
+    )
+
+
+def outstanding_invoices_qs(*, enrollment_id=None, branch_id=None):
+    """Active invoices with a collectible balance (excludes carried-forward lifecycle)."""
+    qs = FeeInvoice.objects.filter(
+        is_active=True,
+        carry_forward_state=CarryForwardState.NORMAL,
+        status__in=COLLECTIBLE_STATUSES,
+        total_paise__gt=F("paid_paise"),
+    )
+    if enrollment_id is not None:
+        qs = qs.filter(student_id=enrollment_id)
+    if branch_id is not None:
+        qs = qs.filter(branch_id=branch_id)
+    return qs
+
+
+def outstanding_balance_paise(enrollment_id) -> int:
+    return sum(inv.balance_paise for inv in outstanding_invoices_qs(enrollment_id=enrollment_id))
+
+
+def mark_invoices_carried_forward(source_enrollment_id, opening_invoice, user=None) -> int:
+    """Mark source invoices as carried forward; preserve status and amounts."""
+    update_kwargs = {
+        "carry_forward_state": CarryForwardState.CARRIED_FORWARD,
+        "carried_forward_to": opening_invoice,
+    }
+    if user is not None:
+        update_kwargs["updated_by"] = user
+    return outstanding_invoices_qs(enrollment_id=source_enrollment_id).update(**update_kwargs)
 
 
 def get_invoice_by_id(invoice_id) -> FeeInvoice | None:
@@ -21,11 +65,8 @@ def invoice_exists_for_assignment(assignment_id) -> bool:
 
 def list_branch_ledger(branch_id):
     """Open-due invoices for a branch (balance > 0) — super-admin branch fee ledger."""
-    from django.db.models import F
     return (
-        FeeInvoice.objects.filter(
-            branch_id=branch_id, is_active=True, total_paise__gt=F("paid_paise")
-        )
+        outstanding_invoices_qs(branch_id=branch_id)
         .select_related("student__student_profile__user", "branch")
         .order_by("-updated_at")
     )
@@ -219,7 +260,21 @@ def get_invoice(branch_id, invoice_id) -> FeeInvoice | None:
         return None
 
 
-def create_invoice(*, branch, student, assignment=None, billing_guardian=None, due_date=None, total_paise=0, status="due", user=None) -> FeeInvoice:
+def create_invoice(
+    *,
+    branch,
+    student,
+    assignment=None,
+    billing_guardian=None,
+    due_date=None,
+    total_paise=0,
+    status="due",
+    carry_forward_state=CarryForwardState.NORMAL,
+    opening_balance_source_year=None,
+    opening_balance_source=None,
+    promotion_session=None,
+    user=None,
+) -> FeeInvoice:
     return FeeInvoice.objects.create(
         branch=branch,
         student=student,
@@ -229,6 +284,10 @@ def create_invoice(*, branch, student, assignment=None, billing_guardian=None, d
         total_paise=total_paise,
         paid_paise=0,
         status=status,
+        carry_forward_state=carry_forward_state,
+        opening_balance_source_year=opening_balance_source_year,
+        opening_balance_source=opening_balance_source,
+        promotion_session=promotion_session,
         created_by=user,
         updated_by=user,
     )

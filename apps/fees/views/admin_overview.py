@@ -17,18 +17,109 @@ from rest_framework.views import APIView
 
 from apps.academics.scoping import resolve_branch
 from apps.accounts.permissions import IsAdminOrSuperAdmin
+from apps.fees.enums import CarryForwardState
 from apps.fees.helpers.payment_dict import batch_label as _batch_label
 from apps.fees.helpers.payment_dict import class_label as _class_label
 from apps.fees.helpers.payment_dict import rupees as _rupees
 from apps.fees.helpers.payment_dict import student_name as _student_name
 from apps.fees.queries import concession as conc_q
 from apps.fees.queries import invoice as inv_q
+from apps.fees.queries.invoice import is_collectible_outstanding
 from apps.fees.queries import payment as pay_q
 from apps.fees.queries import refund as ref_q
 from apps.fees.queries import structure as struct_q
 
 _REFUND_STATUS = {"requested": "pending", "approved": "approved", "rejected": "rejected",
                   "processed": "processed", "completed": "processed"}
+
+_PRIOR_YEAR_BALANCE_PREFIX = "Prior Year Balance"
+
+
+def _current_academic_year_id(branch) -> str | None:
+    from apps.academics.models import AcademicYear
+
+    academic_years = list(
+        AcademicYear.objects.filter(branch_id=branch.pk, is_active=True).order_by("-start_date")
+    )
+    current_ay = next((y for y in academic_years if y.is_current), academic_years[0] if academic_years else None)
+    return str(current_ay.id) if current_ay else None
+
+
+def _filtered_invoices(
+    branch,
+    *,
+    academic_year_id=None,
+    batch_id=None,
+    course_id=None,
+):
+    qs = inv_q.list_invoices(branch.pk).prefetch_related(
+        "installments", "lines", "assignment",
+    ).select_related(
+        "student__academic_year", "student__batch__course",
+        "carried_forward_to__student__academic_year",
+    )
+    if academic_year_id:
+        qs = qs.filter(student__academic_year_id=academic_year_id)
+    if batch_id:
+        qs = qs.filter(student__batch_id=batch_id)
+    if course_id:
+        qs = qs.filter(student__batch__course_id=course_id)
+    return qs
+
+
+def _enrollment_row_metadata(enrollment) -> dict:
+    if not enrollment:
+        return {
+            "classLabel": "",
+            "academicYearId": None,
+            "academicYearLabel": None,
+            "batchId": None,
+            "courseId": None,
+            "courseName": None,
+            "sectionName": None,
+        }
+    batch = enrollment.batch
+    course = batch.course if batch and batch.course_id else None
+    course_name = course.name if course else ""
+    section_name = batch.name if batch else ""
+    class_label = _class_label(enrollment)
+    year = enrollment.academic_year
+    return {
+        "classLabel": class_label,
+        "academicYearId": str(enrollment.academic_year_id) if enrollment.academic_year_id else None,
+        "academicYearLabel": year.name if year else None,
+        "batchId": str(enrollment.batch_id) if enrollment.batch_id else None,
+        "courseId": str(batch.course_id) if batch and batch.course_id else None,
+        "courseName": course_name or None,
+        "sectionName": section_name or None,
+    }
+
+
+def _charge_category(kind: str, label: str) -> str:
+    if label.startswith(_PRIOR_YEAR_BALANCE_PREFIX):
+        return "carry_forward"
+    if kind == "exam":
+        return "exam"
+    return "other"
+
+
+def _allocate_line_paid(lines, total_paid_paise: int) -> list[int]:
+    """Proportional paid_paise per line (last line gets remainder)."""
+    if not lines:
+        return []
+    total_amount = sum(int(line.amount_paise) for line in lines)
+    if total_amount <= 0:
+        return [0] * len(lines)
+    remaining = total_paid_paise
+    allocated = []
+    for idx, line in enumerate(lines):
+        if idx == len(lines) - 1:
+            paid = remaining
+        else:
+            paid = (total_paid_paise * int(line.amount_paise)) // total_amount
+            remaining -= paid
+        allocated.append(paid)
+    return allocated
 
 
 def _installment_label(assignment, sequence: int) -> str:
@@ -220,10 +311,21 @@ def _webhook(w) -> dict:
     }
 
 
-def _installment_schedules(branch) -> dict:
+def _installment_schedules(
+    branch,
+    *,
+    academic_year_id=None,
+    batch_id=None,
+    course_id=None,
+) -> dict:
     today = datetime.date.today()
     by_student: dict[str, list] = {}
-    invoices = inv_q.list_invoices(branch.pk).prefetch_related("installments", "assignment")
+    invoices = _filtered_invoices(
+        branch,
+        academic_year_id=academic_year_id,
+        batch_id=batch_id,
+        course_id=course_id,
+    )
     for inv in invoices:
         enrollment = inv.student
         sid = str(enrollment.student_profile_id) if enrollment else None
@@ -251,6 +353,85 @@ def _installment_schedules(branch) -> dict:
     return by_student
 
 
+def _fee_charges_by_student(
+    branch,
+    *,
+    academic_year_id=None,
+    batch_id=None,
+    course_id=None,
+) -> dict:
+    by_student: dict[str, list] = {}
+    invoices = _filtered_invoices(
+        branch,
+        academic_year_id=academic_year_id,
+        batch_id=batch_id,
+        course_id=course_id,
+    )
+    for inv in invoices:
+        enrollment = inv.student
+        sid = str(enrollment.student_profile_id) if enrollment else None
+        if not sid:
+            continue
+        inst_list = list(inv.installments.all())
+        inst_total = sum(int(i.amount_paise) for i in inst_list)
+        lines = list(inv.lines.all())
+        due_date = inv.due_date.isoformat() if inv.due_date else None
+        year_id = str(enrollment.academic_year_id) if enrollment and enrollment.academic_year_id else ""
+        year_label = enrollment.academic_year.name if enrollment and enrollment.academic_year_id else ""
+
+        rows = by_student.setdefault(sid, [])
+
+        if not inst_list:
+            paid_alloc = _allocate_line_paid(lines, int(inv.paid_paise))
+            for line, line_paid in zip(lines, paid_alloc, strict=False):
+                amount_paise = int(line.amount_paise)
+                balance_paise = max(amount_paise - line_paid, 0)
+                if not is_collectible_outstanding(inv):
+                    balance_paise = 0
+                label = line.label or ""
+                carried_to = None
+                if inv.carry_forward_state == "carried_forward" and inv.carried_forward_to_id:
+                    target_enrollment = inv.carried_forward_to.student
+                    if target_enrollment and target_enrollment.academic_year_id:
+                        carried_to = target_enrollment.academic_year.name
+                rows.append({
+                    "invoiceId": str(inv.id),
+                    "academicYearId": year_id,
+                    "academicYearLabel": year_label,
+                    "label": label,
+                    "kind": line.kind or "other",
+                    "amount": _rupees(amount_paise),
+                    "paid": _rupees(line_paid),
+                    "balance": _rupees(balance_paise),
+                    "dueDate": due_date,
+                    "isCarryForward": label.startswith(_PRIOR_YEAR_BALANCE_PREFIX),
+                    "originalStatus": inv.status,
+                    "carryForward": inv.carry_forward_state == "carried_forward",
+                    "carriedForwardToYearLabel": carried_to,
+                    "category": _charge_category(line.kind or "other", label),
+                })
+        elif int(inv.total_paise) > inst_total:
+            remainder = int(inv.total_paise) - inst_total
+            if int(inv.total_paise) > 0:
+                remainder_paid = (int(inv.paid_paise) * remainder) // int(inv.total_paise)
+            else:
+                remainder_paid = 0
+            rows.append({
+                "invoiceId": str(inv.id),
+                "academicYearId": year_id,
+                "academicYearLabel": year_label,
+                "label": "Other charges (not in installments)",
+                "kind": "other",
+                "amount": _rupees(remainder),
+                "paid": _rupees(remainder_paid),
+                "balance": _rupees(max(remainder - remainder_paid, 0)),
+                "dueDate": due_date,
+                "isCarryForward": False,
+                "category": "other",
+            })
+    return by_student
+
+
 def _reconciliation_list(branch) -> list:
     from django.utils import timezone
     from datetime import timedelta
@@ -269,51 +450,74 @@ def _reconciliation_list(branch) -> list:
     return items
 
 
-def _ledger_and_collection(branch):
+def _ledger_and_collection(
+    branch,
+    *,
+    academic_year_id=None,
+    batch_id=None,
+    course_id=None,
+):
     """Group invoices per student into ledger rows; derive the collection snapshot."""
     today = datetime.date.today()
     by_student: dict[str, dict] = {}
     outstanding_total = 0
 
-    for inv in inv_q.list_invoices(branch.pk).prefetch_related("installments"):
+    for inv in _filtered_invoices(
+        branch,
+        academic_year_id=academic_year_id,
+        batch_id=batch_id,
+        course_id=course_id,
+    ):
         enrollment = inv.student
         sid = str(enrollment.student_profile_id) if enrollment else "—"
+        meta = _enrollment_row_metadata(enrollment)
         row = by_student.setdefault(sid, {
             "studentId": sid,
             "studentName": _student_name(enrollment),
-            "classLabel": _class_label(enrollment),
+            "classLabel": meta["classLabel"],
+            "academicYearId": meta["academicYearId"],
+            "academicYearLabel": meta["academicYearLabel"],
+            "batchId": meta["batchId"],
+            "courseId": meta["courseId"],
+            "courseName": meta["courseName"],
+            "sectionName": meta["sectionName"],
             "totalDue": 0, "paid": 0, "balance": 0,
             "nextDueDate": None, "isOverdue": False, "escalationLevel": 0,
             "_due_paise": 0, "_paid_paise": 0,
         })
         row["_due_paise"] += inv.total_paise
         row["_paid_paise"] += inv.paid_paise
+        if inv.carry_forward_state == CarryForwardState.CARRIED_FORWARD:
+            row["_due_paise"] -= inv.total_paise
+            row["_paid_paise"] -= inv.paid_paise
         balance = inv.total_paise - inv.paid_paise
-        outstanding_total += max(balance, 0)
-        if balance > 0:
-            open_inst_dates = [
-                inst.due_date for inst in inv.installments.all()
-                if inst.paid_paise < inst.amount_paise and inst.due_date
-            ]
-            if open_inst_dates:
-                earliest = min(open_inst_dates)
-                if row["nextDueDate"] is None or earliest.isoformat() < row["nextDueDate"]:
-                    row["nextDueDate"] = earliest.isoformat()
-            elif inv.due_date:
-                if row["nextDueDate"] is None or inv.due_date.isoformat() < row["nextDueDate"]:
-                    row["nextDueDate"] = inv.due_date.isoformat()
-            for inst in inv.installments.all():
-                if (
-                    inst.paid_paise < inst.amount_paise
-                    and inst.due_date
-                    and inst.due_date < today
-                ):
+        collectible = is_collectible_outstanding(inv)
+        if collectible:
+            outstanding_total += max(balance, 0)
+        if collectible and balance > 0:
+                open_inst_dates = [
+                    inst.due_date for inst in inv.installments.all()
+                    if inst.paid_paise < inst.amount_paise and inst.due_date
+                ]
+                if open_inst_dates:
+                    earliest = min(open_inst_dates)
+                    if row["nextDueDate"] is None or earliest.isoformat() < row["nextDueDate"]:
+                        row["nextDueDate"] = earliest.isoformat()
+                elif inv.due_date:
+                    if row["nextDueDate"] is None or inv.due_date.isoformat() < row["nextDueDate"]:
+                        row["nextDueDate"] = inv.due_date.isoformat()
+                for inst in inv.installments.all():
+                    if (
+                        inst.paid_paise < inst.amount_paise
+                        and inst.due_date
+                        and inst.due_date < today
+                    ):
+                        row["isOverdue"] = True
+                        row["escalationLevel"] = max(row["escalationLevel"], 1)
+                        break
+                if not row["isOverdue"] and inv.due_date and inv.due_date < today:
                     row["isOverdue"] = True
                     row["escalationLevel"] = max(row["escalationLevel"], 1)
-                    break
-            if not row["isOverdue"] and inv.due_date and inv.due_date < today:
-                row["isOverdue"] = True
-                row["escalationLevel"] = max(row["escalationLevel"], 1)
 
     ledger = []
     overdue_count = 0
@@ -360,10 +564,16 @@ class AdminFeesOverviewView(APIView):
 
         batches = []
         for b in list_batches(branch.pk):
+            course = b.course if b.course_id else None
             batches.append({
                 "id": str(b.id),
                 "label": _batch_label(b),
                 "studentCount": enrollments_in_batch(b.id).count(),
+                "academicYearId": str(b.academic_year_id) if b.academic_year_id else None,
+                "academicYearLabel": b.academic_year.name if b.academic_year_id else None,
+                "courseId": str(b.course_id) if b.course_id else None,
+                "courseName": course.name if course else None,
+                "sectionName": b.name or None,
             })
 
         return Response({
@@ -383,6 +593,10 @@ class AdminFeesOverviewView(APIView):
             "collection": collection,
             "installmentSchedulesByStudent": _installment_schedules(branch),
             "batches": batches,
+            "academicYears": [
+                {"id": str(y.id), "name": y.name, "isCurrent": y.is_current}
+                for y in academic_years
+            ],
             "currentAcademicYearId": str(current_ay.id) if current_ay else None,
             "currentAcademicYearLabel": current_ay.name if current_ay else None,
             "creditNoteRequests": [],

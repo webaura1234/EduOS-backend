@@ -234,3 +234,51 @@ def test_admin_overview_requires_admin(env):
     )
     resp = _client(student_user).get(reverse("examinations:admin-overview"))
     assert resp.status_code == 403
+
+
+def test_admin_overview_academic_year_param_returns_prior_year(env):
+    """Passing ?academicYearId=<prior> surfaces a rolled-over year's exams/results;
+    omitting it keeps the current-year default unchanged (audit P1.2)."""
+    client = _client(env["admin"])
+    _make_student(env, "yr")
+
+    old_exam_id, _ = _setup_exam_with_slot(
+        env, client, period=env["old_period"], name="Old Final", offset=0,
+    )
+    current_exam_id, _ = _setup_exam_with_slot(
+        env, client, period=env["current_period"], name="Current Final", offset=1,
+    )
+    old_year_id = str(env["old_period"].academic_year_id)
+    current_year_id = str(env["current_period"].academic_year_id)
+
+    # Default: current year only, and the picker lists every year.
+    default_body = _data(client.get(reverse("examinations:admin-overview")))
+    default_ids = {e["id"] for e in default_body["exams"]}
+    assert current_exam_id in default_ids
+    assert old_exam_id not in default_ids
+    assert default_body["selectedAcademicYearId"] == current_year_id
+    assert {old_year_id, current_year_id} <= {y["id"] for y in default_body["academicYears"]}
+
+    # Explicit prior year: the prior-year exam becomes reachable, current excluded.
+    prior_body = _data(
+        client.get(reverse("examinations:admin-overview"), {"academicYearId": old_year_id})
+    )
+    prior_ids = {e["id"] for e in prior_body["exams"]}
+    assert old_exam_id in prior_ids
+    assert current_exam_id not in prior_ids
+    assert prior_body["selectedAcademicYearId"] == old_year_id
+
+
+def test_admin_overview_unknown_year_param_falls_back_to_current(env):
+    """An unknown/cross-branch year id is ignored, not honored (no cross-branch probing)."""
+    import uuid
+
+    client = _client(env["admin"])
+    _make_student(env, "fb")
+    _setup_exam_with_slot(env, client, period=env["current_period"], name="Current Final", offset=1)
+    current_year_id = str(env["current_period"].academic_year_id)
+
+    body = _data(
+        client.get(reverse("examinations:admin-overview"), {"academicYearId": str(uuid.uuid4())})
+    )
+    assert body["selectedAcademicYearId"] == current_year_id

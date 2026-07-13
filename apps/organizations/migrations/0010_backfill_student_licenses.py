@@ -100,7 +100,8 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ("organizations", "0009_licensing"),
-        ("accounts", "0001_initial"),
+        # The backfill queries User.tenant, which is added in accounts 0002.
+        ("accounts", "0002_remove_studentprofile_current_section_id_and_more"),
     ]
 
     operations = [

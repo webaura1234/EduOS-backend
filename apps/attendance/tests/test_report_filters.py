@@ -129,3 +129,41 @@ def test_ranking_includes_all_students_detention_only_below(env):
     assert len(ranking_ids) == 2
     assert len(detention_ids) == 1
     assert detention_ids.issubset(ranking_ids)
+
+
+def test_prior_year_report_reachable_via_include_inactive(env):
+    """After a rollover the source-year enrollments are is_active=False, so the live
+    roster no longer sees them; the year-scoped historical path (academic_year_id +
+    include_inactive) still reports their prior-year attendance (audit P1.3)."""
+    _seed_july_sessions(env)
+    branch = env["branch"]
+    old_year = env["batch"].academic_year
+    date_from = datetime.date(2024, 7, 1)
+    date_to = datetime.date(2024, 7, 31)
+
+    # Before rollover both students appear in the default (live) ranking.
+    before = report_i.ranking_report(branch, date_from=date_from, date_to=date_to)
+    assert len({r["studentId"] for r in before["rows"]}) == 2
+
+    # Simulate the rollover: old year demoted+frozen FIRST (single-current-year
+    # constraint), then the new current year, then source enrollments deactivated —
+    # exactly what promotion/rollover does to prior-year enrollments.
+    AcademicYear.objects.filter(pk=old_year.pk).update(is_current=False, is_frozen=True)
+    AcademicYear.objects.create(
+        branch=branch, name="2025-26", is_current=True,
+        start_date=datetime.date(2025, 6, 1), end_date=datetime.date(2026, 4, 30),
+    )
+    StudentEnrollment.objects.filter(academic_year=old_year).update(is_active=False)
+
+    # Live roster no longer sees the rolled-over students (unchanged default behavior).
+    after_default = report_i.ranking_report(branch, date_from=date_from, date_to=date_to)
+    assert after_default["rows"] == []
+
+    # Historical path: the prior-year roster and their July attendance are reachable.
+    historical = report_i.ranking_report(
+        branch, date_from=date_from, date_to=date_to,
+        academic_year_id=old_year.pk, include_inactive=True,
+    )
+    hist_ids = {r["studentId"] for r in historical["rows"]}
+    assert hist_ids == {str(env["p1"].pk), str(env["p2"].pk)}
+    assert all(r["sessions"] == 4 for r in historical["rows"])

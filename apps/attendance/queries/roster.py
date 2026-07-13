@@ -49,6 +49,26 @@ def active_student_counts_by_branch(branch_ids) -> dict:
     return {row["branch_id"]: row["n"] for row in rows}
 
 
+def enrollments_for_report(branch_id, *, batch_id=None, academic_year_id=None, include_inactive=False):
+    """Roster for an attendance report, optionally scoped to one academic year.
+
+    With ``include_inactive=True`` (used for a prior, frozen year) this returns the
+    full historical roster for that year — every student who was enrolled then,
+    including those since promoted out or graduated whose enrollment is now
+    ``is_active=False`` — so a past year's report is reachable after a rollover
+    (audit P1.3). Default matches the live roster: active enrollments only."""
+    qs = StudentEnrollment.objects.filter(branch_id=branch_id)
+    if not include_inactive:
+        qs = qs.filter(status=EnrollmentStatus.ACTIVE, is_active=True)
+    if batch_id:
+        qs = qs.filter(batch_id=batch_id)
+    if academic_year_id:
+        qs = qs.filter(academic_year_id=academic_year_id)
+    return qs.select_related(
+        "student_profile__user", "batch", "batch__course", "batch__academic_year"
+    ).order_by("student_profile__user__first_name")
+
+
 def attendance_config(branch) -> tuple[int, bool]:
     """(threshold_percent, exam_day_counts_toward_attendance) for a branch's tenant."""
     try:
@@ -92,18 +112,25 @@ def roster_counts_for_batches(batch_ids) -> dict[str, int]:
     return {str(row["batch_id"]): row["n"] for row in rows}
 
 
-def get_student_profile_in_branch(branch_id, student_id):
-    """Resolve the API's `studentId` (a StudentProfile id) to that student's active
-    enrollment within the branch, creating it if missing (enrollment-seam shim)."""
+def get_student_profile_in_branch(branch_id, student_id, *, include_inactive=False):
+    """Resolve the API's `studentId` (a StudentProfile id) to that student's enrollment
+    within the branch.
+
+    With ``include_inactive=True``, reaches terminal enrollments for admin/history reads
+    after the student's ``current_batch`` mirror was cleared on exit.
+    """
     try:
-        profile = StudentProfile.objects.select_related("user", "current_batch").get(
-            pk=student_id,
-            current_batch__course__department__branch_id=branch_id,
-            is_active=True,
-        )
+        profile = StudentProfile.objects.select_related(
+            "user", "current_batch", "current_enrollment"
+        ).get(pk=student_id, is_active=True)
     except (StudentProfile.DoesNotExist, ValueError, TypeError):
         return None
-    return enrollment_q.resolve_enrollment_for_profile(profile)
+    return enrollment_q.resolve_enrollment_for_profile_in_branch(
+        profile,
+        branch_id,
+        include_inactive=include_inactive,
+        create=not include_inactive,
+    )
 
 
 def resolve_students_for_marking(branch_id, student_ids: list) -> dict:
@@ -112,7 +139,7 @@ def resolve_students_for_marking(branch_id, student_ids: list) -> dict:
     (itself 2 queries) per student, the dominant cost of marking a large class.
 
     Returns ``{studentId (str): StudentEnrollment | None}``; ``None`` means no active
-    profile was found for that id in this branch. Profiles with no existing
+    enrollment was found for that id in this branch. Profiles with no existing
     enrollment fall back to the same auto-create path ``get_student_profile_in_branch``
     uses, one at a time — a rare edge case (a profile with zero enrollments yet), so
     falling back per-id there doesn't reintroduce the N+1 for the common case.
@@ -121,9 +148,8 @@ def resolve_students_for_marking(branch_id, student_ids: list) -> dict:
         return {}
 
     profiles = list(
-        StudentProfile.objects.select_related("user", "current_batch").filter(
+        StudentProfile.objects.select_related("user", "current_batch", "current_enrollment").filter(
             pk__in=student_ids,
-            current_batch__course__department__branch_id=branch_id,
             is_active=True,
         )
     )
@@ -131,7 +157,9 @@ def resolve_students_for_marking(branch_id, student_ids: list) -> dict:
 
     enrollments = (
         StudentEnrollment.objects.filter(
-            student_profile_id__in=[p.pk for p in profiles], is_active=True,
+            student_profile_id__in=[p.pk for p in profiles],
+            branch_id=branch_id,
+            is_active=True,
         )
         .select_related("student_profile__user", "batch", "academic_year")
         .order_by("student_profile_id", "-created_at")
@@ -149,7 +177,9 @@ def resolve_students_for_marking(branch_id, student_ids: list) -> dict:
             continue
         enrollment = enrollment_by_profile_id.get(str(profile.pk))
         if enrollment is None:
-            enrollment = enrollment_q.resolve_enrollment_for_profile(profile)
+            enrollment = enrollment_q.resolve_enrollment_for_profile_in_branch(
+                profile, branch_id, include_inactive=False, create=True,
+            )
         result[str(sid)] = enrollment
     return result
 

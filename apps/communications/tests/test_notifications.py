@@ -89,6 +89,9 @@ def test_templates_render_with_required_vars(env, notification_type):
         "title": "Holiday notice",
         "announcement_id": "ann-1",
         "body_preview": "School closed tomorrow.",
+        "from_class": "Grade 09 — A",
+        "to_class": "Grade 10 — A",
+        "target_year": "2025-2026",
     }
     rendered = render_notification(notification_type, user, variables)
     assert rendered["title"]
@@ -229,6 +232,40 @@ def test_branch_recent_admin_only(env):
     assert _client(env["admin"]).get(url).status_code == 200
     assert len(_data(_client(env["admin"]).get(url))["notifications"]) >= 1
     assert _client(env["student"]).get(url).status_code == 403
+
+
+def test_branch_recent_dedupes_same_event_to_multiple_recipients(env):
+    parent = UserFactory(
+        role=Role.PARENT,
+        tenant=env["tenant"],
+        branch=env["branch"],
+        custom_login_id="PAR-1",
+        must_change_password=False,
+    )
+    variables = {
+        "student_name": "Alice",
+        "exam_name": "Unit Test 1",
+        "exam_id": "00000000-0000-0000-0000-000000000001",
+    }
+    create_notification(
+        "examination.results_published",
+        tenant=env["tenant"],
+        branch=env["branch"],
+        recipient=env["student"],
+        variables=variables,
+        dedup_key="test:exam:alice:student",
+    )
+    create_notification(
+        "examination.results_published",
+        tenant=env["tenant"],
+        branch=env["branch"],
+        recipient=parent,
+        variables=variables,
+        dedup_key="test:exam:alice:parent",
+    )
+    rows = inbox_q.branch_recent(env["branch"].pk, limit=20)
+    alice_results = [r for r in rows if r.title == "Results published" and "Alice" in r.message]
+    assert len(alice_results) == 1
 
 
 def test_fee_reminder_days_respected(env):

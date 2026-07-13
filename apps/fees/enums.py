@@ -18,6 +18,16 @@ class InvoiceStatus(models.TextChoices):
     WRITTEN_OFF = "written_off", "Written off"
 
 
+class CarryForwardState(models.TextChoices):
+    NORMAL = "normal", "Normal"
+    CARRIED_FORWARD = "carried_forward", "Carried forward"
+
+
+class OpeningBalanceSource(models.TextChoices):
+    PROMOTION = "promotion", "Academic Year Promotion"
+    ROLLOVER = "rollover", "Academic Year Rollover"
+
+
 class PaymentStatus(models.TextChoices):
     CREATED = "created", "Created"
     PENDING = "pending", "Pending"

@@ -1,4 +1,8 @@
-"""Interactors — Academic year rollover (Flow 7)."""
+"""Interactors — Legacy standalone rollover engine (Flow 7).
+
+Not a user-facing entry point. Academic Year Promotion is the sole execution path.
+Internal helpers remain for regression tests and shared enrollment/year logic.
+"""
 
 from __future__ import annotations
 
@@ -9,17 +13,55 @@ from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 from apps.academics.dtos import RolloverPreviewDTO, RolloverStudentPreviewDTO
+from apps.academics.exceptions import RolloverDirectExecutionDisabledError
 from apps.academics.helpers import is_college
+from apps.academics.interactors.year_transition import deactivate_source_enrollment
 from apps.academics.models import PeriodType, RolloverRunStatus
 from apps.academics.queries import calendar as cal_q
 from apps.academics.queries import rollover as rol_q
 from apps.academics.queries import structure as struct_q
 from apps.academics.queries import timetable as tt_q
 from apps.admissions.queries import enrollment as enr_q
+from apps.admissions.enums import EnrollmentStatus
 from apps.examinations.queries import marks as exam_marks_q
 from apps.organizations.models import Branch
 
 ROLLOVER_ASYNC_THRESHOLD = 200
+
+
+def _ensure_direct_rollover_allowed() -> None:
+    """Block standalone rollover — promotion is the only admin execution path."""
+    raise RolloverDirectExecutionDisabledError()
+
+
+def _assert_no_conflicting_promotion(branch_id) -> None:
+    """Reject rollover when promotion owns the same branch/year transition."""
+    from apps.academics.models.promotion import (
+        AcademicPromotionSession,
+        PromotionExecutionStatus,
+        PromotionSessionStatus,
+    )
+
+    if AcademicPromotionSession.objects.filter(
+        branch_id=branch_id,
+        execution_status=PromotionExecutionStatus.RUNNING,
+        is_active=True,
+    ).exists():
+        raise ValidationError(
+            "Cannot run standalone rollover while promotion execution is in progress."
+        )
+
+    current = cal_q.get_current_year(branch_id)
+    if current and AcademicPromotionSession.objects.filter(
+        branch_id=branch_id,
+        source_year_id=current.pk,
+        status=PromotionSessionStatus.APPROVED,
+        is_active=True,
+    ).exists():
+        raise ValidationError(
+            "Cannot run standalone rollover while an approved promotion session exists. "
+            "Use Academic Year Promotion instead."
+        )
 
 
 def _shift_year(d: datetime.date, years: int = 1) -> datetime.date:
@@ -63,7 +105,7 @@ def build_preview(branch_id, tenant) -> RolloverPreviewDTO:
     if current.is_frozen:
         raise ValidationError("Current academic year is already frozen.")
 
-    students = rol_q.list_students_in_year(branch_id, current.pk)
+    students = rol_q.list_enrollments_in_year(branch_id, current.pk)
     promotions: list[RolloverStudentPreviewDTO] = []
     warnings = [
         "Faculty timetable will need regeneration after rollover.",
@@ -76,8 +118,9 @@ def build_preview(branch_id, tenant) -> RolloverPreviewDTO:
         )
 
     college = is_college(tenant)
-    for profile in students:
-        batch = profile.current_batch
+    for enrollment in students:
+        profile = enrollment.student_profile
+        batch = enrollment.batch
         if not batch:
             continue
         next_course = _get_next_course(batch.course.department_id, batch.course_id)
@@ -85,10 +128,7 @@ def build_preview(branch_id, tenant) -> RolloverPreviewDTO:
             # Final year: graduates unless college arrears remain (EC-ROL-05).
             to_class = "Graduated"
             if college:
-                old_enr = enr_q.get_active_enrollment_for_profile(
-                    profile.pk, academic_year_id=current.pk
-                )
-                if old_enr and exam_marks_q.open_arrear_subjects(old_enr.pk):
+                if exam_marks_q.open_arrear_subjects(enrollment.pk):
                     to_class = "Retained (arrears pending)"
             promotions.append(
                 RolloverStudentPreviewDTO(
@@ -122,6 +162,8 @@ def build_preview(branch_id, tenant) -> RolloverPreviewDTO:
 
 @transaction.atomic
 def execute_rollover(*, branch: Branch, tenant, expected_version: int, user=None):
+    _ensure_direct_rollover_allowed()
+    _assert_no_conflicting_promotion(branch.pk)
     preview = build_preview(branch.pk, tenant)
     if preview.version != expected_version:
         raise ValidationError(
@@ -213,20 +255,18 @@ def _execute_rollover_sync(
         batch_map[str(ob.pk)] = str(nb.pk)
 
     college = is_college(tenant)
-    students = rol_q.list_students_in_year(branch.pk, current.pk)
+    students = rol_q.list_enrollments_in_year(branch.pk, current.pk)
     student_actions: list[dict] = []
-    for profile in students:
-        batch = profile.current_batch
+    for enrollment in students:
+        profile = enrollment.student_profile
+        batch = enrollment.batch
         if not batch:
             continue
 
         # Carried-forward arrears (college only), derived from the prior-year enrollment.
         backlog: list[dict] = []
-        old_enrollment = enr_q.get_active_enrollment_for_profile(
-            profile.pk, academic_year_id=current.pk
-        )
-        if college and old_enrollment:
-            backlog = exam_marks_q.open_arrear_subjects(old_enrollment.pk)
+        if college:
+            backlog = exam_marks_q.open_arrear_subjects(enrollment.pk)
 
         prior_batch_id = str(batch.pk)
         prior_status = profile.academic_status
@@ -237,13 +277,21 @@ def _execute_rollover_sync(
                 # Final-year with open arrears: retained in the same final batch (new-year
                 # equivalent) to re-sit; NOT graduated until backlog clears (EC-ROL-05).
                 dest = struct_q.get_batch(branch.pk, batch_map[str(batch.pk)])
+                deactivate_source_enrollment(enrollment, user=user)
                 new_enr = enr_q.create_enrollment(
                     branch=branch, student_profile=profile, batch=dest,
                     academic_year=new_year, backlog_subjects=backlog, user=user,
                 )
+                rol_q.sync_current_enrollment(profile, new_enr, user=user)
                 rol_q.set_student_batch(profile, dest.pk, user=user)
                 action, new_enr_id, new_batch_id = "retained_arrear", str(new_enr.pk), str(dest.pk)
             else:
+                from apps.admissions.enums import EnrollmentStatus
+
+                deactivate_source_enrollment(
+                    enrollment, terminal_status=EnrollmentStatus.GRADUATED, user=user
+                )
+                rol_q.sync_current_enrollment(profile, enrollment, user=user)
                 rol_q.graduate_student(profile, user=user)
                 action, new_enr_id, new_batch_id = "graduated", None, None
         else:
@@ -260,10 +308,12 @@ def _execute_rollover_sync(
                     class_teacher_id=batch.class_teacher_id,
                     user=user,
                 )
+            deactivate_source_enrollment(enrollment, user=user)
             new_enr = enr_q.create_enrollment(
                 branch=branch, student_profile=profile, batch=dest,
                 academic_year=new_year, backlog_subjects=backlog, user=user,
             )
+            rol_q.sync_current_enrollment(profile, new_enr, user=user)
             rol_q.set_student_batch(profile, dest.pk, user=user)
             action, new_enr_id, new_batch_id = "promoted", str(new_enr.pk), str(dest.pk)
 
@@ -272,6 +322,7 @@ def _execute_rollover_sync(
             "user_id": str(profile.user_id),
             "prior_current_batch_id": prior_batch_id,
             "prior_academic_status": prior_status,
+            "prior_enrollment_id": str(enrollment.pk),
             "action": action,
             "new_enrollment_id": new_enr_id,
             "new_batch_id": new_batch_id,
@@ -311,16 +362,27 @@ def _execute_rollover_sync(
 
 
 def _capture_snapshot(branch_id, year_id) -> dict:
-    students = rol_q.list_students_in_year(branch_id, year_id)
+    enrollments = rol_q.list_enrollments_in_year(branch_id, year_id)
     return {
-        "student_batches": {str(s.user_id): str(s.current_batch_id) if s.current_batch_id else None for s in students},
-        "student_statuses": {str(s.user_id): s.academic_status for s in students},
+        "student_batches": {
+            str(e.student_profile.user_id): str(e.batch_id) if e.batch_id else None
+            for e in enrollments
+        },
+        "student_statuses": {
+            str(e.student_profile.user_id): e.student_profile.academic_status for e in enrollments
+        },
         "current_year_id": str(year_id),
     }
 
 
 @transaction.atomic
 def undo_rollover(*, branch_id, user=None):
+    _ensure_direct_rollover_allowed()
+    return _undo_rollover_impl(branch_id=branch_id, user=user)
+
+
+@transaction.atomic
+def _undo_rollover_impl(*, branch_id, user=None):
     run = rol_q.get_latest_rollover_run(branch_id)
     if not run or run.status != RolloverRunStatus.SUCCEEDED:
         raise ValidationError("Nothing to undo.")
@@ -346,6 +408,18 @@ def undo_rollover(*, branch_id, user=None):
     for act in snap.get("student_actions", []):
         if act.get("new_enrollment_id"):
             enr_q.soft_delete_enrollment_by_id(act["new_enrollment_id"], user=user)
+        prior_id = act.get("prior_enrollment_id")
+        if prior_id:
+            prior = enr_q.get_enrollment_by_id(prior_id, include_inactive=True)
+            if prior:
+                enr_q.update_enrollment(
+                    prior,
+                    {"is_active": True, "status": EnrollmentStatus.ACTIVE},
+                    user=user,
+                )
+                profile = rol_q.get_student_profile(act.get("user_id"))
+                if profile:
+                    rol_q.sync_current_enrollment(profile, prior, user=user)
 
     # Order matters: drop the new year's current flag BEFORE reactivating the old
     # one, or the unique-current-year constraint would be violated.

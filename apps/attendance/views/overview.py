@@ -64,6 +64,7 @@ def _record(r) -> dict:
 
 
 def _class_section(b) -> dict:
+    year = b.academic_year
     return {
         "id": str(b.id),
         "label": batch_display_label(b),
@@ -72,7 +73,42 @@ def _class_section(b) -> dict:
         "grade": b.course.name,
         "section": b.name,
         "academicYearId": str(b.academic_year_id),
+        "academicYearLabel": year.name if year else None,
+        "isCurrentYear": bool(year and year.is_current),
     }
+
+
+def _branch_years(branch) -> list:
+    from apps.academics.models import AcademicYear
+
+    return list(
+        AcademicYear.objects.filter(branch_id=branch.pk, is_active=True).order_by("-start_date")
+    )
+
+
+def _current_academic_year(branch):
+    years = _branch_years(branch)
+    return next((y for y in years if y.is_current), years[0] if years else None)
+
+
+def _resolve_selected_year(years: list, requested_id):
+    """The requested academic year if it belongs to the branch, else the current
+    (or most-recent) one. Prevents cross-branch id probing (audit P1.3)."""
+    if requested_id:
+        for y in years:
+            if str(y.id) == str(requested_id):
+                return y
+    return next((y for y in years if y.is_current), years[0] if years else None)
+
+
+def _batches_for_mark_attendance(branch):
+    """Mark attendance applies to the current academic year — prior years are frozen."""
+    current = _current_academic_year(branch)
+    batches = list(list_batches(branch.pk))
+    if not current:
+        return batches
+    current_batches = [b for b in batches if b.academic_year_id == current.id]
+    return current_batches if current_batches else batches
 
 
 def _leave(lv) -> dict:
@@ -237,7 +273,7 @@ class AdminMarkAttendanceView(APIView):
 
         mode = roster_q.attendance_mode(branch)
         holiday_blocked = roster_q.is_student_holiday(branch.pk, mark_date)
-        batches = list(list_batches(branch.pk))
+        batches = _batches_for_mark_attendance(branch)
         period_slots = [_period_slot(s) for s in tt_q.list_period_slots(branch.pk)]
         batch_id = request.query_params.get("batchId") or None
 
@@ -257,6 +293,12 @@ class AdminMarkAttendanceView(APIView):
         batch = struct_q.get_batch(branch.pk, batch_id)
         if not batch:
             return Response({"error": "Batch not found."}, status=http.HTTP_404_NOT_FOUND)
+        current = _current_academic_year(branch)
+        if current and batch.academic_year_id != current.id:
+            return Response(
+                {"detail": "Cannot modify attendance in a frozen academic year."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
 
         subjects = _batch_subjects(branch.pk, batch_id)
         base["subjects"] = subjects
@@ -295,7 +337,10 @@ class AdminMarkAttendanceView(APIView):
             from rest_framework.exceptions import ValidationError
 
             if isinstance(exc, ValidationError):
-                return Response(exc.detail, status=http.HTTP_400_BAD_REQUEST)
+                detail = exc.detail
+                if isinstance(detail, dict):
+                    return Response({"error": detail}, status=http.HTTP_400_BAD_REQUEST)
+                return Response({"error": str(detail)}, status=http.HTTP_400_BAD_REQUEST)
             raise
 
         records = [_record(r) for r in record_q.list_records_for_session(session.pk)]
@@ -318,29 +363,51 @@ class AdminAttendanceOverviewView(APIView):
         threshold, exam_counts = roster_q.attendance_config(branch)
         batch_names = {str(b.id): batch_display_label(b) for b in list_batches(branch.pk)}
         batches = list(list_batches(branch.pk))
+        years = _branch_years(branch)
+        current_ay = next((y for y in years if y.is_current), years[0] if years else None)
+        selected_year = _resolve_selected_year(years, request.query_params.get("academicYearId"))
+        is_prior_year = bool(selected_year and not selected_year.is_current)
 
         records = [_record(r) for r in record_q.list_records_for_branch(branch.pk)]
         leaves = [_leave(lv) for lv in leave_q.list_leaves(branch.pk) if lv.student_id]
         audits = [_audit(a) for a in audit_q.list_audits(branch.pk)[:100]]
 
         date_from, date_to, period_label, report_filters = _resolve_report_range(request)
+        # A prior-year selection with no explicit month/week reports over the whole
+        # frozen year; an explicit month/week still narrows within it (audit P1.3).
+        if is_prior_year and not (
+            request.query_params.get("month") or request.query_params.get("week")
+        ):
+            date_from, date_to = selected_year.start_date, selected_year.end_date
+            period_label = selected_year.name
+            report_filters = {
+                **report_filters,
+                "dateFrom": date_from.isoformat(),
+                "dateTo": date_to.isoformat(),
+            }
+        if selected_year:
+            report_filters = {**report_filters, "academicYearId": str(selected_year.id)}
 
         # The Reports tab is the only consumer of shortage/detention/period rows, and it
         # requests them with explicit filter params. Computing them (a full ranking scan +
         # detention report) for the *base* overview — which the Leave/Rules/Audit/Mark tabs
         # load — is wasted work and payload. Skip it unless the caller asks for a report.
         wants_reports = any(
-            key in request.query_params for key in ("period", "batchId", "month", "week")
+            key in request.query_params
+            for key in ("period", "batchId", "month", "week", "academicYearId")
         )
         if wants_reports:
             batch_id = report_filters.get("batchId")
+            ay_id = selected_year.id if selected_year else None
             ranking = report_i.ranking_report(
-                branch, date_from=date_from, date_to=date_to, batch_id=batch_id
+                branch, date_from=date_from, date_to=date_to, batch_id=batch_id,
+                academic_year_id=ay_id, include_inactive=is_prior_year,
             )
             shortage = _shortage_rows(ranking, batch_names)
             detention = _shortage_rows(
                 report_i.detention_report(
-                    branch, batch_id=batch_id, date_from=date_from, date_to=date_to
+                    branch, batch_id=batch_id, date_from=date_from, date_to=date_to,
+                    academic_year_id=ay_id, include_inactive=is_prior_year,
                 ),
                 batch_names,
             )
@@ -357,6 +424,13 @@ class AdminAttendanceOverviewView(APIView):
             "records": records,
             "leaveRequests": leaves,
             "classSections": [_class_section(b) for b in batches],
+            "currentAcademicYearId": str(current_ay.id) if current_ay else None,
+            # Academic-year picker for the Reports tab: lets an admin pull a prior,
+            # frozen year's shortage/detention/period roster after a rollover (audit P1.3).
+            "academicYears": [
+                {"id": str(y.id), "name": y.name, "isCurrent": y.is_current} for y in years
+            ],
+            "selectedAcademicYearId": str(selected_year.id) if selected_year else None,
             "auditLog": audits,
             "shortageReport": shortage,
             "detentionList": detention,

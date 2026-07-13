@@ -59,13 +59,30 @@ def mark_all_read(recipient_id, *, user=None) -> int:
     return qs.update(read_at=now, updated_at=now)
 
 
+def _branch_activity_signature(row: Notification) -> tuple:
+    """Collapse per-recipient copies of the same event for admin activity feeds."""
+    return (row.notification_type, row.title, row.message)
+
+
 def branch_recent(branch_id, *, limit=20):
-    return (
+    batch_size = max(limit * 4, 80)
+    rows = (
         _active_qs()
         .filter(branch_id=branch_id)
         .select_related("recipient", "created_by")
-        .order_by("-created_at")[:limit]
+        .order_by("-created_at")[:batch_size]
     )
+    seen: set[tuple] = set()
+    unique: list[Notification] = []
+    for row in rows:
+        sig = _branch_activity_signature(row)
+        if sig in seen:
+            continue
+        seen.add(sig)
+        unique.append(row)
+        if len(unique) >= limit:
+            break
+    return unique
 
 
 def expire_fee_notifications_for_invoice(invoice_id) -> int:

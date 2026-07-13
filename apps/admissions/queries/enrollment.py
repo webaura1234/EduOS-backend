@@ -15,10 +15,14 @@ def _branch_of_batch(batch):
     return batch.course.department.branch
 
 
-def list_enrollments(branch_id, *, batch_id=None, academic_year_id=None):
-    qs = StudentEnrollment.objects.filter(branch_id=branch_id, is_active=True).select_related(
+def list_enrollments(branch_id, *, batch_id=None, academic_year_id=None, include_inactive=False):
+    """Enrollments for a branch. `include_inactive=True` also returns prior-year
+    enrollments deactivated by rollover — the historical read path (audit P1.1)."""
+    qs = StudentEnrollment.objects.filter(branch_id=branch_id).select_related(
         "student_profile__user", "batch", "academic_year"
     )
+    if not include_inactive:
+        qs = qs.filter(is_active=True)
     if batch_id:
         qs = qs.filter(batch_id=batch_id)
     if academic_year_id:
@@ -26,22 +30,88 @@ def list_enrollments(branch_id, *, batch_id=None, academic_year_id=None):
     return qs.order_by("-created_at")
 
 
-def get_enrollment_by_id(enrollment_id) -> StudentEnrollment | None:
+def get_enrollment_by_id(enrollment_id, *, include_inactive=False) -> StudentEnrollment | None:
+    qs = StudentEnrollment.objects.select_related(
+        "student_profile__user", "batch", "academic_year"
+    )
+    if not include_inactive:
+        qs = qs.filter(is_active=True)
     try:
-        return StudentEnrollment.objects.select_related(
-            "student_profile__user", "batch", "academic_year"
-        ).get(pk=enrollment_id, is_active=True)
+        return qs.get(pk=enrollment_id)
     except (StudentEnrollment.DoesNotExist, ValueError, TypeError):
         return None
 
 
-def get_active_enrollment_for_profile(profile_id, *, academic_year_id=None) -> StudentEnrollment | None:
-    qs = StudentEnrollment.objects.filter(student_profile_id=profile_id, is_active=True)
+def get_active_enrollment_for_profile(
+    profile_id, *, academic_year_id=None, include_inactive=False
+) -> StudentEnrollment | None:
+    """Resolve a student's enrollment. With `include_inactive=True` (and typically an
+    explicit `academic_year_id`), reaches a rolled-over prior-year enrollment that is
+    no longer active — the historical read path (audit P1.1). Default is unchanged:
+    active enrollment only."""
+    qs = StudentEnrollment.objects.filter(student_profile_id=profile_id)
+    if not include_inactive:
+        qs = qs.filter(is_active=True)
     if academic_year_id is not None:
         qs = qs.filter(academic_year_id=academic_year_id)
     return qs.select_related("student_profile__user", "batch", "academic_year").order_by(
         "-created_at"
     ).first()
+
+
+def get_enrollment_for_profile_in_branch(
+    profile_id,
+    branch_id,
+    *,
+    academic_year_id=None,
+    include_inactive=False,
+) -> StudentEnrollment | None:
+    """Resolve a student's enrollment within a branch.
+
+    With ``include_inactive=True``, reaches terminal enrollments (graduated /
+    transferred / withdrawn) whose ``current_batch`` mirror was cleared on exit.
+    """
+    qs = StudentEnrollment.objects.filter(
+        student_profile_id=profile_id,
+        branch_id=branch_id,
+    )
+    if not include_inactive:
+        qs = qs.filter(is_active=True)
+    if academic_year_id is not None:
+        qs = qs.filter(academic_year_id=academic_year_id)
+    return qs.select_related(
+        "student_profile__user", "batch", "academic_year", "batch__course"
+    ).order_by("-created_at").first()
+
+
+def resolve_enrollment_for_profile_in_branch(
+    profile,
+    branch_id,
+    *,
+    academic_year_id=None,
+    include_inactive=False,
+    create=False,
+    user=None,
+) -> StudentEnrollment | None:
+    """Branch-scoped enrollment resolver for admin lookups."""
+    enrollment = get_enrollment_for_profile_in_branch(
+        profile.pk,
+        branch_id,
+        academic_year_id=academic_year_id,
+        include_inactive=include_inactive,
+    )
+    if enrollment is not None or not create:
+        return enrollment
+
+    # Legacy shim: only auto-create when the profile still has a batch pointer.
+    if profile.current_batch_id is None:
+        return None
+    return resolve_enrollment_for_profile(
+        profile,
+        academic_year=academic_year_id,
+        user=user,
+        create=True,
+    )
 
 
 def resolve_enrollment_for_profile(profile, *, batch=None, academic_year=None, user=None,
@@ -64,10 +134,28 @@ def resolve_enrollment_for_profile(profile, *, batch=None, academic_year=None, u
     enrollment = existing.select_related(
         "student_profile__user", "batch", "academic_year"
     ).order_by("-created_at").first()
-    if enrollment is not None or not create:
+    if enrollment is not None:
         return enrollment
 
-    if academic_year is None:
+    if batch is None:
+        if profile.current_enrollment_id:
+            current = profile.current_enrollment
+            if current and (
+                academic_year is None
+                or current.academic_year_id
+                == getattr(academic_year, "pk", academic_year)
+            ):
+                return current
+        historical = get_active_enrollment_for_profile(
+            profile.pk,
+            academic_year_id=getattr(academic_year, "pk", academic_year),
+            include_inactive=True,
+        )
+        if historical is not None or not create:
+            return historical
+        return None
+
+    if not create or academic_year is None:
         return None
 
     return StudentEnrollment.objects.create(

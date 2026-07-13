@@ -1,22 +1,37 @@
-"""Validation of academic-year rollover: preview, execute (promotion + freeze), undo,
-plus Stage 6 enrollment-aware promotion, graduation, and college arrears (EC-ROL-05)."""
+"""Validation of academic-year rollover internals and retirement of direct execution."""
 
 import datetime
 from decimal import Decimal
 
 import pytest
+from django.urls import reverse
 from django.utils import timezone
+from rest_framework.test import APIClient
 
+from apps.academics.exceptions import RolloverDirectExecutionDisabledError
 from apps.academics.interactors import rollover as rol_i
 from apps.academics.models import AcademicPeriod, AcademicYear, Batch, Course, Department, Subject
 from apps.accounts.models.profile import AcademicStatus, StudentProfile
 from apps.accounts.models.user import Role
 from apps.accounts.tests.factories import UserFactory
+from apps.accounts.tokens import generate_access_token
+from apps.admissions.enums import EnrollmentStatus
 from apps.admissions.models import StudentEnrollment
 from apps.examinations.models import Exam, ExamRegistration, MarksEntry
 from apps.organizations.tests.factories import BranchFactory, TenantFactory
 
 pytestmark = pytest.mark.django_db
+
+
+def _run_rollover_sync(branch, tenant, *, user=None):
+    preview = rol_i.build_preview(branch.pk, tenant)
+    return rol_i._execute_rollover_sync(
+        branch=branch,
+        tenant=tenant,
+        expected_version=preview.version,
+        user=user,
+        existing_run=None,
+    )
 
 
 @pytest.fixture
@@ -39,83 +54,153 @@ def scenario():
 
     student = UserFactory(role=Role.STUDENT, tenant=tenant, branch=branch,
                           custom_login_id="STU-R1", must_change_password=False)
-    StudentProfile.objects.create(user=student, current_batch=batch9, academic_status=AcademicStatus.ACTIVE)
+    profile = StudentProfile.objects.create(
+        user=student, current_batch=batch9, academic_status=AcademicStatus.ACTIVE
+    )
+    enrollment = StudentEnrollment.objects.create(
+        branch=branch,
+        student_profile=profile,
+        batch=batch9,
+        academic_year=year,
+        status=EnrollmentStatus.ACTIVE,
+    )
+    profile.current_enrollment = enrollment
+    profile.save(update_fields=["current_enrollment"])
 
     return {"tenant": tenant, "branch": branch, "year": year, "batch9": batch9, "student": student}
+
+
+@pytest.fixture
+def admin_client(scenario):
+    admin = UserFactory(
+        role=Role.ADMIN,
+        tenant=scenario["tenant"],
+        branch=scenario["branch"],
+        custom_login_id=None,
+        must_change_password=False,
+    )
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {generate_access_token(admin)}")
+    return client
 
 
 def test_preview_lists_promotion(scenario):
     preview = rol_i.build_preview(scenario["branch"].pk, scenario["tenant"])
     assert preview.from_year_label == "2024-25"
-    assert preview.to_year_label == "2025-2026"  # generator expands the suffix
+    assert preview.to_year_label == "2025-2026"
     assert len(preview.students_to_promote) == 1
     row = preview.students_to_promote[0]
     assert row.from_class == "Grade 09 — A"
     assert row.to_class == "Grade 10 — A"
 
 
-def test_execute_promotes_and_freezes(scenario):
-    branch, tenant, student = scenario["branch"], scenario["tenant"], scenario["student"]
-    preview = rol_i.build_preview(branch.pk, tenant)
+def test_execute_rollover_public_entry_disabled(scenario):
+    preview = rol_i.build_preview(scenario["branch"].pk, scenario["tenant"])
+    with pytest.raises(RolloverDirectExecutionDisabledError):
+        rol_i.execute_rollover(
+            branch=scenario["branch"],
+            tenant=scenario["tenant"],
+            expected_version=preview.version,
+            user=None,
+        )
 
-    result = rol_i.execute_rollover(
-        branch=branch, tenant=tenant, expected_version=preview.version, user=None,
-    )
+
+def test_undo_rollover_public_entry_disabled(scenario):
+    with pytest.raises(RolloverDirectExecutionDisabledError):
+        rol_i.undo_rollover(branch_id=scenario["branch"].pk, user=None)
+
+
+@pytest.mark.parametrize(
+    "route_name,method,payload",
+    [
+        ("academics:rollover-preview", "post", {}),
+        ("academics:rollover-execute", "post", {"expectedVersion": 1}),
+        ("academics:rollover-undo", "post", {}),
+        ("academics:rollover-status", "get", None),
+    ],
+)
+def test_rollover_api_returns_410(admin_client, route_name, method, payload):
+    url = reverse(route_name)
+    if method == "post":
+        resp = admin_client.post(url, payload or {}, format="json")
+    else:
+        resp = admin_client.get(url)
+    assert resp.status_code == 410
+    body = resp.json()
+    errors = body.get("errors") or {}
+    assert errors.get("code") == "rollover_direct_execution_disabled"
+    assert errors.get("promotionPath") == "/admin/academic-management/promotion"
+
+
+def test_sync_execute_promotes_and_freezes(scenario):
+    branch, tenant, student = scenario["branch"], scenario["tenant"], scenario["student"]
+    result = _run_rollover_sync(branch, tenant)
     assert result["status"] == "succeeded"
 
-    # Old year frozen and no longer current; exactly one current year (the new one).
     scenario["year"].refresh_from_db()
     assert scenario["year"].is_frozen is True
     assert scenario["year"].is_current is False
     current = AcademicYear.objects.filter(branch=branch, is_current=True)
     assert current.count() == 1 and current.first().name == "2025-2026"
 
-    # Student promoted into a Grade 10 batch in the new year.
     profile = StudentProfile.objects.get(user=student)
     assert profile.current_batch.course.name == "Grade 10"
     assert profile.current_batch.academic_year.name == "2025-2026"
 
 
-def test_execute_rejects_stale_version(scenario):
-    from rest_framework.exceptions import ValidationError
-
-    with pytest.raises(ValidationError):
-        rol_i.execute_rollover(
-            branch=scenario["branch"], tenant=scenario["tenant"], expected_version=999, user=None,
-        )
-
-
-def test_undo_restores_previous_state(scenario):
+def test_undo_impl_restores_previous_state(scenario):
     branch, tenant, student = scenario["branch"], scenario["tenant"], scenario["student"]
-    preview = rol_i.build_preview(branch.pk, tenant)
-    rol_i.execute_rollover(branch=branch, tenant=tenant, expected_version=preview.version, user=None)
+    _run_rollover_sync(branch, tenant)
 
-    # Sanity: status says undo is available.
     status = rol_i.get_rollover_status(branch.pk)
     assert status["canUndo"] is True
 
-    rol_i.undo_rollover(branch_id=branch.pk, user=None)
+    rol_i._undo_rollover_impl(branch_id=branch.pk, user=None)
 
-    # Student is back in the original 9-A batch.
     profile = StudentProfile.objects.get(user=student)
     assert profile.current_batch_id == scenario["batch9"].pk
     assert profile.academic_status == AcademicStatus.ACTIVE
 
-    # Old year is current + unfrozen again; new year is no longer active/current.
     scenario["year"].refresh_from_db()
     assert scenario["year"].is_current is True
     assert scenario["year"].is_frozen is False
-    # Exactly one current year survives (validates the unique-current-year fix).
     assert AcademicYear.objects.filter(branch=branch, is_current=True).count() == 1
     assert AcademicYear.objects.filter(branch=branch, name="2025-2026", is_active=True).count() == 0
 
 
-# ── Stage 6: enrollment-aware promotion ───────────────────────────────────────
-def test_promotion_creates_enrollment(scenario):
-    """Promotion now creates a StudentEnrollment for the new year + promoted batch."""
+def test_undo_then_reexecute_enrollment_succeeds(scenario):
+    """After undo, a soft-deleted target-year enrollment must not block re-creation."""
+    from apps.admissions.queries.enrollment import create_enrollment
+
     branch, tenant, student = scenario["branch"], scenario["tenant"], scenario["student"]
-    preview = rol_i.build_preview(branch.pk, tenant)
-    rol_i.execute_rollover(branch=branch, tenant=tenant, expected_version=preview.version, user=None)
+    _run_rollover_sync(branch, tenant)
+    profile = StudentProfile.objects.get(user=student)
+    new_year = AcademicYear.objects.get(branch=branch, name="2025-2026")
+    prior_new = StudentEnrollment.objects.get(
+        student_profile=profile, academic_year=new_year, is_active=True,
+    )
+
+    rol_i._undo_rollover_impl(branch_id=branch.pk, user=None)
+
+    prior_new.refresh_from_db()
+    assert prior_new.is_active is False
+
+    batch10 = Batch.objects.filter(
+        course__name="Grade 10", academic_year=new_year, is_active=True,
+    ).first()
+    enr = create_enrollment(
+        branch=branch,
+        student_profile=profile,
+        batch=batch10,
+        academic_year=new_year,
+    )
+    assert enr.is_active is True
+    assert enr.pk != prior_new.pk
+
+
+def test_promotion_creates_enrollment(scenario):
+    branch, tenant, student = scenario["branch"], scenario["tenant"], scenario["student"]
+    _run_rollover_sync(branch, tenant)
 
     profile = StudentProfile.objects.get(user=student)
     new_enr = StudentEnrollment.objects.filter(student_profile=profile, is_active=True).first()
@@ -124,40 +209,36 @@ def test_promotion_creates_enrollment(scenario):
     assert new_enr.academic_year.name == "2025-2026"
 
 
-def test_undo_soft_deletes_created_enrollment(scenario):
-    """EC-ROL-02 — undo soft-deletes the enrollments the run created."""
+def test_undo_impl_soft_deletes_created_enrollment(scenario):
     branch, tenant, student = scenario["branch"], scenario["tenant"], scenario["student"]
-    preview = rol_i.build_preview(branch.pk, tenant)
-    rol_i.execute_rollover(branch=branch, tenant=tenant, expected_version=preview.version, user=None)
+    _run_rollover_sync(branch, tenant)
     profile = StudentProfile.objects.get(user=student)
     assert StudentEnrollment.objects.filter(student_profile=profile, is_active=True).exists()
 
-    rol_i.undo_rollover(branch_id=branch.pk, user=None)
-    assert not StudentEnrollment.objects.filter(student_profile=profile, is_active=True).exists()
+    rol_i._undo_rollover_impl(branch_id=branch.pk, user=None)
+    active = StudentEnrollment.objects.filter(student_profile=profile, is_active=True)
+    assert active.count() == 1
+    assert active.first().academic_year_id == scenario["year"].pk
 
 
-def test_undo_after_window_expired_blocked(scenario):
-    """EC-ROL-04 — undo after the 24h window → 403."""
+def test_undo_impl_after_window_expired_blocked(scenario):
     from rest_framework.exceptions import PermissionDenied
 
     from apps.academics.queries import rollover as rol_q
 
     branch, tenant = scenario["branch"], scenario["tenant"]
-    preview = rol_i.build_preview(branch.pk, tenant)
-    rol_i.execute_rollover(branch=branch, tenant=tenant, expected_version=preview.version, user=None)
+    _run_rollover_sync(branch, tenant)
 
     run = rol_q.get_latest_rollover_run(branch.pk)
     run.undo_expires_at = timezone.now() - datetime.timedelta(hours=1)
     run.save(update_fields=["undo_expires_at"])
 
     with pytest.raises(PermissionDenied):
-        rol_i.undo_rollover(branch_id=branch.pk, user=None)
+        rol_i._undo_rollover_impl(branch_id=branch.pk, user=None)
 
 
-# ── Stage 6: college graduation + arrears (EC-ROL-05) ─────────────────────────
 @pytest.fixture
 def college_scenario():
-    """A college with one (final-year) course and a student enrolled in it."""
     tenant = TenantFactory(institution_type="college")
     branch = BranchFactory(tenant=tenant)
     year = AcademicYear.objects.create(
@@ -169,7 +250,7 @@ def college_scenario():
         start_date=datetime.date(2024, 6, 1), end_date=datetime.date(2024, 10, 31),
     )
     dept = Department.objects.create(branch=branch, name="CS", department_type="department")
-    course = Course.objects.create(department=dept, name="Final Year")  # only course → final
+    course = Course.objects.create(department=dept, name="Final Year")
     batch = Batch.objects.create(course=course, academic_year=year, name="A", capacity=40)
     student = UserFactory(role=Role.STUDENT, tenant=tenant, branch=branch,
                           custom_login_id="STU-C1", must_change_password=False)
@@ -185,18 +266,18 @@ def college_scenario():
 
 
 def test_final_year_no_arrears_graduates(college_scenario):
-    """EC-ROL-03 — a final-year student with no backlog graduates."""
     cs = college_scenario
-    preview = rol_i.build_preview(cs["branch"].pk, cs["tenant"])
-    rol_i.execute_rollover(branch=cs["branch"], tenant=cs["tenant"],
-                           expected_version=preview.version, user=None)
+    _run_rollover_sync(cs["branch"], cs["tenant"])
     profile = StudentProfile.objects.get(user=cs["student"])
     assert profile.academic_status == AcademicStatus.GRADUATED
     assert profile.current_batch_id is None
+    cs["enrollment"].refresh_from_db()
+    assert cs["enrollment"].is_active is False
+    assert cs["enrollment"].status == EnrollmentStatus.GRADUATED
+    assert profile.current_enrollment_id == cs["enrollment"].pk
 
 
 def test_college_arrears_carried_on_rollover(college_scenario):
-    """EC-ROL-05 — final-year with open arrears is retained, backlog carried, regs intact."""
     cs = college_scenario
     exam = Exam.objects.create(branch=cs["branch"], academic_period=cs["period"],
                                name="Finals", exam_type="final", is_published=True)
@@ -209,23 +290,17 @@ def test_college_arrears_carried_on_rollover(college_scenario):
                                   marks=Decimal("20"), marks_status="submitted")
     reg = ExamRegistration.objects.create(exam=exam, student=cs["enrollment"], is_arrear=True)
 
-    preview = rol_i.build_preview(cs["branch"].pk, cs["tenant"])
-    rol_i.execute_rollover(branch=cs["branch"], tenant=cs["tenant"],
-                           expected_version=preview.version, user=None)
+    _run_rollover_sync(cs["branch"], cs["tenant"])
 
     profile = StudentProfile.objects.get(user=cs["student"])
-    # Not graduated — retained with arrears.
     assert profile.academic_status == AcademicStatus.ACTIVE
-    # New enrollment in the new year carrying both arrear subjects.
     new_enr = StudentEnrollment.objects.filter(
         student_profile=profile, academic_year__name="2025-2026", is_active=True
     ).first()
     assert new_enr is not None
     assert len(new_enr.backlog_subjects) == 2
-    # Original arrear registration left intact (not archived).
     reg.refresh_from_db()
     assert reg.is_active is True
-    # Student exam hub surfaces 2 pending arrears.
     from apps.examinations.interactors.hub import build_exam_hub
     hub = build_exam_hub(profile, tenant=cs["tenant"])
     assert len(hub["pendingArrears"]) == 2

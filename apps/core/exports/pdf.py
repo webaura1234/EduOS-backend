@@ -7,6 +7,10 @@ import os
 import sys
 
 
+class PdfRenderError(Exception):
+    """Raised when HTML cannot be rendered to PDF bytes."""
+
+
 def _ensure_macos_pango_loadable() -> None:
     """On macOS dev machines, Homebrew's Pango/Cairo libs aren't on the default
     dlopen search path. Linux (Docker/prod) resolves them via ldconfig, so this
@@ -20,5 +24,8 @@ def _ensure_macos_pango_loadable() -> None:
 
 def render_pdf(html_string: str) -> bytes:
     _ensure_macos_pango_loadable()
-    from weasyprint import HTML  # lazy import — needs libpango at import time
-    return HTML(string=html_string).write_pdf()
+    try:
+        from weasyprint import HTML  # lazy import — needs libpango at import time
+        return HTML(string=html_string).write_pdf()
+    except Exception as exc:
+        raise PdfRenderError(str(exc)) from exc

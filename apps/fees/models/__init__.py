@@ -6,6 +6,7 @@ CreditNote, and the webhook idempotency log.
 """
 
 from apps.fees.enums import (
+    CarryForwardState,
     CreditNoteStatus,
     FeeComponentKind,
     FeeHeadBillingType,
@@ -13,6 +14,7 @@ from apps.fees.enums import (
     FeeHeadRefundType,
     FeeStructureStatus,
     InvoiceStatus,
+    OpeningBalanceSource,
     PaymentMethod,
     PaymentStatus,
     RefundStatus,
@@ -48,6 +50,8 @@ __all__ = [
     "FeeHeadBillingType",
     "FeeHeadRefundType",
     "InvoiceStatus",
+    "CarryForwardState",
+    "OpeningBalanceSource",
     "PaymentStatus",
     "PaymentMethod",
     "RefundStatus",

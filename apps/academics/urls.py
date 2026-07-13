@@ -46,6 +46,36 @@ from apps.academics.views.syllabus_authoring import (
 from apps.academics.views.student_materials import StudentStudyMaterialsView
 from apps.academics.views.student_timetable import StudentTimetableView
 from apps.academics.views.overview import AcademicYearOverviewView
+from apps.academics.views.promotion_preparation import (
+    PromotionBlockedStudentsView,
+    PromotionClassMappingsView,
+    PromotionPreparationLockView,
+    PromotionPreparationReadinessView,
+    PromotionPreparationStartView,
+    PromotionPreparationUnlockView,
+    PromotionPreparationView,
+    PromotionPreviewView,
+    PromotionSectionMappingsView,
+    PromotionValidateView,
+)
+from apps.academics.views.promotion import (
+    PromotionApproveView,
+    PromotionReopenReviewView,
+    PromotionCurrentView,
+    PromotionDecisionBulkOverrideView,
+    PromotionDecisionOverrideView,
+    PromotionDecisionsView,
+    PromotionSessionDetailView,
+    PromotionStartView,
+)
+from apps.academics.views.promotion_execution import (
+    PromotionExecuteDryRunView,
+    PromotionExecuteReportDownloadView,
+    PromotionExecuteReportView,
+    PromotionExecuteResumeView,
+    PromotionExecuteStatusView,
+    PromotionExecuteView,
+)
 from apps.academics.views.rollover import (
     RolloverExecuteView,
     RolloverPreviewView,
@@ -167,4 +197,43 @@ urlpatterns = [
     path("rollover/execute/", RolloverExecuteView.as_view(), name="rollover-execute"),
     path("rollover/undo/", RolloverUndoView.as_view(), name="rollover-undo"),
     path("rollover/status/", RolloverStatusView.as_view(), name="rollover-status"),
+    # Promotion workspace (Phase 1 — decisions only)
+    path("promotion/current/", PromotionCurrentView.as_view(), name="promotion-current"),
+    path("promotion/start/", PromotionStartView.as_view(), name="promotion-start"),
+    path("promotion/sessions/<uuid:session_id>/", PromotionSessionDetailView.as_view(), name="promotion-session-detail"),
+    path("promotion/sessions/<uuid:session_id>/decisions/", PromotionDecisionsView.as_view(), name="promotion-decisions"),
+    path(
+        "promotion/sessions/<uuid:session_id>/decisions/bulk/",
+        PromotionDecisionBulkOverrideView.as_view(),
+        name="promotion-decision-bulk-override",
+    ),
+    path(
+        "promotion/sessions/<uuid:session_id>/decisions/<uuid:decision_id>/",
+        PromotionDecisionOverrideView.as_view(),
+        name="promotion-decision-override",
+    ),
+    path("promotion/sessions/<uuid:session_id>/approve/", PromotionApproveView.as_view(), name="promotion-approve"),
+    path(
+        "promotion/sessions/<uuid:session_id>/reopen-review/",
+        PromotionReopenReviewView.as_view(),
+        name="promotion-reopen-review",
+    ),
+    # Promotion preparation (Phase 2)
+    path("promotion/sessions/<uuid:session_id>/preparation/", PromotionPreparationView.as_view(), name="promotion-preparation"),
+    path("promotion/sessions/<uuid:session_id>/preparation/start/", PromotionPreparationStartView.as_view(), name="promotion-preparation-start"),
+    path("promotion/sessions/<uuid:session_id>/preparation/readiness/", PromotionPreparationReadinessView.as_view(), name="promotion-preparation-readiness"),
+    path("promotion/sessions/<uuid:session_id>/preparation/class-mappings/", PromotionClassMappingsView.as_view(), name="promotion-class-mappings"),
+    path("promotion/sessions/<uuid:session_id>/preparation/section-mappings/", PromotionSectionMappingsView.as_view(), name="promotion-section-mappings"),
+    path("promotion/sessions/<uuid:session_id>/preparation/validate/", PromotionValidateView.as_view(), name="promotion-validate"),
+    path("promotion/sessions/<uuid:session_id>/preparation/preview/", PromotionPreviewView.as_view(), name="promotion-preview"),
+    path("promotion/sessions/<uuid:session_id>/preparation/blocked-students/", PromotionBlockedStudentsView.as_view(), name="promotion-blocked-students"),
+    path("promotion/sessions/<uuid:session_id>/preparation/lock/", PromotionPreparationLockView.as_view(), name="promotion-preparation-lock"),
+    path("promotion/sessions/<uuid:session_id>/preparation/unlock/", PromotionPreparationUnlockView.as_view(), name="promotion-preparation-unlock"),
+    # Promotion execution (Phase 3)
+    path("promotion/sessions/<uuid:session_id>/execute/dry-run/", PromotionExecuteDryRunView.as_view(), name="promotion-execute-dry-run"),
+    path("promotion/sessions/<uuid:session_id>/execute/", PromotionExecuteView.as_view(), name="promotion-execute"),
+    path("promotion/sessions/<uuid:session_id>/execute/status/", PromotionExecuteStatusView.as_view(), name="promotion-execute-status"),
+    path("promotion/sessions/<uuid:session_id>/execute/report/", PromotionExecuteReportView.as_view(), name="promotion-execute-report"),
+    path("promotion/sessions/<uuid:session_id>/execute/report/download/", PromotionExecuteReportDownloadView.as_view(), name="promotion-execute-report-download"),
+    path("promotion/sessions/<uuid:session_id>/execute/resume/", PromotionExecuteResumeView.as_view(), name="promotion-execute-resume"),
 ]

@@ -94,6 +94,10 @@ class FeeLedgerExport(ExportDefinition):
             gross_paise = invoice.total_paise + concession_paise
 
         from django.utils import timezone
+
+        balance_paise = invoice.balance_paise
+        if invoice.carry_forward_state == "carried_forward":
+            balance_paise = 0
         
         # Use existing 'invoice_number' if it exists on the model, otherwise truncate ID
         invoice_num = getattr(invoice, 'invoice_number', getattr(invoice, 'number', str(invoice.pk)[:8].upper()))
@@ -109,7 +113,7 @@ class FeeLedgerExport(ExportDefinition):
             "concession": round(concession_paise / 100, 2),
             "amount": round(invoice.total_paise / 100, 2),
             "paid": round(invoice.paid_paise / 100, 2),
-            "balance": round(invoice.balance_paise / 100, 2),
+            "balance": round(balance_paise / 100, 2),
             "due_date": invoice.due_date.isoformat() if invoice.due_date else "",
             "status": invoice.get_status_display(),
             "branch": invoice.branch.name,
@@ -136,13 +140,14 @@ class FeeDefaultersExport(ExportDefinition):
 
     def get_queryset(self, *, tenant_id, branch_id, params: dict):
         from django.utils import timezone
-        from apps.fees.enums import InvoiceStatus
+        from apps.fees.enums import CarryForwardState, InvoiceStatus
         from apps.fees.models import FeeInvoice
 
         today = timezone.localdate()
         qs = FeeInvoice.objects.filter(
             branch__tenant_id=tenant_id,
             status__in=[InvoiceStatus.DUE, InvoiceStatus.PARTIAL],
+            carry_forward_state=CarryForwardState.NORMAL,
             due_date__lt=today,
             is_active=True,
         )

@@ -96,12 +96,21 @@ def _resolve_period_slot(branch, period_index, start_time, end_time, user):
 
 
 def _resolve_period(branch, period_id=None):
+    if period_id:
+        return cal_q.get_period_for_branch(branch.pk, period_id)
     year = cal_q.get_current_year(branch.pk)
     if year is None:
         return None
-    if period_id:
-        return cal_q.get_period(year.pk, period_id)
     return cal_q.resolve_current_period(year.pk)
+
+
+def _staffing_batch_error(batch) -> str | None:
+    if batch.academic_year.is_frozen:
+        return (
+            "This class belongs to a frozen academic year. "
+            "Staffing can only be changed for the current academic year."
+        )
+    return None
 
 
 def _subject_teacher_payload(assignment) -> dict:
@@ -424,6 +433,9 @@ class AdminAcademicsActionView(APIView):
             batch = struct_q.get_batch(branch.pk, payload.get("classSectionId"))
             if batch is None:
                 return Response({"error": "Class section not found."}, status=status.HTTP_404_NOT_FOUND)
+            staffing_err = _staffing_batch_error(batch)
+            if staffing_err:
+                return Response({"error": staffing_err}, status=status.HTTP_400_BAD_REQUEST)
             teacher_id = payload.get("teacherUserId")
             if not teacher_id:
                 return Response({"error": "teacherUserId is required."}, status=status.HTTP_400_BAD_REQUEST)
@@ -450,6 +462,9 @@ class AdminAcademicsActionView(APIView):
             batch = struct_q.get_batch(branch.pk, payload.get("classSectionId"))
             if batch is None:
                 return Response({"error": "Class section not found."}, status=status.HTTP_404_NOT_FOUND)
+            staffing_err = _staffing_batch_error(batch)
+            if staffing_err:
+                return Response({"error": staffing_err}, status=status.HTTP_400_BAD_REQUEST)
             try:
                 struct_i.update_batch(
                     branch.tenant, batch, fields={"class_teacher_id": None}, user=user,
@@ -465,6 +480,9 @@ class AdminAcademicsActionView(APIView):
             batch = struct_q.get_batch(branch.pk, payload.get("classSectionId"))
             if batch is None:
                 return Response({"error": "Class section not found."}, status=status.HTTP_404_NOT_FOUND)
+            staffing_err = _staffing_batch_error(batch)
+            if staffing_err:
+                return Response({"error": staffing_err}, status=status.HTTP_400_BAD_REQUEST)
             subject = curr_q.get_subject(branch.pk, payload.get("subjectId"))
             if subject is None:
                 return Response({"error": "Subject not found."}, status=status.HTTP_404_NOT_FOUND)
@@ -474,7 +492,12 @@ class AdminAcademicsActionView(APIView):
             period = _resolve_period(branch, payload.get("academicPeriodId"))
             if period is None:
                 return Response(
-                    {"error": "Create a current academic year with at least one term/period first."},
+                    {
+                        "error": (
+                            "Add at least one term or semester under Calendar "
+                            "before assigning subject teachers."
+                        ),
+                    },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             batch_subject = _resolve_batch_subject(branch, batch, subject, period, user)
@@ -507,13 +530,21 @@ class AdminAcademicsActionView(APIView):
             batch = struct_q.get_batch(branch.pk, payload.get("classSectionId"))
             if batch is None:
                 return Response({"error": "Class section not found."}, status=status.HTTP_404_NOT_FOUND)
+            staffing_err = _staffing_batch_error(batch)
+            if staffing_err:
+                return Response({"error": staffing_err}, status=status.HTTP_400_BAD_REQUEST)
             subject = curr_q.get_subject(branch.pk, payload.get("subjectId"))
             if subject is None:
                 return Response({"error": "Subject not found."}, status=status.HTTP_404_NOT_FOUND)
             period = _resolve_period(branch, payload.get("academicPeriodId"))
             if period is None:
                 return Response(
-                    {"error": "Create a current academic year with at least one term/period first."},
+                    {
+                        "error": (
+                            "Add at least one term or semester under Calendar "
+                            "before changing subject teachers."
+                        ),
+                    },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             batch_subject = (

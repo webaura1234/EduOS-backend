@@ -113,7 +113,25 @@ def _set_password(user: User) -> None:
         user.save(update_fields=["password"])
 
 
-def _user(*, role, tenant, branch, first_name, last_name, phone=None, login_id=None) -> User:
+def _admin_email(*, branch_code: str | None, index: int | None = None) -> str:
+    """Dev email for MFA login (admin/super_admin require email OTP, not password)."""
+    if branch_code is None:
+        return f"superadmin@{SUBDOMAIN}.test"
+    suffix = f"{branch_code.lower()}-{index}" if index is not None else branch_code.lower()
+    return f"admin-{suffix}@{SUBDOMAIN}.test"
+
+
+def _user(
+    *,
+    role,
+    tenant,
+    branch,
+    first_name,
+    last_name,
+    phone=None,
+    login_id=None,
+    email=None,
+) -> User:
     lookup = {"role": role, "tenant": tenant}
     if login_id:
         lookup["custom_login_id"] = login_id
@@ -127,12 +145,19 @@ def _user(*, role, tenant, branch, first_name, last_name, phone=None, login_id=N
             branch=branch,
             phone=phone,
             custom_login_id=login_id,
+            email=email or "",
             must_change_password=False,
             is_active=True,
         ),
     )
+    if email and user.email != email:
+        user.email = email
+        user.save(update_fields=["email"])
     _set_password(user)
-    print(f"  - {role:<13} {login_id or phone:<16} [{'created' if created else 'exists'}]")
+    label = login_id or phone
+    if email:
+        label = f"{label} ({email})"
+    print(f"  - {role:<13} {label:<16} [{'created' if created else 'exists'}]")
     return user
 
 
@@ -204,6 +229,7 @@ def _seed_branch_core(*, tenant, branch, branch_index: int, code: str):
                 first_name="Admin",
                 last_name=f"{code} {j}",
                 phone=phone,
+                email=_admin_email(branch_code=code, index=j),
             )
         )
 
@@ -934,6 +960,7 @@ def seed():
         first_name="Ravi",
         last_name="SuperAdmin",
         phone=SUPER_ADMIN_PHONE,
+        email=_admin_email(branch_code=None),
     )
 
     branch_contexts = []

@@ -8,7 +8,9 @@ from apps.academics.scoping import resolve_branch
 from apps.examinations.permissions import IsAdminOrSuperAdmin
 from apps.examinations.views.admin_overview import (
     AdminExaminationsOverviewView,
+    _branch_years,
     _current_academic_year_id,
+    _resolve_year_id,
     _result_status,
     _seating_plan,
 )
@@ -21,8 +23,18 @@ from apps.examinations.serializers.exam import ExamScheduleSlotSerializer
 from apps.examinations.serializers.registration import ExamRegistrationSerializer
 
 
-def _exam_bundle(branch):
-    year_id = _current_academic_year_id(branch.pk)
+def _year_meta(request, branch):
+    """(resolved_year_id, academicYears payload) for a tab request, honoring an
+    optional ?academicYearId= override validated against the branch (audit P1.4)."""
+    years = _branch_years(branch.pk)
+    year_id = _resolve_year_id(years, request.query_params.get("academicYearId"))
+    payload = [{"id": str(y.id), "name": y.name, "isCurrent": y.is_current} for y in years]
+    return year_id, payload
+
+
+def _exam_bundle(branch, *, year_id=None):
+    if year_id is None:
+        year_id = _current_academic_year_id(branch.pk)
     exams = list(exam_q.list_exams_for_year(branch.pk, academic_year_id=year_id))
     exam_ids = [e.id for e in exams]
     slots = list(exam_q.list_schedule_slots_for_exams(exam_ids))
@@ -127,12 +139,15 @@ class AdminExaminationsScheduleTabView(APIView):
 
     def get(self, request) -> Response:
         branch = resolve_branch(request)
-        b = _exam_bundle(branch)
+        year_id, academic_years = _year_meta(request, branch)
+        b = _exam_bundle(branch, year_id=year_id)
         return Response({
             "institutionType": b["institutionType"],
             "exams": b["exams"],
             "slots": b["slots"],
             "students": b["students"],
+            "academicYears": academic_years,
+            "selectedAcademicYearId": str(year_id) if year_id else None,
         })
 
 
@@ -141,12 +156,15 @@ class AdminExaminationsSeatingTabView(APIView):
 
     def get(self, request) -> Response:
         branch = resolve_branch(request)
-        b = _exam_bundle(branch)
+        year_id, academic_years = _year_meta(request, branch)
+        b = _exam_bundle(branch, year_id=year_id)
         return Response({
             "institutionType": b["institutionType"],
             "slots": b["slots"],
             "students": b["students"],
             "seatingPlans": b["seatingPlans"],
+            "academicYears": academic_years,
+            "selectedAcademicYearId": str(year_id) if year_id else None,
         })
 
 
@@ -155,13 +173,16 @@ class AdminExaminationsInvigilationTabView(APIView):
 
     def get(self, request) -> Response:
         branch = resolve_branch(request)
-        b = _exam_bundle(branch)
+        year_id, academic_years = _year_meta(request, branch)
+        b = _exam_bundle(branch, year_id=year_id)
         return Response({
             "institutionType": b["institutionType"],
             "slots": b["slots"],
             "invigilation": b["invigilation"],
             # Active faculty only — assignment UI must not invent its own roster.
             "faculty": b["faculty"],
+            "academicYears": academic_years,
+            "selectedAcademicYearId": str(year_id) if year_id else None,
         })
 
 
@@ -170,11 +191,14 @@ class AdminExaminationsResultsTabView(APIView):
 
     def get(self, request) -> Response:
         branch = resolve_branch(request)
-        b = _exam_bundle(branch)
+        year_id, academic_years = _year_meta(request, branch)
+        b = _exam_bundle(branch, year_id=year_id)
         return Response({
             "institutionType": b["institutionType"],
             "slots": b["slots"],
             "resultStatusByExam": b["resultStatusByExam"],
             "publishedResults": b["publishedResults"],
+            "academicYears": academic_years,
+            "selectedAcademicYearId": str(year_id) if year_id else None,
         })
 

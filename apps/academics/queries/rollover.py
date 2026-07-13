@@ -6,6 +6,8 @@ from django.utils import timezone
 
 from apps.academics.models import AcademicRolloverRun, AcademicYear, Batch, RolloverRunStatus
 from apps.accounts.models.profile import AcademicStatus, StudentProfile
+from apps.admissions.enums import EnrollmentStatus
+from apps.admissions.models import StudentEnrollment
 
 
 def get_latest_rollover_run(branch_id) -> AcademicRolloverRun | None:
@@ -48,17 +50,39 @@ def update_rollover_run(run: AcademicRolloverRun, fields: dict, user=None) -> Ac
     return run
 
 
+def list_enrollments_in_year(branch_id, academic_year_id):
+    """Active source-year enrollments for promotion/rollover rosters."""
+    return (
+        StudentEnrollment.objects.filter(
+            branch_id=branch_id,
+            academic_year_id=academic_year_id,
+            status=EnrollmentStatus.ACTIVE,
+            is_active=True,
+            student_profile__academic_status=AcademicStatus.ACTIVE,
+            student_profile__is_active=True,
+        )
+        .select_related("student_profile__user", "batch", "batch__course")
+        .order_by("student_profile__user__first_name")
+    )
+
+
 def list_students_in_year(branch_id, academic_year_id):
+    """Return active student profiles enrolled in the source year.
+
+    Prefer ``list_enrollments_in_year`` when batch placement is needed — profile
+    ``current_batch`` may be null even while the source-year enrollment is active.
+    """
     return StudentProfile.objects.filter(
-        current_batch__academic_year_id=academic_year_id,
-        current_batch__course__department__branch_id=branch_id,
+        pk__in=list_enrollments_in_year(branch_id, academic_year_id).values_list(
+            "student_profile_id", flat=True
+        ),
         academic_status=AcademicStatus.ACTIVE,
         is_active=True,
     ).select_related("user", "current_batch", "current_batch__course")
 
 
 def count_students_in_year(branch_id, academic_year_id) -> int:
-    return list_students_in_year(branch_id, academic_year_id).count()
+    return list_enrollments_in_year(branch_id, academic_year_id).count()
 
 
 def set_student_batch(profile: StudentProfile, batch_id, user=None):
@@ -69,8 +93,32 @@ def set_student_batch(profile: StudentProfile, batch_id, user=None):
     profile.save(update_fields=["current_batch_id", "version", "updated_by", "updated_at"])
 
 
+def sync_current_enrollment(profile: StudentProfile, enrollment, *, user=None):
+    """Keep the profile pointer on the terminal/historical enrollment row after exit."""
+    if enrollment is None or profile.current_enrollment_id == enrollment.pk:
+        return profile
+    profile.current_enrollment = enrollment
+    update_fields = ["current_enrollment"]
+    if user:
+        profile.updated_by = user
+        update_fields.append("updated_by")
+    profile.save(update_fields=update_fields + ["updated_at"])
+    return profile
+
+
 def graduate_student(profile: StudentProfile, user=None):
     profile.academic_status = AcademicStatus.GRADUATED
+    profile.current_batch_id = None
+    profile.version += 1
+    if user:
+        profile.updated_by = user
+    profile.save(
+        update_fields=["academic_status", "current_batch_id", "version", "updated_by", "updated_at"]
+    )
+
+
+def set_student_academic_status(profile: StudentProfile, *, status: str, user=None):
+    profile.academic_status = status
     profile.current_batch_id = None
     profile.version += 1
     if user:

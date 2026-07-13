@@ -171,7 +171,9 @@ def batch_name_exists(course_id, academic_year_id, name, exclude_id=None) -> boo
 
 
 def batch_has_students(batch_id) -> bool:
-    return StudentProfile.objects.filter(current_batch_id=batch_id, is_active=True).exists()
+    from apps.admissions.models import StudentEnrollment
+
+    return StudentEnrollment.objects.filter(batch_id=batch_id, is_active=True).exists()
 
 
 def batch_has_study_materials(batch_id) -> bool:

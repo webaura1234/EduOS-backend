@@ -195,3 +195,57 @@ def test_mark_future_date_rejected(env):
         {"date": future, "batchId": str(env["batch"].id)},
     )
     assert resp.status_code == 400
+
+
+def test_mark_rejects_frozen_year_batch(env):
+    """Prior-year batches must not be used for marking after promotion."""
+    frozen_year = AcademicYear.objects.create(
+        branch=env["branch"],
+        name="2023-24",
+        is_current=False,
+        is_frozen=True,
+        start_date=datetime.date(2023, 6, 1),
+        end_date=datetime.date(2024, 4, 30),
+    )
+    dept = Department.objects.get(branch=env["branch"])
+    course = Course.objects.get(department=dept)
+    frozen_batch = Batch.objects.create(
+        course=course,
+        academic_year=frozen_year,
+        name="A",
+    )
+    today = datetime.date.today().isoformat()
+    resp = _client(env["admin"]).get(
+        reverse("attendance:admin-mark"),
+        {"date": today, "batchId": str(frozen_batch.id)},
+    )
+    assert resp.status_code == 400, resp.content
+    body = resp.json()
+    msg = body.get("message") or str(body.get("errors") or "")
+    assert "frozen academic year" in msg.lower()
+
+
+def test_mark_class_sections_current_year_only(env):
+    """Mark metadata lists only current-year batches when both years exist."""
+    frozen_year = AcademicYear.objects.create(
+        branch=env["branch"],
+        name="2023-24",
+        is_current=False,
+        is_frozen=True,
+        start_date=datetime.date(2023, 6, 1),
+        end_date=datetime.date(2024, 4, 30),
+    )
+    dept = Department.objects.get(branch=env["branch"])
+    course = Course.objects.get(department=dept)
+    frozen_batch = Batch.objects.create(
+        course=course,
+        academic_year=frozen_year,
+        name="B",
+    )
+    resp = _client(env["admin"]).get(reverse("attendance:admin-mark"))
+    assert resp.status_code == 200, resp.content
+    sections = _data(resp)["classSections"]
+    section_ids = {s["id"] for s in sections}
+    assert str(env["batch"].id) in section_ids
+    assert str(frozen_batch.id) not in section_ids
+    assert all(s.get("isCurrentYear") for s in sections if s["id"] == str(env["batch"].id))

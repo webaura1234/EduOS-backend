@@ -8,14 +8,16 @@ old per-branch counts, and must key each count to the correct branch.
 import pytest
 
 from apps.academics.tests.factories import AcademicYearFactory, BatchFactory
-from apps.accounts.models.profile import StudentProfile
+from apps.accounts.models.profile import AcademicStatus, StudentProfile
 from apps.accounts.models.user import Role
 from apps.accounts.queries.user import (
     count_active_by_role_grouped_by_branch,
     count_active_by_role_in_branch,
 )
 from apps.accounts.tests.factories import UserFactory
+from apps.admissions.enums import EnrollmentStatus
 from apps.admissions.tests.factories import StudentEnrollmentFactory
+from apps.attendance.queries import roster as roster_q
 from apps.attendance.queries.roster import (
     active_student_counts_by_branch,
     all_active_students_in_branch,
@@ -72,3 +74,72 @@ def test_faculty_counts_grouped_by_branch_matches_per_branch():
 
     assert grouped.get(branch_a.pk, 0) == count_active_by_role_in_branch(branch_a.pk, Role.FACULTY) == 1
     assert grouped.get(branch_b.pk, 0) == count_active_by_role_in_branch(branch_b.pk, Role.FACULTY) == 2
+
+
+def test_get_student_profile_in_branch_finds_graduated_student_with_include_inactive():
+    tenant = TenantFactory(institution_type="school")
+    branch = BranchFactory(tenant=tenant)
+    year = AcademicYearFactory(branch=branch, is_current=True)
+    batch = BatchFactory(course__department__branch=branch, academic_year=year)
+    user = UserFactory(
+        role=Role.STUDENT,
+        tenant=tenant,
+        branch=branch,
+        custom_login_id="STU-EXIT",
+        must_change_password=False,
+    )
+    profile = StudentProfile.objects.create(
+        user=user,
+        current_batch=None,
+        academic_status=AcademicStatus.GRADUATED,
+        is_active=True,
+    )
+    enrollment = StudentEnrollmentFactory(
+        student_profile=profile,
+        branch=branch,
+        batch=batch,
+        academic_year=year,
+    )
+    enrollment.is_active = False
+    enrollment.status = EnrollmentStatus.GRADUATED
+    enrollment.save(update_fields=["is_active", "status"])
+    profile.current_enrollment = enrollment
+    profile.save(update_fields=["current_enrollment"])
+
+    assert roster_q.get_student_profile_in_branch(branch.pk, profile.pk) is None
+    assert (
+        roster_q.get_student_profile_in_branch(branch.pk, profile.pk, include_inactive=True)
+        == enrollment
+    )
+
+
+def test_resolve_students_for_marking_excludes_graduated_student():
+    tenant = TenantFactory(institution_type="school")
+    branch = BranchFactory(tenant=tenant)
+    year = AcademicYearFactory(branch=branch, is_current=True)
+    batch = BatchFactory(course__department__branch=branch, academic_year=year)
+    user = UserFactory(
+        role=Role.STUDENT,
+        tenant=tenant,
+        branch=branch,
+        custom_login_id="STU-MARK",
+        must_change_password=False,
+    )
+    profile = StudentProfile.objects.create(
+        user=user,
+        current_batch=None,
+        academic_status=AcademicStatus.GRADUATED,
+        is_active=True,
+    )
+    enrollment = StudentEnrollmentFactory(
+        student_profile=profile,
+        branch=branch,
+        batch=batch,
+        academic_year=year,
+    )
+    enrollment.is_active = False
+    enrollment.status = EnrollmentStatus.GRADUATED
+    enrollment.save(update_fields=["is_active", "status"])
+
+    resolved = roster_q.resolve_students_for_marking(branch.pk, [str(profile.pk)])
+    assert resolved[str(profile.pk)] is None

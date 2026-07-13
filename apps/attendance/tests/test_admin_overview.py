@@ -38,7 +38,8 @@ def test_overview_returns_attendance_data_shape(env):
     assert resp.status_code == 200, resp.content
     body = _data(resp)
     for key in ("live", "rules", "records", "leaveRequests", "classSections", "auditLog",
-                "shortageReport", "detentionList", "periodReports", "reportFilters"):
+                "shortageReport", "detentionList", "periodReports", "reportFilters",
+                "currentAcademicYearId", "academicYears", "selectedAcademicYearId"):
         assert key in body, f"missing {key}"
     assert isinstance(body["classSections"], list)
     assert isinstance(body["periodReports"], list)

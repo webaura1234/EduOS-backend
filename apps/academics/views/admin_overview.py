@@ -169,6 +169,7 @@ def _subject(s, *, units, batches, progress_map, has_marks=False) -> dict:
 
 
 def _class_section(b) -> dict:
+    year = getattr(b, "academic_year", None)
     return {
         "id": str(b.id),
         "label": batch_display_label(b),
@@ -177,6 +178,8 @@ def _class_section(b) -> dict:
         "grade": b.course.name,
         "section": b.name,
         "academicYearId": str(b.academic_year_id),
+        "isCurrentYear": bool(year and year.is_current),
+        "isFrozenAcademicYear": bool(year and year.is_frozen),
     }
 
 

@@ -15,6 +15,8 @@ from apps.fees.views.admin_overview import (
     _concession_request,
     _concession_rule,
     _credit_note,
+    _current_academic_year_id,
+    _fee_charges_by_student,
     _installment_schedules,
     _ledger_and_collection,
     _reconciliation_list,
@@ -23,6 +25,17 @@ from apps.fees.views.admin_overview import (
     _student_concession,
     _webhook,
 )
+
+
+def _parse_ledger_filters(request, branch):
+    academic_year_id = request.query_params.get("academicYearId") or _current_academic_year_id(branch)
+    course_id = request.query_params.get("courseId") or None
+    batch_id = request.query_params.get("batchId") or None
+    return {
+        "academic_year_id": academic_year_id or None,
+        "course_id": course_id or None,
+        "batch_id": batch_id or None,
+    }
 
 
 def _fees_meta(branch):
@@ -36,15 +49,25 @@ def _fees_meta(branch):
 
     batches = []
     for b in list_batches(branch.pk):
+        course = b.course if b.course_id else None
         batches.append({
             "id": str(b.id),
             "label": _batch_label(b),
             "studentCount": enrollments_in_batch(b.id).count(),
+            "academicYearId": str(b.academic_year_id) if b.academic_year_id else None,
+            "academicYearLabel": b.academic_year.name if b.academic_year_id else None,
+            "courseId": str(b.course_id) if b.course_id else None,
+            "courseName": course.name if course else None,
+            "sectionName": b.name or None,
         })
 
     return {
         "institutionType": branch.tenant.institution_type,
         "batches": batches,
+        "academicYears": [
+            {"id": str(y.id), "name": y.name, "isCurrent": y.is_current}
+            for y in academic_years
+        ],
         "currentAcademicYearId": str(current_ay.id) if current_ay else None,
         "currentAcademicYearLabel": current_ay.name if current_ay else None,
     }
@@ -116,11 +139,13 @@ class AdminFeesInstallmentsTabView(APIView):
 
     def get(self, request) -> Response:
         branch = resolve_branch(request)
-        ledger, _collection = _ledger_and_collection(branch)
+        filters = _parse_ledger_filters(request, branch)
+        ledger, _collection = _ledger_and_collection(branch, **filters)
         return Response({
             **_fees_meta(branch),
             "ledger": ledger,
-            "installmentSchedulesByStudent": _installment_schedules(branch),
+            "installmentSchedulesByStudent": _installment_schedules(branch, **filters),
+            "feeChargesByStudent": _fee_charges_by_student(branch, **filters),
         })
 
 

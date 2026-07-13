@@ -8,16 +8,21 @@ from apps.fees.models import FeeStructure, StudentFeeAssignment
 # `studentId` stays a StudentProfile id; these helpers resolve it to the enrollment.
 
 
-def get_student_in_branch(branch_id, student_id):
-    """Resolve the API's `studentId` (a StudentProfile id) to the student's active
-    enrollment in the branch, creating it if missing."""
+def get_student_in_branch(branch_id, student_id, *, include_inactive=False):
+    """Resolve the API's `studentId` (a StudentProfile id) to the student's enrollment
+    in the branch, creating it if missing for active students only."""
     try:
-        profile = StudentProfile.objects.select_related("user", "current_batch").get(
-            pk=student_id, current_batch__course__department__branch_id=branch_id, is_active=True
-        )
+        profile = StudentProfile.objects.select_related(
+            "user", "current_batch", "current_enrollment"
+        ).get(pk=student_id, is_active=True)
     except (StudentProfile.DoesNotExist, ValueError, TypeError):
         return None
-    return enrollment_q.resolve_enrollment_for_profile(profile)
+    return enrollment_q.resolve_enrollment_for_profile_in_branch(
+        profile,
+        branch_id,
+        include_inactive=include_inactive,
+        create=not include_inactive,
+    )
 
 
 def students_in_batch(batch_id):

@@ -672,7 +672,7 @@ def download_report_card(exam, *, branch, student_profile_id, college: bool) -> 
 
     from apps.examinations.services.pdf import hall_ticket_content_payload, read_result_pdf
 
-    student = get_student_in_branch(branch.pk, student_profile_id)
+    student = get_student_in_branch(branch.pk, student_profile_id, include_inactive=True)
     if not student:
         raise ValidationError({"studentId": "Student not found in this branch."})
 

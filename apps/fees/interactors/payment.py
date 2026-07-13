@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from apps.fees.enums import InvoiceStatus, PaymentMethod, PaymentStatus, RefundStatus
+from apps.fees.enums import CarryForwardState, InvoiceStatus, PaymentMethod, PaymentStatus, RefundStatus
 from apps.fees.helpers.paise import financial_year_for
 from apps.fees.models import Payment
 from apps.fees.queries.invoice import (
@@ -71,6 +71,13 @@ def _auto_refund(payment, amount_paise, reason):
                   status=RefundStatus.REQUESTED, idempotency_key=f"refund_auto_{payment.id.hex}")
 
 
+def _ensure_invoice_collectible(invoice) -> None:
+    if invoice.carry_forward_state == CarryForwardState.CARRIED_FORWARD:
+        raise ValidationError(
+            "This invoice has been carried forward to the current year and cannot accept payments."
+        )
+
+
 class CreatePaymentOrderInteractor:
     """Creates a new payment attempt, initiating an order with Razorpay if online."""
 
@@ -98,6 +105,8 @@ class CreatePaymentOrderInteractor:
         # closes the gap even if a future/careless caller skips its own check.
         if invoice.branch.tenant_id != self.payer_user.tenant_id:
             raise ValidationError("Invoice not found.")
+
+        _ensure_invoice_collectible(invoice)
 
         if invoice.status == InvoiceStatus.PAID and self.amount_paise > 0:
             raise ValidationError("This invoice has already been fully paid.")
@@ -243,6 +252,8 @@ class RecordOfflinePaymentInteractor:
             raise ValidationError("Invoice not found.")
         if self.user is not None and invoice.branch.tenant_id != self.user.tenant_id:
             raise ValidationError("Invoice not found.")
+
+        _ensure_invoice_collectible(invoice)
 
         if invoice.status == InvoiceStatus.PAID:
             raise ValidationError("Invoice is already fully paid.")

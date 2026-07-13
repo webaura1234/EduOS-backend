@@ -3,7 +3,7 @@
 from django.db import models
 
 from apps.core.models import BaseModel
-from apps.fees.enums import FeeComponentKind, InvoiceStatus
+from apps.fees.enums import CarryForwardState, FeeComponentKind, InvoiceStatus, OpeningBalanceSource
 
 
 class FeeInvoice(BaseModel):
@@ -19,6 +19,38 @@ class FeeInvoice(BaseModel):
     total_paise = models.BigIntegerField(default=0)
     paid_paise = models.BigIntegerField(default=0)
     status = models.CharField(max_length=15, choices=InvoiceStatus.choices, default=InvoiceStatus.DUE)
+    carry_forward_state = models.CharField(
+        max_length=20,
+        choices=CarryForwardState.choices,
+        default=CarryForwardState.NORMAL,
+    )
+    carried_forward_to = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="carried_from_invoices",
+    )
+    opening_balance_source_year = models.ForeignKey(
+        "academics.AcademicYear",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="opening_balance_invoices",
+    )
+    opening_balance_source = models.CharField(
+        max_length=15,
+        choices=OpeningBalanceSource.choices,
+        null=True,
+        blank=True,
+    )
+    promotion_session = models.ForeignKey(
+        "academics.AcademicPromotionSession",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="opening_balance_invoices",
+    )
 
     class Meta:
         db_table = "fees_fee_invoice"

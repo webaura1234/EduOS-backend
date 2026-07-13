@@ -9,6 +9,7 @@ class NotificationCategory(models.TextChoices):
     FEES = "fees", "Fees"
     EXAMINATION = "examination", "Examination"
     ADMISSIONS = "admissions", "Admissions"
+    ACADEMICS = "academics", "Academics"
 
 
 class NotificationPriority(models.TextChoices):
@@ -29,6 +30,11 @@ NOTIFICATION_TYPES = (
     "examination.results_published",
     "admissions.status_updated",
     "announcement.published",
+    "academics.promotion_completed",
+    "academics.promotion_retained",
+    "academics.promotion_graduated",
+    "academics.promotion_transferred",
+    "academics.promotion_withdrawn",
 )
 
 TYPE_TO_CATEGORY = {
@@ -41,4 +47,9 @@ TYPE_TO_CATEGORY = {
     "examination.results_published": NotificationCategory.EXAMINATION,
     "admissions.status_updated": NotificationCategory.ADMISSIONS,
     "announcement.published": NotificationCategory.ANNOUNCEMENT,
+    "academics.promotion_completed": NotificationCategory.ACADEMICS,
+    "academics.promotion_retained": NotificationCategory.ACADEMICS,
+    "academics.promotion_graduated": NotificationCategory.ACADEMICS,
+    "academics.promotion_transferred": NotificationCategory.ACADEMICS,
+    "academics.promotion_withdrawn": NotificationCategory.ACADEMICS,
 }
