@@ -9,6 +9,7 @@ from apps.gallery.models import GalleryAlbum, GalleryImage
 from apps.gallery.queries import album as album_q
 from apps.gallery.queries import image as image_q
 from apps.gallery.services.storage import get_gallery_storage
+from apps.gallery.services.visibility import normalize_visibility
 
 
 def _unique_slug(branch_id, title: str, *, batch_id=None, exclude_id=None) -> str:
@@ -21,7 +22,7 @@ def _unique_slug(branch_id, title: str, *, batch_id=None, exclude_id=None) -> st
     return slug
 
 
-def create_album(*, branch, academic_year, title, user, batch=None, description="", visibility="students", event_tag=""):
+def create_album(*, branch, academic_year, title, user, batch=None, description="", visibility=None, event_tag=""):
     title = (title or "").strip()
     if not title:
         raise ValidationError({"title": "Title is required."})
@@ -33,7 +34,7 @@ def create_album(*, branch, academic_year, title, user, batch=None, description=
         title=title,
         slug=slug,
         description=(description or "").strip(),
-        visibility=visibility or "students",
+        visibility=normalize_visibility(visibility),
         event_tag=(event_tag or "").strip(),
         created_by=user,
         updated_by=user,
@@ -49,8 +50,8 @@ def update_album(album: GalleryAlbum, *, user, **fields) -> GalleryAlbum:
         )
     if "description" in fields:
         album.description = (fields["description"] or "").strip()
-    if "visibility" in fields and fields["visibility"]:
-        album.visibility = fields["visibility"]
+    if "visibility" in fields and fields["visibility"] is not None:
+        album.visibility = normalize_visibility(fields["visibility"])
     if "event_tag" in fields:
         album.event_tag = (fields["event_tag"] or "").strip()
     if "sort_order" in fields and fields["sort_order"] is not None:
@@ -61,13 +62,21 @@ def update_album(album: GalleryAlbum, *, user, **fields) -> GalleryAlbum:
 
 
 def delete_album(album: GalleryAlbum, *, user) -> None:
+    from apps.gallery.enums import ProcessingStatus
+    from apps.organizations.billing.storage_quota import adjust_storage_usage
+
     storage = get_gallery_storage()
     prefix = storage.build_album_prefix(
         branch=album.branch, batch=album.batch, album_slug=album.slug,
     ) + "/"
-    storage.delete_folder(prefix=prefix)
+    freed = 0
     for image in image_q.list_for_album(album.pk):
+        if image.processing_status == ProcessingStatus.READY and image.stored_bytes:
+            freed += image.stored_bytes
         image.soft_delete(user=user)
+    storage.delete_folder(prefix=prefix)
+    if freed:
+        adjust_storage_usage(album.branch.tenant, -freed)
     album.soft_delete(user=user)
 
 

@@ -36,6 +36,7 @@ In `S3_MODE=sandbox`, use `POST /images/{id}/staging/` with multipart file inste
 
 | Method | Path | Role |
 |--------|------|------|
+| GET | `/api/v1/gallery/storage/` | Admin (quota + stats) |
 | GET/POST | `/api/v1/gallery/albums/` | Admin |
 | GET/PATCH/DELETE | `/api/v1/gallery/albums/{id}/` | Admin |
 | POST | `/api/v1/gallery/albums/{id}/reorder-images/` | Admin |
@@ -50,4 +51,29 @@ In `S3_MODE=sandbox`, use `POST /images/{id}/staging/` with multipart file inste
 
 ## Configuration
 
-See `.env.example`: `R2_*`, `GALLERY_MAX_UPLOAD_BYTES`, `S3_MODE`.
+See `.env.example`: `R2_*`, `GALLERY_MAX_UPLOAD_BYTES`, `S3_MODE`,
+`STORAGE_MB_PER_LICENSED_STUDENT`.
+
+## Cloudflare R2 lifecycle (ops)
+
+Configure these rules in the Cloudflare R2 bucket dashboard (belt-and-suspenders
+alongside Celery purge tasks). **Do not** add lifecycle deletion on gallery or
+compliance document prefixes.
+
+| Prefix | Delete after |
+|--------|----------------|
+| `staging/*` | 1 day |
+| `exports/*` | 2–3 days |
+| `school/*/gallery/*` | never (manual delete only) |
+| `receipts/*`, `hall_tickets/*`, `report_cards/*`, `marksheets/*` | never |
+
+Celery Beat also runs:
+- `apps.gallery.tasks.purge_stale_gallery_staging` (daily)
+- `apps.analytics.tasks.purge_expired_exports` (daily)
+- `apps.gallery.tasks.audit_tenant_storage_bytes` (weekly)
+
+## Storage quota (Pii Aura)
+
+Included storage = **licensed students × 100 MB** (`STORAGE_MB_PER_LICENSED_STUDENT`).
+Gallery WebP + thumbnails count toward usage. Staging and CSV exports do not.
+At 100% capacity, new uploads are blocked; existing media keeps serving.

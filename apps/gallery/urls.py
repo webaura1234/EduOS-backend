@@ -13,8 +13,10 @@ from apps.gallery.views.api import (
     AdminImageStagingUploadView,
     AdminImagePresignView,
     AdminImageStatusView,
+    AdminStorageUsageView,
     FacultyImageConfirmView,
     FacultyImagePresignView,
+    GalleryMediaView,
     ReaderAlbumDetailView,
     ReaderAlbumListView,
 )
@@ -22,6 +24,8 @@ from apps.gallery.views.api import (
 app_name = "gallery"
 
 urlpatterns = [
+    path("media/", GalleryMediaView.as_view(), name="gallery-media"),
+    path("storage/", AdminStorageUsageView.as_view(), name="storage-usage"),
     path("albums/", AdminAlbumListCreateView.as_view(), name="albums"),
     path("albums/me/", ReaderAlbumListView.as_view(), name="reader-albums"),
     path("albums/me/<uuid:album_id>/", ReaderAlbumDetailView.as_view(), name="reader-album-detail"),

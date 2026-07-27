@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from apps.gallery.enums import AlbumVisibility
 from apps.gallery.services.storage import get_gallery_storage
+from apps.gallery.services.visibility import normalize_visibility, visibility_allows
+
+__all__ = ["album_payload", "image_payload", "visibility_allows"]
 
 
 def album_payload(album, *, include_stats: bool = True) -> dict:
@@ -19,7 +21,7 @@ def album_payload(album, *, include_stats: bool = True) -> dict:
         "batchName": album.batch.name if album.batch_id else None,
         "academicYearId": str(album.academic_year_id),
         "academicYearName": album.academic_year.name,
-        "visibility": album.visibility,
+        "visibility": normalize_visibility(album.visibility),
         "eventTag": album.event_tag,
         "sortOrder": album.sort_order,
         "isSchoolAlbum": album.is_school_album,
@@ -51,15 +53,3 @@ def image_payload(image) -> dict:
         "uploadedByName": uploaded_by.full_name if uploaded_by else "",
         "createdAt": image.created_at.isoformat(),
     }
-
-
-def visibility_allows(role: str, visibility: str) -> bool:
-    if visibility == AlbumVisibility.PRIVATE:
-        return False
-    if visibility == AlbumVisibility.STAFF_ONLY:
-        return role in ("admin", "super_admin", "faculty")
-    if visibility == AlbumVisibility.FACULTY:
-        return role in ("admin", "super_admin", "faculty", "student", "parent")
-    if visibility == AlbumVisibility.PARENTS:
-        return role in ("admin", "super_admin", "faculty", "student", "parent")
-    return role in ("admin", "super_admin", "faculty", "student", "parent")

@@ -44,7 +44,7 @@ def list_for_branch(
 
 def get_for_branch(branch_id, album_id) -> GalleryAlbum:
     return GalleryAlbum.objects.select_related(
-        "batch", "batch__course", "academic_year", "created_by", "branch",
+        "batch", "batch__course", "academic_year", "created_by", "branch", "branch__tenant",
     ).get(pk=album_id, branch_id=branch_id, is_active=True)
 
 

@@ -39,3 +39,17 @@ def purge_stale_gallery_staging() -> int:
         image.save(update_fields=["staging_key", "updated_at"])
         deleted += 1
     return deleted
+
+
+@shared_task
+def audit_tenant_storage_bytes() -> dict:
+    """Weekly repair: recompute STORAGE_BYTES from gallery stored_bytes per tenant."""
+    from apps.organizations.billing.storage_quota import recompute_gallery_usage, sync_storage_limit_for_tenant
+    from apps.organizations.models import Tenant
+
+    repaired = 0
+    for tenant in Tenant.objects.filter(is_active=True).iterator():
+        sync_storage_limit_for_tenant(tenant)
+        recompute_gallery_usage(tenant)
+        repaired += 1
+    return {"tenants": repaired}

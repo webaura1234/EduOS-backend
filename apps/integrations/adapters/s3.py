@@ -34,9 +34,8 @@ class SandboxS3:
         return SandboxS3.SINK[key]
 
     def signed_url(self, *, key: str, ttl_seconds: int = 86400) -> str:
-        public_base = getattr(settings, "R2_PUBLIC_BASE_URL", "")
-        if public_base:
-            return f"{public_base.rstrip('/')}/{key}"
+        # Sandbox bytes are not on CDN — callers should prefer GalleryStorageService
+        # which builds a local media proxy URL. Keep a deterministic stub for tests.
         return f"https://sandbox-s3.local/{key}?signature=stub&ttl={ttl_seconds}"
 
     def presigned_upload_url(
@@ -78,7 +77,12 @@ class LiveS3:
         from django.conf import settings as _s
 
         endpoint = getattr(_s, "R2_ENDPOINT_URL", "") or None
-        region = getattr(_s, "AWS_S3_REGION_NAME", "auto")
+        # R2 only accepts: auto | wnam | enam | weur | eeur | apac | oc
+        # — never AWS regions like ap-south-1.
+        if endpoint:
+            region = getattr(_s, "R2_REGION_NAME", "") or "auto"
+        else:
+            region = getattr(_s, "AWS_S3_REGION_NAME", "ap-south-1") or "ap-south-1"
         access_key = getattr(_s, "R2_ACCESS_KEY_ID", "") or getattr(_s, "AWS_ACCESS_KEY_ID", "")
         secret_key = getattr(_s, "R2_SECRET_ACCESS_KEY", "") or getattr(_s, "AWS_SECRET_ACCESS_KEY", "")
 
@@ -119,7 +123,9 @@ class LiveS3:
     def signed_url(self, *, key: str, ttl_seconds: int = 86400) -> str:  # pragma: no cover
         public_base = getattr(settings, "R2_PUBLIC_BASE_URL", "")
         if public_base:
-            return f"{public_base.rstrip('/')}/{key}"
+            from apps.gallery.services.storage import _public_cdn_usable
+            if _public_cdn_usable(public_base):
+                return f"{public_base.rstrip('/')}/{key}"
         return self._client.generate_presigned_url(
             "get_object",
             Params={"Bucket": self._bucket, "Key": key},

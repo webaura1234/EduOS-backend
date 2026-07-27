@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import datetime
+import mimetypes
 
 from django.core.exceptions import ObjectDoesNotExist
+from django.http import HttpResponse
 from rest_framework import status as http
-from rest_framework.exceptions import ValidationError
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -22,12 +24,45 @@ from apps.gallery.queries import album as album_q
 from apps.gallery.queries import image as image_q
 from apps.gallery.serializers.payload import album_payload, image_payload, visibility_allows
 from apps.gallery.services.image_pipeline import validate_upload_meta
+from apps.gallery.services.keys import validate_key
+from apps.gallery.services.media_urls import verify_media_sig
+from apps.gallery.services.storage import get_gallery_storage
+from apps.integrations.adapters.s3 import S3NotFoundError
 
 
 def _parse_date(value):
     if not value:
         return None
     return datetime.date.fromisoformat(value)
+
+
+class GalleryMediaView(APIView):
+    """Stream gallery object bytes via HMAC-signed URL (sandbox / img-src friendly)."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request) -> HttpResponse:
+        key = request.query_params.get("key") or ""
+        exp = request.query_params.get("exp") or ""
+        sig = request.query_params.get("sig") or ""
+        if not verify_media_sig(key=key, exp=exp, sig=sig):
+            raise PermissionDenied("Invalid or expired media signature.")
+        try:
+            validate_key(key)
+        except ValueError as exc:
+            raise ValidationError({"key": str(exc)}) from exc
+        storage = get_gallery_storage()
+        try:
+            content = storage.download_file(key=key)
+        except S3NotFoundError as exc:
+            raise NotFound("Media object not found.") from exc
+        content_type = mimetypes.guess_type(key)[0] or "application/octet-stream"
+        if key.endswith(".webp"):
+            content_type = "image/webp"
+        response = HttpResponse(content, content_type=content_type)
+        response["Cache-Control"] = "private, max-age=3600"
+        return response
 
 
 class AdminAlbumListCreateView(APIView):
@@ -82,6 +117,18 @@ class AdminAlbumListCreateView(APIView):
             event_tag=request.data.get("eventTag", ""),
         )
         return Response(album_payload(album), status=http.HTTP_201_CREATED)
+
+
+class AdminStorageUsageView(APIView):
+    """GET /api/v1/gallery/storage/ — tenant storage quota + gallery stats."""
+
+    permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
+
+    def get(self, request) -> Response:
+        from apps.organizations.billing.storage_quota import storage_status_payload
+
+        branch = resolve_branch(request)
+        return Response(storage_status_payload(branch.tenant))
 
 
 class AdminAlbumDetailView(APIView):
@@ -195,6 +242,8 @@ class AdminImagePresignView(APIView):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
 
     def post(self, request) -> Response:
+        from apps.organizations.billing.storage_quota import storage_warning_snapshot
+
         branch = resolve_branch(request)
         album_id = request.data.get("albumId")
         files = request.data.get("files") or []
@@ -204,7 +253,10 @@ class AdminImagePresignView(APIView):
             raise ValidationError({"files": "Provide at least one file spec."})
         album = album_q.get_for_branch(branch.pk, album_id)
         uploads = image_i.presign_uploads(album=album, files=files, user=request.user)
-        return Response({"uploads": uploads})
+        return Response({
+            "uploads": uploads,
+            "storage": storage_warning_snapshot(branch.tenant),
+        })
 
 
 class AdminImageConfirmView(APIView):
@@ -219,7 +271,9 @@ class AdminImageConfirmView(APIView):
         album = album_q.get_for_branch(branch.pk, album_id)
         from django.conf import settings as dj_settings
         sync = getattr(dj_settings, "CELERY_TASK_ALWAYS_EAGER", False) or request.data.get("sync")
-        image = image_i.confirm_upload(album, image_id, request.user, sync_process=bool(sync))
+        image = image_i.confirm_upload(
+            album=album, image_id=image_id, user=request.user, sync_process=bool(sync),
+        )
         return Response(image_payload(image))
 
 

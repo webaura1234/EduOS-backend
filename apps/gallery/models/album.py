@@ -4,7 +4,10 @@ from django.db import models
 
 from apps.core.models import BaseModel
 from apps.core.models.mixins import BranchScopedMixin
-from apps.gallery.enums import AlbumVisibility
+
+
+def _default_visibility():
+    return ["students"]
 
 
 class GalleryAlbum(BaseModel, BranchScopedMixin):
@@ -28,11 +31,8 @@ class GalleryAlbum(BaseModel, BranchScopedMixin):
     description = models.TextField(blank=True, default="")
     cover_image_key = models.CharField(max_length=512, blank=True, default="")
     total_images = models.PositiveIntegerField(default=0)
-    visibility = models.CharField(
-        max_length=20,
-        choices=AlbumVisibility.choices,
-        default=AlbumVisibility.STUDENTS,
-    )
+    # List of audiences: "students", "parents", "faculty". Empty = private.
+    visibility = models.JSONField(default=_default_visibility, blank=True)
     event_tag = models.CharField(max_length=100, blank=True, default="")
     sort_order = models.PositiveIntegerField(default=0)
 

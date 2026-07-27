@@ -14,7 +14,12 @@ from apps.gallery.services.storage import get_gallery_storage
 
 
 def presign_uploads(*, album, files: list[dict], user) -> list[dict]:
+    from apps.organizations.billing.storage_quota import assert_can_upload
+
     storage = get_gallery_storage()
+    estimated = sum(int(spec.get("fileSize") or 0) for spec in files)
+    assert_can_upload(album.branch.tenant, estimated)
+
     results = []
     for spec in files:
         file_name = (spec.get("fileName") or "").strip()
@@ -59,8 +64,12 @@ def confirm_upload(*, album, image_id, user, sync_process: bool = False) -> Gall
 
 def process_image_record(image_id: str) -> None:
     """Download staging object, process, upload final keys, update DB."""
+    from apps.organizations.billing.storage_quota import adjust_storage_usage
+
     storage = get_gallery_storage()
-    image = GalleryImage.objects.select_related("album", "album__branch", "album__batch").get(pk=image_id)
+    image = GalleryImage.objects.select_related(
+        "album", "album__branch", "album__branch__tenant", "album__batch",
+    ).get(pk=image_id)
     album = image.album
 
     if not image.staging_key:
@@ -92,15 +101,19 @@ def process_image_record(image_id: str) -> None:
         storage.upload_file(key=thumb_key, content=thumb_bytes, content_type="image/webp")
         storage.delete_file(key=image.staging_key)
 
+        stored = len(main_bytes) + len(thumb_bytes)
         image.image_key = main_key
         image.thumbnail_key = thumb_key
         image.staging_key = ""
         image.width = width
         image.height = height
         image.content_hash = content_hash
+        image.stored_bytes = stored
         image.processing_status = ProcessingStatus.READY
         image.processing_error = ""
         image.save()
+
+        adjust_storage_usage(album.branch.tenant, stored)
 
         if not album.cover_image_key:
             album.cover_image_key = thumb_key
@@ -116,13 +129,22 @@ def process_image_record(image_id: str) -> None:
 
 
 def bulk_delete_images(*, album, image_ids: list, user) -> int:
+    from apps.organizations.billing.storage_quota import adjust_storage_usage
+
     storage = get_gallery_storage()
     deleted = 0
+    freed = 0
     for image in image_q.get_by_ids(album.pk, image_ids):
+        if image.staging_key:
+            storage.delete_file(key=image.staging_key)
         storage.delete_file(key=image.image_key)
         storage.delete_file(key=image.thumbnail_key)
+        if image.processing_status == ProcessingStatus.READY and image.stored_bytes:
+            freed += image.stored_bytes
         image.soft_delete(user=user)
         deleted += 1
+    if freed:
+        adjust_storage_usage(album.branch.tenant, -freed)
     if album.cover_image_key and not image_q.list_for_album(album.pk, ready_only=True).exists():
         album.cover_image_key = ""
         album.save(update_fields=["cover_image_key", "updated_at"])

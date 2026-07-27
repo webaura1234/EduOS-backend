@@ -146,6 +146,10 @@ def refresh_summary(tenant) -> TenantLicenseSummary:
     summary.pending_amount_inr = unlicensed_active * price
     summary.current_period = get_current_period(tenant.pk)
     summary.save()
+
+    from apps.organizations.billing.storage_quota import sync_storage_limit_for_tenant
+
+    sync_storage_limit_for_tenant(tenant)
     return summary
 
 
@@ -320,8 +324,10 @@ def record_payment(
     ])
 
     from apps.organizations.billing.billing_refresh import refresh_tenant_billing
+    from apps.organizations.billing.storage_quota import sync_storage_limit_for_tenant
 
     refresh_tenant_billing(tenant.pk, user=user)
+    sync_storage_limit_for_tenant(tenant)
     return payment
 
 

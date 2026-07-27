@@ -48,6 +48,7 @@ class PlanSubscriptionFactory(DjangoModelFactory):
         model = PlanSubscription
 
     tenant = factory.SubFactory(TenantFactory)
+    storage_limit_gb = 10
 
 
 class TenantQuotaFactory(DjangoModelFactory):

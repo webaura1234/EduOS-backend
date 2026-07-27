@@ -238,6 +238,14 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.analytics.tasks.purge_expired_exports",
         "schedule": 86400,  # 24 h; crontab(hour=2, minute=0) when django-celery-beat DB scheduler is seeded
     },
+    "purge-stale-gallery-staging": {
+        "task": "apps.gallery.tasks.purge_stale_gallery_staging",
+        "schedule": 86400,
+    },
+    "audit-tenant-storage-bytes": {
+        "task": "apps.gallery.tasks.audit_tenant_storage_bytes",
+        "schedule": 604800,  # weekly
+    },
     "daily-notification-scans": {
         "task": "apps.communications.tasks.run_daily_notification_scans",
         "schedule": 86400,
@@ -275,6 +283,7 @@ R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY", "")
 R2_BUCKET_NAME = os.environ.get("R2_BUCKET_NAME", "eduos-gallery")
 R2_ENDPOINT_URL = os.environ.get("R2_ENDPOINT_URL", "")
 R2_PUBLIC_BASE_URL = os.environ.get("R2_PUBLIC_BASE_URL", "")
+R2_REGION_NAME = os.environ.get("R2_REGION_NAME", "auto")  # R2: auto|wnam|enam|weur|eeur|apac|oc
 
 # Gallery image processing
 GALLERY_MAX_UPLOAD_BYTES = int(os.environ.get("GALLERY_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
@@ -282,6 +291,14 @@ GALLERY_MAX_DIMENSION_PX = int(os.environ.get("GALLERY_MAX_DIMENSION_PX", "4096"
 GALLERY_THUMBNAIL_MAX_PX = int(os.environ.get("GALLERY_THUMBNAIL_MAX_PX", "400"))
 GALLERY_WEBP_QUALITY = int(os.environ.get("GALLERY_WEBP_QUALITY", "82"))
 GALLERY_STAGING_TTL_HOURS = int(os.environ.get("GALLERY_STAGING_TTL_HOURS", "24"))
+# Absolute origin for sandbox media proxy URLs (img src cannot send Bearer auth).
+GALLERY_SANDBOX_MEDIA_BASE = os.environ.get(
+    "GALLERY_SANDBOX_MEDIA_BASE", "http://127.0.0.1:8000",
+)
+# Tenant storage allowance: licensed_students × MB (Pii Aura policy).
+STORAGE_MB_PER_LICENSED_STUDENT = int(os.environ.get("STORAGE_MB_PER_LICENSED_STUDENT", "100"))
+STORAGE_WARN_PERCENT = int(os.environ.get("STORAGE_WARN_PERCENT", "80"))
+STORAGE_CRITICAL_PERCENT = int(os.environ.get("STORAGE_CRITICAL_PERCENT", "90"))
 
 # ──────────────────────────────────────────────
 # Razorpay

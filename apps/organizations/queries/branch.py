@@ -13,7 +13,7 @@ def list_branches(tenant_id):
 def get_branch(tenant_id, branch_id) -> Branch | None:
     """A single branch scoped to the tenant, or None."""
     try:
-        return Branch.objects.get(tenant_id=tenant_id, pk=branch_id)
+        return Branch.objects.select_related("tenant").get(tenant_id=tenant_id, pk=branch_id)
     except (Branch.DoesNotExist, ValueError, TypeError):
         return None
 

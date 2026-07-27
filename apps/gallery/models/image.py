@@ -21,6 +21,8 @@ class GalleryImage(BaseModel):
     external_url = models.URLField(max_length=500, blank=True, default="")
     original_file_name = models.CharField(max_length=255, blank=True, default="")
     file_size = models.PositiveIntegerField(default=0)
+    # Bytes counted toward tenant quota (final WebP + thumbnail). 0 until ready.
+    stored_bytes = models.PositiveIntegerField(default=0)
     width = models.PositiveIntegerField(default=0)
     height = models.PositiveIntegerField(default=0)
     sort_order = models.PositiveIntegerField(default=0)

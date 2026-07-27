@@ -2,10 +2,42 @@
 
 from __future__ import annotations
 
+import ipaddress
+import socket
+from urllib.parse import urlparse
+
 from django.conf import settings
 
 from apps.gallery.services import keys as key_builder
 from apps.integrations.adapters.s3 import get_s3_adapter
+
+
+def _hostname_is_loopback(hostname: str) -> bool:
+    if not hostname:
+        return False
+    host = hostname.strip().lower().rstrip(".")
+    if host in {"localhost", "127.0.0.1", "::1"}:
+        return True
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        return False
+    for info in infos:
+        ip = info[4][0]
+        try:
+            if ipaddress.ip_address(ip).is_loopback:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _public_cdn_usable(public_base: str) -> bool:
+    """False when CDN host resolves to loopback (common local /etc/hosts override)."""
+    if not public_base:
+        return False
+    host = urlparse(public_base if "://" in public_base else f"https://{public_base}").hostname
+    return not _hostname_is_loopback(host or "")
 
 
 class GalleryStorageService:
@@ -68,13 +100,19 @@ class GalleryStorageService:
             key=key, content_type=content_type, ttl_seconds=ttl_seconds,
         )
 
+    def _is_live_storage(self) -> bool:
+        return getattr(settings, "S3_MODE", "sandbox") == "live"
+
     def generate_public_url(self, key: str) -> str | None:
         if not key:
             return None
+        # Never invent CDN URLs for in-memory sandbox objects.
+        if not self._is_live_storage():
+            return None
         public_base = getattr(settings, "R2_PUBLIC_BASE_URL", "")
-        if public_base:
-            return f"{public_base.rstrip('/')}/{key}"
-        return None
+        if not _public_cdn_usable(public_base):
+            return None
+        return f"{public_base.rstrip('/')}/{key}"
 
     def generate_signed_url(self, key: str, *, ttl_seconds: int | None = None) -> str | None:
         if not key:
@@ -83,6 +121,9 @@ class GalleryStorageService:
         if public:
             return public
         ttl = ttl_seconds or getattr(settings, "AWS_S3_PRESIGNED_URL_EXPIRY", 86400)
+        if not self._is_live_storage():
+            from apps.gallery.services.media_urls import build_sandbox_media_url
+            return build_sandbox_media_url(key, ttl_seconds=ttl)
         return self._adapter.signed_url(key=key, ttl_seconds=ttl)
 
     def resolve_image_urls(self, image) -> tuple[str | None, str | None]:
