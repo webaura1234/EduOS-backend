@@ -1,4 +1,4 @@
-"""Student account Profile tab — view form, edit name/ownPhone, change password."""
+"""Student account Profile tab — view form, edit name, change password."""
 
 import datetime
 
@@ -52,19 +52,24 @@ def test_get_profile_form(env):
     assert body["classLabel"] == "Class 5 - A"
     assert body["rollNumber"] == "STU-001"
     assert body["phone"] == "+919876543220"   # guardian contact
-    assert body["editableFields"] == ["name", "ownPhone"]
+    assert body["editableFields"] == ["name"]
 
 
-def test_update_name_and_own_phone(env):
+def test_update_name(env):
     url = reverse("accounts:student-profile-form")
-    resp = _client(env["user"]).patch(
-        url, {"name": "Rahul K Sharma", "ownPhone": "+919999999999"}, format="json")
+    resp = _client(env["user"]).patch(url, {"name": "Rahul K Sharma"}, format="json")
     assert resp.status_code == 200, resp.content
     p = _data(resp)["profile"]
     assert p["name"] == "Rahul K Sharma"
-    assert p["ownPhone"] == "+919999999999"
+
+
+def test_own_phone_rejected_on_profile_patch(env):
+    url = reverse("accounts:student-profile-form")
+    resp = _client(env["user"]).patch(
+        url, {"name": "Rahul K Sharma", "ownPhone": "+919999999999"}, format="json")
+    assert resp.status_code == 400
     env["user"].refresh_from_db()
-    assert env["user"].phone == "+919999999999"
+    assert env["user"].phone != "+919999999999"
 
 
 def test_change_password(env):

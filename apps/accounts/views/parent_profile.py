@@ -9,6 +9,8 @@ from apps.accounts.permissions import IsParent
 from apps.accounts.queries.parent import list_portal_children
 from apps.accounts.services.avatar import avatar_url_for_user
 
+_PHONE_CHANGE_DISABLED = "Phone number cannot be changed here. Contact your institution office."
+
 
 def _form(user) -> dict:
     return {
@@ -41,6 +43,11 @@ class ParentProfileFormView(APIView):
                 user.first_name = first
                 user.last_name = last
                 changed += ["first_name", "last_name"]
+        if "ownPhone" in request.data:
+            return Response(
+                {"error": _PHONE_CHANGE_DISABLED},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
         if changed:
             user.save(update_fields=changed)
         return Response({"profile": _form(user), "name": user.full_name})

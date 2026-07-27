@@ -171,6 +171,30 @@ def test_student_sees_only_published_for_their_batch(env):
     assert titles == ["Published"]
 
 
+def test_admin_can_post_homework_without_subject_assignment(env):
+    admin = UserFactory(
+        role=Role.ADMIN,
+        tenant=env["branch"].tenant,
+        branch=env["branch"],
+        must_change_password=False,
+    )
+    url = reverse("coursework:faculty-homework")
+    resp = _client(admin).post(url, {
+        "classSectionId": str(env["homeroom_batch"].id),
+        "date": "2026-06-22",
+        "title": "Admin posted",
+        "details": "For all students in class",
+        "publish": True,
+    }, format="json")
+    assert resp.status_code == 201, resp.content
+    entry = _data(resp)["entry"]
+    assert entry["status"] == "published"
+
+    body = _data(_client(env["student"]).get(reverse("coursework:student-homework")))
+    titles = [h["title"] for h in body["homework"]]
+    assert "Admin posted" in titles
+
+
 def test_edit_existing_homework(env):
     url = reverse("coursework:faculty-homework")
     fc = _client(env["subject_teacher"])
@@ -189,3 +213,102 @@ def test_edit_existing_homework(env):
     }, format="json"))["entry"]
     assert edited["id"] == created["id"]
     assert edited["title"] == "New" and edited["status"] == "published"
+
+
+def test_student_homework_uses_enrollment_batch_branch(env):
+    """Student feed resolves batch from enrollment, not the request user's branch alone."""
+    url = reverse("coursework:faculty-homework")
+    _client(env["subject_teacher"]).post(url, {
+        "classSectionId": str(env["homeroom_batch"].id),
+        "date": "2026-06-22",
+        "title": "For homeroom",
+        "publish": True,
+    }, format="json")
+    body = _data(_client(env["student"]).get(reverse("coursework:student-homework")))
+    titles = [h["title"] for h in body["homework"]]
+    assert "For homeroom" in titles
+
+
+def test_student_homework_not_visible_for_other_branch_batch(env):
+    """Homework posted to another campus batch does not appear for this student."""
+    other_branch = BranchFactory(tenant=env["branch"].tenant, code="OB", name="Other Campus")
+    year = env["homeroom_batch"].academic_year
+    other_batch = BatchFactory(course__department__branch=other_branch, academic_year=year, name="A")
+    other_teacher = UserFactory(
+        role=Role.FACULTY, tenant=env["branch"].tenant, branch=other_branch,
+        custom_login_id="FAC-OB", must_change_password=False,
+    )
+    _assign_subject_teacher(other_batch, other_teacher, other_branch)
+    url = reverse("coursework:faculty-homework")
+    _client(other_teacher).post(url, {
+        "classSectionId": str(other_batch.id),
+        "date": "2026-06-22",
+        "title": "Other campus only",
+        "publish": True,
+    }, format="json")
+    body = _data(_client(env["student"]).get(reverse("coursework:student-homework")))
+    titles = [h["title"] for h in body["homework"]]
+    assert "Other campus only" not in titles
+
+
+def test_student_homework_falls_back_to_current_batch_without_enrollment(env):
+    """Profiles with current_batch but no enrollment row still receive published homework."""
+    su = UserFactory(
+        role=Role.STUDENT, tenant=env["branch"].tenant, branch=env["branch"],
+        custom_login_id="STU-NO-ENR", must_change_password=False,
+    )
+    StudentProfile.objects.create(user=su, current_batch=env["homeroom_batch"])
+    url = reverse("coursework:faculty-homework")
+    _client(env["subject_teacher"]).post(url, {
+        "classSectionId": str(env["homeroom_batch"].id),
+        "date": "2026-06-22",
+        "title": "Profile batch fallback",
+        "publish": True,
+    }, format="json")
+    body = _data(_client(su).get(reverse("coursework:student-homework")))
+    titles = [h["title"] for h in body["homework"]]
+    assert "Profile batch fallback" in titles
+
+
+def test_homework_post_maps_to_current_academic_year_batch(env):
+    """Posting against a prior-year batch id lands on the current year's section."""
+    from apps.academics.models import AcademicYear
+
+    old_year = env["homeroom_batch"].academic_year
+    old_year.is_current = False
+    old_year.save(update_fields=["is_current"])
+    new_year = AcademicYear.objects.create(
+        branch=env["branch"],
+        name="2027-2028",
+        start_date=datetime.date(2027, 6, 1),
+        end_date=datetime.date(2028, 4, 30),
+        is_current=True,
+    )
+    new_batch = BatchFactory(
+        course=env["homeroom_batch"].course,
+        academic_year=new_year,
+        name=env["homeroom_batch"].name,
+    )
+    _assign_subject_teacher(new_batch, env["subject_teacher"], env["branch"])
+    StudentEnrollmentFactory(
+        student_profile=env["student"].student_profile,
+        branch=env["branch"],
+        batch=new_batch,
+    )
+    env["student"].student_profile.current_batch = new_batch
+    env["student"].student_profile.save(update_fields=["current_batch"])
+
+    url = reverse("coursework:faculty-homework")
+    resp = _client(env["subject_teacher"]).post(url, {
+        "classSectionId": str(env["homeroom_batch"].id),
+        "date": "2026-06-22",
+        "title": "Current year mapped",
+        "publish": True,
+    }, format="json")
+    assert resp.status_code == 201, resp.content
+    entry = _data(resp)["entry"]
+    assert entry["classSectionId"] == str(new_batch.id)
+
+    body = _data(_client(env["student"]).get(reverse("coursework:student-homework")))
+    titles = [h["title"] for h in body["homework"]]
+    assert "Current year mapped" in titles

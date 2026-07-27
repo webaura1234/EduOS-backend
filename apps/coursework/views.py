@@ -11,8 +11,10 @@ from rest_framework.views import APIView
 from apps.academics.queries import faculty_teaching as ft_q
 from apps.academics.queries import structure as struct_q
 from apps.academics.scoping import resolve_branch
+from apps.accounts.models.user import Role
 from apps.accounts.permissions import IsStudent
-from apps.admissions.queries.enrollment import get_active_enrollment_for_profile
+from apps.academics.helpers import batch_homework_label
+from apps.admissions.queries.enrollment import resolve_enrollment_for_profile
 from apps.attendance.permissions import IsFacultyOrAdmin
 from apps.coursework import queries as hw_q
 
@@ -23,11 +25,16 @@ def _batch_label(batch) -> str:
     return batch.name if batch else ""
 
 
-def _entry(h) -> dict:
+def _entry(h, *, tenant_id=None) -> dict:
+    batch = h.batch if h.batch_id else None
+    if batch and tenant_id:
+        class_label = batch_homework_label(batch, tenant_id)
+    else:
+        class_label = _batch_label(batch) if batch else ""
     return {
         "id": str(h.id),
         "classSectionId": str(h.batch_id),
-        "classLabel": _batch_label(h.batch) if h.batch_id else "",
+        "classLabel": class_label,
         "date": h.date.isoformat(),
         "title": h.title,
         "details": h.details,
@@ -60,9 +67,10 @@ class FacultyHomeworkView(APIView):
         homeroom_ids = [b.id for b in homerooms]
         teaching_batch_ids = ft_q.subject_teaching_batch_ids(branch.pk, faculty_id)
 
-        my_class_hw = [_entry(h) for h in hw_q.list_for_batches(branch.pk, homeroom_ids)]
+        tenant_id = branch.tenant_id
+        my_class_hw = [_entry(h, tenant_id=tenant_id) for h in hw_q.list_for_batches(branch.pk, homeroom_ids)]
         other_hw = [
-            _entry(h)
+            _entry(h, tenant_id=tenant_id)
             for h in hw_q.list_for_faculty_in_batches(branch.pk, faculty_id, list(teaching_batch_ids))
         ]
 
@@ -71,12 +79,12 @@ class FacultyHomeworkView(APIView):
             "viewScope": view_scope,
             "facultyUserId": str(faculty_id),
             "canAssign": len(teaching_batch_ids) > 0,
-            "myClass": {
-                "homerooms": ft_q.homerooms_payload(homerooms),
+                "myClass": {
+                "homerooms": ft_q.homerooms_payload(homerooms, branch.tenant_id),
                 "homework": my_class_hw,
             },
             "otherClasses": {
-                "teachingClasses": ft_q.teaching_classes_grouped(branch.pk, faculty_id),
+                "teachingClasses": ft_q.teaching_classes_grouped(branch.pk, faculty_id, branch.tenant_id),
                 "homework": other_hw,
             },
         })
@@ -92,8 +100,13 @@ class FacultyHomeworkView(APIView):
         if batch is None:
             raise ValidationError({"classSectionId": "Class not found."})
 
+        from apps.coursework.batch_scope import resolve_homework_target_batch
+
+        batch = resolve_homework_target_batch(batch, branch.pk, allow_create=True)
+
         teaching_batch_ids = ft_q.subject_teaching_batch_ids(branch.pk, faculty_id)
-        if batch.id not in teaching_batch_ids:
+        is_admin = request.user.role in {Role.ADMIN, Role.SUPER_ADMIN}
+        if not is_admin and batch.id not in teaching_batch_ids:
             raise PermissionDenied(
                 "You can only post homework for classes where you are assigned as a subject teacher."
             )
@@ -117,7 +130,7 @@ class FacultyHomeworkView(APIView):
         else:
             hw = hw_q.create(branch=branch, batch=batch, date=date, title=title,
                              details=details, publish=publish, user=request.user)
-        return Response({"success": True, "entry": _entry(hw)},
+        return Response({"success": True, "entry": _entry(hw, tenant_id=branch.tenant_id)},
                         status=http.HTTP_201_CREATED)
 
 
@@ -137,15 +150,35 @@ class FacultyHomeworkDetailView(APIView):
         return Response({"success": True})
 
 
+def _student_homework_batch(profile):
+    """Resolve the batch whose published homework the student should see."""
+    if profile is None:
+        return None
+    enrollment = resolve_enrollment_for_profile(profile, create=False)
+    batch = (enrollment.batch if enrollment else None) or profile.current_batch
+    if batch is None:
+        return None
+    if not getattr(batch, "course_id", None):
+        from apps.academics.models import Batch
+
+        batch = (
+            Batch.objects.select_related("course__department__branch")
+            .filter(pk=batch.pk, is_active=True)
+            .first()
+        )
+    return batch
+
+
 class StudentHomeworkView(APIView):
     """GET → { homework } published for the student's batch."""
     permission_classes = [IsAuthenticated, IsStudent]
 
     def get(self, request) -> Response:
-        branch = resolve_branch(request)
         profile = getattr(request.user, "student_profile", None)
-        enrollment = get_active_enrollment_for_profile(profile.pk) if profile else None
-        if not enrollment or not enrollment.batch_id:
+        batch = _student_homework_batch(profile)
+        if batch is None or not batch.course_id:
             return Response({"homework": []})
-        rows = hw_q.list_published_for_batch(branch.pk, enrollment.batch_id)
-        return Response({"homework": [_entry(h) for h in rows]})
+        branch_id = batch.course.department.branch_id
+        tenant_id = request.user.tenant_id
+        rows = hw_q.list_published_for_student_class(branch_id, batch)
+        return Response({"homework": [_entry(h, tenant_id=tenant_id) for h in rows]})

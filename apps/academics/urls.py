@@ -24,6 +24,10 @@ from apps.academics.views.curriculum import (
 )
 from apps.academics.views.holiday import HolidayDetailView, HolidayListCreateView
 from apps.academics.views.admin_actions import AdminAcademicsActionView
+from apps.academics.views.admin_material_upload import (
+    AdminStudyMaterialUploadView,
+    StudyMaterialDownloadView,
+)
 from apps.academics.views.admin_overview import AdminAcademicsOverviewView
 from apps.academics.views.admin_tab_overview import (
     AdminAcademicsCalendarTabView,
@@ -124,6 +128,16 @@ urlpatterns = [
         name="admin-substitutions-tab",
     ),
     path("admin-overview/actions/", AdminAcademicsActionView.as_view(), name="admin-actions"),
+    path(
+        "study-materials/upload/",
+        AdminStudyMaterialUploadView.as_view(),
+        name="study-material-upload",
+    ),
+    path(
+        "study-materials/<uuid:material_id>/download/",
+        StudyMaterialDownloadView.as_view(),
+        name="study-material-download",
+    ),
     path("dependencies/", AcademicsDependenciesView.as_view(), name="dependencies"),
     path(
         "substitutions/available-faculty/",

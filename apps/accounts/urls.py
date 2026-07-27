@@ -51,7 +51,7 @@ from apps.accounts.views.student_profile import StudentProfileFormView
 from apps.accounts.views.faculty_profile import FacultyProfileFormView
 from apps.accounts.views.parent_profile import ParentProfileFormView
 from apps.accounts.views.super_admin_profile import SuperAdminProfileFormView
-from apps.accounts.views.avatar import AvatarConfirmView, AvatarDeleteView, AvatarPresignView
+from apps.accounts.views.avatar import AvatarConfirmView, AvatarDeleteView, AvatarPresignView, AvatarUploadView
 from apps.accounts.views.faculty_dashboard import FacultyDashboardView
 from apps.accounts.views.super_admin_operations import SuperAdminOperationsOverviewView
 from apps.accounts.views.walkthrough import MeWalkthroughsView
@@ -77,6 +77,7 @@ urlpatterns = [
     path("me/parent-profile/", ParentProfileFormView.as_view(), name="parent-profile-form"),
     path("me/super-admin-profile/", SuperAdminProfileFormView.as_view(), name="super-admin-profile-form"),
     path("me/avatar/presign/", AvatarPresignView.as_view(), name="avatar-presign"),
+    path("me/avatar/upload/", AvatarUploadView.as_view(), name="avatar-upload"),
     path("me/avatar/confirm/", AvatarConfirmView.as_view(), name="avatar-confirm"),
     path("me/avatar/", AvatarDeleteView.as_view(), name="avatar-delete"),
     path("super-admin/operations/overview/", SuperAdminOperationsOverviewView.as_view(),

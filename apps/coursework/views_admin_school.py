@@ -4,7 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.academics.helpers import batch_display_label
+from apps.academics.helpers import batch_homework_label
 from apps.academics.models import Batch
 from apps.academics.scoping import resolve_branch
 from apps.accounts.models.user import Role, User
@@ -12,8 +12,8 @@ from apps.accounts.permissions import IsAdminOrSuperAdmin
 from apps.coursework import queries as hw_q
 
 
-def _homework_entry(h) -> dict:
-    label = batch_display_label(h.batch) if h.batch_id else ""
+def _homework_entry(h, tenant_id) -> dict:
+    label = batch_homework_label(h.batch, tenant_id) if h.batch_id else ""
     return {
         "id": str(h.id),
         "classSectionId": str(h.batch_id),
@@ -48,7 +48,7 @@ class AdminSchoolOverviewView(APIView):
         class_teachers = []
         class_sections = []
         for b in batches:
-            label = batch_display_label(b)
+            label = batch_homework_label(b, tenant.id)
             class_sections.append({
                 "id": str(b.id),
                 "label": label,
@@ -77,7 +77,7 @@ class AdminSchoolOverviewView(APIView):
             ).order_by("first_name", "last_name")
         ]
 
-        homework = [_homework_entry(h) for h in hw_q.list_for_branch(branch.pk)]
+        homework = [_homework_entry(h, tenant.id) for h in hw_q.list_for_branch(branch.pk)]
 
         return Response({
             "institutionType": tenant.institution_type,

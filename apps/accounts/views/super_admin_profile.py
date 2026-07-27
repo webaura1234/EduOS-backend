@@ -8,6 +8,8 @@ from rest_framework.views import APIView
 from apps.accounts.permissions import IsSuperAdmin
 from apps.accounts.services.avatar import avatar_url_for_user
 
+_PHONE_CHANGE_DISABLED = "Phone number cannot be changed here. Contact your institution office."
+
 
 def _form(user) -> dict:
     tenant = user.tenant
@@ -20,12 +22,12 @@ def _form(user) -> dict:
         "avatarUrl": avatar_url_for_user(user),
         "institutionName": tenant.name if tenant else None,
         "institutionType": tenant.institution_type if tenant else None,
-        "editableFields": ["name", "ownPhone"],
+        "editableFields": ["name"],
     }
 
 
 class SuperAdminProfileFormView(APIView):
-    """GET → SuperAdminProfileData; PATCH → update name/ownPhone."""
+    """GET → SuperAdminProfileData; PATCH → update name."""
 
     permission_classes = [IsAuthenticated, IsSuperAdmin]
 
@@ -43,8 +45,10 @@ class SuperAdminProfileFormView(APIView):
                 user.last_name = last
                 changed += ["first_name", "last_name"]
         if "ownPhone" in request.data:
-            user.phone = (request.data.get("ownPhone") or "").strip() or None
-            changed.append("phone")
+            return Response(
+                {"error": _PHONE_CHANGE_DISABLED},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
         if changed:
             user.save(update_fields=changed)
         return Response({"profile": _form(user), "name": user.full_name})

@@ -46,10 +46,19 @@ class SaveEnquiryFormSerializer(serializers.Serializer):
         return value
 
 
+def _display_title(title: str) -> str:
+    raw = (title or "").strip() or "Admission Enquiry"
+    return (
+        raw.replace("Enquirys", "Enquiries")
+        .replace("enquirys", "enquiries")
+        .replace("ENQUIRYS", "ENQUIRIES")
+    )
+
+
 def enquiry_form_dict(form) -> dict:
     """camelCase representation of a form for admin editing."""
     return {
-        "title": form.title,
+        "title": _display_title(form.title),
         "description": form.description,
         "isPublic": form.is_public,
         "fields": form.fields or [],
@@ -61,7 +70,7 @@ def public_enquiry_form_dict(form, *, institution_name: str, subdomain: str) -> 
     return {
         "institutionName": institution_name,
         "subdomain": subdomain,
-        "title": form.title,
+        "title": _display_title(form.title),
         "description": form.description,
         "fields": form.fields or [],
     }

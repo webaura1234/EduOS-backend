@@ -121,6 +121,9 @@ def list_assignments_data(*, branch_id, batch_id=None, subject_id=None):
 @transaction.atomic
 def list_faculty_teaching_assignments_data(*, branch_id, faculty_id):
     asg_q.close_past_due_assignments(branch_id)
+    from apps.organizations.models import Branch
+
+    tenant_id = Branch.objects.only("tenant_id").get(pk=branch_id).tenant_id
     homerooms = ft_q.homeroom_batches(branch_id, faculty_id)
     homeroom_ids = [b.id for b in homerooms]
     teaching_batch_ids = list(ft_q.subject_teaching_batch_ids(branch_id, faculty_id))
@@ -134,11 +137,11 @@ def list_faculty_teaching_assignments_data(*, branch_id, faculty_id):
 
     return {
         "myClass": {
-            "homerooms": ft_q.homerooms_payload(homerooms),
+            "homerooms": ft_q.homerooms_payload(homerooms, tenant_id),
             "assignments": [serialize_assignment(a) for a in my_class],
         },
         "otherClasses": {
-            "teachingClasses": ft_q.teaching_classes_grouped(branch_id, faculty_id),
+            "teachingClasses": ft_q.teaching_classes_grouped(branch_id, faculty_id, tenant_id),
             "assignments": [serialize_assignment(a) for a in other],
         },
         "submissions": [serialize_submission(s) for s in submissions],

@@ -13,6 +13,12 @@ from apps.accounts.services.avatar import (
 from apps.integrations.adapters.s3 import get_s3_adapter
 
 
+def _tenant_required(user):
+    if not user.tenant_id:
+        return Response({"error": "Tenant context required."}, status=http.HTTP_400_BAD_REQUEST)
+    return None
+
+
 class AvatarPresignView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -23,12 +29,65 @@ class AvatarPresignView(APIView):
         err = validate_avatar_upload(content_type=content_type, file_size=file_size)
         if err:
             return Response({"error": err}, status=http.HTTP_400_BAD_REQUEST)
-        if not user.tenant_id:
-            return Response({"error": "Tenant context required."}, status=http.HTTP_400_BAD_REQUEST)
+        denied = _tenant_required(user)
+        if denied:
+            return denied
 
         key = avatar_object_key(tenant_id=user.tenant_id, user_id=user.pk)
-        upload_url = get_s3_adapter().presigned_upload_url(key=key, content_type=content_type)
-        return Response({"uploadUrl": upload_url, "key": key})
+        try:
+            upload_url = get_s3_adapter().presigned_upload_url(key=key, content_type=content_type)
+        except Exception:
+            return Response(
+                {
+                    "error": "Photo storage is not configured. Use direct upload, or set valid R2 credentials.",
+                    "directUpload": True,
+                },
+                status=http.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response({
+            "uploadUrl": upload_url,
+            "key": key,
+            "directUpload": "sandbox-s3.local" in upload_url,
+        })
+
+
+class AvatarUploadView(APIView):
+    """
+    Direct multipart upload — used in local/sandbox when browser cannot PUT to
+    sandbox-s3.local, and as a fallback when live R2 is misconfigured.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request) -> Response:
+        user = request.user
+        denied = _tenant_required(user)
+        if denied:
+            return denied
+
+        upload = request.FILES.get("file")
+        if upload is None:
+            return Response({"error": "file is required."}, status=http.HTTP_400_BAD_REQUEST)
+
+        content_type = (upload.content_type or "").strip()
+        content = upload.read()
+        err = validate_avatar_upload(content_type=content_type, file_size=len(content))
+        if err:
+            return Response({"error": err}, status=http.HTTP_400_BAD_REQUEST)
+
+        key = avatar_object_key(tenant_id=user.tenant_id, user_id=user.pk)
+        get_s3_adapter().upload(key=key, content=content, content_type=content_type)
+        user.avatar_s3_key = key
+        user.save(update_fields=["avatar_s3_key"])
+
+        url = avatar_url_for_user(user)
+        # Browser cannot fetch sandbox-s3.local — return a data URL for display.
+        if not url or "sandbox-s3.local" in url:
+            import base64
+
+            b64 = base64.b64encode(content).decode("ascii")
+            url = f"data:{content_type};base64,{b64}"
+
+        return Response({"avatarUrl": url, "key": key})
 
 
 class AvatarConfirmView(APIView):

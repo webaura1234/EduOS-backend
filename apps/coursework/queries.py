@@ -10,7 +10,7 @@ def list_for_batches(branch_id, batch_ids):
         return []
     return (
         Homework.objects.filter(branch_id=branch_id, batch_id__in=batch_ids, is_active=True)
-        .select_related("batch", "batch__course", "created_by")
+        .select_related("batch", "batch__course", "batch__course__department__branch", "created_by")
         .order_by("-date", "-created_at")
     )
 
@@ -25,7 +25,7 @@ def list_for_faculty_in_batches(branch_id, faculty_user_id, batch_ids):
             batch_id__in=batch_ids,
             is_active=True,
         )
-        .select_related("batch", "batch__course", "created_by")
+        .select_related("batch", "batch__course", "batch__course__department__branch", "created_by")
         .order_by("-date", "-created_at")
     )
 
@@ -33,7 +33,7 @@ def list_for_faculty_in_batches(branch_id, faculty_user_id, batch_ids):
 def list_for_faculty(branch_id, faculty_user_id):
     return (
         Homework.objects.filter(branch_id=branch_id, created_by_id=faculty_user_id, is_active=True)
-        .select_related("batch", "batch__course", "created_by")
+        .select_related("batch", "batch__course", "batch__course__department__branch", "created_by")
         .order_by("-date", "-created_at")
     )
 
@@ -41,7 +41,7 @@ def list_for_faculty(branch_id, faculty_user_id):
 def list_for_branch(branch_id):
     return (
         Homework.objects.filter(branch_id=branch_id, is_active=True)
-        .select_related("batch", "batch__course", "created_by")
+        .select_related("batch", "batch__course", "batch__course__department__branch", "created_by")
         .order_by("-date", "-created_at")
     )
 
@@ -51,7 +51,28 @@ def list_published_for_batch(branch_id, batch_id):
         Homework.objects.filter(
             branch_id=branch_id, batch_id=batch_id, status="published", is_active=True,
         )
-        .select_related("batch", "created_by")
+        .select_related("batch", "batch__course", "batch__course__department__branch", "created_by")
+        .order_by("-date")
+    )
+
+
+def list_published_for_student_class(branch_id, batch) -> list:
+    """Published homework for the student's logical class (handles duplicate / prior-year batches)."""
+    from apps.coursework.batch_scope import sibling_batch_ids
+
+    if batch is None:
+        return []
+    batch_ids = sibling_batch_ids(batch, branch_id)
+    if not batch_ids:
+        return []
+    return list(
+        Homework.objects.filter(
+            branch_id=branch_id,
+            batch_id__in=batch_ids,
+            status="published",
+            is_active=True,
+        )
+        .select_related("batch", "batch__course", "batch__course__department__branch", "created_by")
         .order_by("-date")
     )
 

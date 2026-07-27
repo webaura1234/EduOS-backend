@@ -29,6 +29,24 @@ def batch_display_label(batch) -> str:
     return batch.name
 
 
+def tenant_has_multiple_branches(tenant_id) -> bool:
+    from apps.organizations.models import Branch
+
+    return Branch.objects.filter(tenant_id=tenant_id, is_active=True).count() > 1
+
+
+def batch_homework_label(batch, tenant_id) -> str:
+    """Class label for homework UIs — includes campus when the school has multiple branches."""
+    label = batch_display_label(batch)
+    if not tenant_has_multiple_branches(tenant_id):
+        return label
+    dept = getattr(getattr(batch, "course", None), "department", None)
+    branch = getattr(dept, "branch", None)
+    if branch and getattr(branch, "name", None):
+        return f"{label} · {branch.name}"
+    return label
+
+
 def reject_class_teacher_for_college(tenant) -> None:
     if is_college(tenant):
         raise PermissionDenied("Class teacher assignment is only available for schools.")

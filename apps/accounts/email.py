@@ -61,7 +61,9 @@ def send_email(to_email: str, to_name: str, subject: str, html_body: str, text_b
             "=============================================================\n",
             flush=True,
         )
-        logger.info("📧 [DEV EMAIL] to %s: %s", to_email, subject)
+        # Also log via the logger so the OTP is visible even if stdout buffering
+        # reorders relative to request access logs.
+        logger.info("📧 [DEV EMAIL] to %s: %s | body=%s", to_email, subject, text_body or html_body)
         _record_success()
         return
 

@@ -117,9 +117,14 @@ class GalleryStorageService:
     def generate_signed_url(self, key: str, *, ttl_seconds: int | None = None) -> str | None:
         if not key:
             return None
-        public = self.generate_public_url(key)
-        if public:
-            return public
+        # Public CDN URLs only when live storage is actually usable.
+        from apps.integrations.adapters.s3 import _live_config_usable
+
+        mode = getattr(settings, "S3_MODE", "sandbox")
+        if mode == "live" and _live_config_usable():
+            public = self.generate_public_url(key)
+            if public:
+                return public
         ttl = ttl_seconds or getattr(settings, "AWS_S3_PRESIGNED_URL_EXPIRY", 86400)
         if not self._is_live_storage():
             from apps.gallery.services.media_urls import build_sandbox_media_url

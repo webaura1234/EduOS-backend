@@ -1,4 +1,4 @@
-"""Load `.env` from the project root into os.environ (without overwriting existing vars)."""
+"""Load `.env` from the project root into os.environ (values in `.env` win)."""
 
 import os
 import re
@@ -29,6 +29,6 @@ def load_env() -> None:
         if not (value.startswith('"') or value.startswith("'")):
             value = re.split(r"\s+#", value, maxsplit=1)[0].strip()
         value = value.strip('"').strip("'")
-        os.environ.setdefault(key, value)
+        os.environ[key] = value
 
     _ENV_LOADED = True

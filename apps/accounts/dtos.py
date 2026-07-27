@@ -52,14 +52,19 @@ class MFARequiredDTO:
     mfa_session_token: str
     email_hint: str
     has_parent_account: bool = False
+    # DEBUG-only — never set in production responses.
+    dev_otp: str | None = None
 
     def to_dict(self) -> dict:
-        return {
+        payload = {
             "mfa_required": True,
             "mfa_session_token": self.mfa_session_token,
             "email_hint": self.email_hint,
             "has_parent_account": self.has_parent_account,
         }
+        if self.dev_otp:
+            payload["dev_otp"] = self.dev_otp
+        return payload
 
 
 @dataclass

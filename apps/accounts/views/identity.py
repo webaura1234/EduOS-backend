@@ -18,9 +18,7 @@ from rest_framework.views import APIView
 from apps.accounts.dtos import MessageDTO
 from apps.accounts.interactors.identity import (
     confirm_email_change,
-    confirm_phone_change,
     initiate_email_change,
-    initiate_phone_change,
 )
 
 
@@ -31,24 +29,15 @@ class ChangeMobileInitiateView(APIView):
     POST /api/v1/auth/change-phone/initiate/
     body: { new_phone: string }
 
-    Sends a 6-digit OTP to the new phone number.
+    Disabled — phone numbers are managed by the institution.
     """
 
     permission_classes = [IsAuthenticated]
 
     def post(self, request) -> Response:
-        new_phone = (request.data.get("new_phone") or "").strip()
-        if not new_phone:
-            return Response(
-                {"detail": "new_phone is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        initiate_phone_change(request.user, new_phone)
-
         return Response(
-            MessageDTO(detail="A verification code has been sent to your new phone number."),
-            status=status.HTTP_200_OK,
+            {"detail": "Phone number cannot be changed here. Contact your institution office."},
+            status=status.HTTP_403_FORBIDDEN,
         )
 
 
@@ -57,24 +46,15 @@ class ChangeMobileConfirmView(APIView):
     POST /api/v1/auth/change-phone/confirm/
     body: { otp: string }
 
-    Verifies the OTP and updates the user's phone number.
+    Disabled — phone numbers are managed by the institution.
     """
 
     permission_classes = [IsAuthenticated]
 
     def post(self, request) -> Response:
-        otp = (request.data.get("otp") or "").strip()
-        if not otp:
-            return Response(
-                {"detail": "otp is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        confirm_phone_change(request.user, otp)
-
         return Response(
-            MessageDTO(detail="Phone number updated successfully."),
-            status=status.HTTP_200_OK,
+            {"detail": "Phone number cannot be changed here. Contact your institution office."},
+            status=status.HTTP_403_FORBIDDEN,
         )
 
 

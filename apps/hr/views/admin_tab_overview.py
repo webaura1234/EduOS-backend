@@ -147,7 +147,11 @@ class AdminHRLeaveTabView(APIView):
 
     def get(self, request) -> Response:
         branch = resolve_branch(request)
-        return Response({**_hr_shell(branch), "leaveRequests": _leave_requests(branch)})
+        return Response({
+            **_hr_shell(branch),
+            "employees": _employees(branch),
+            "leaveRequests": _leave_requests(branch),
+        })
 
 
 class AdminHRPayrollTabView(APIView):

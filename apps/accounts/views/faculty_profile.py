@@ -9,6 +9,8 @@ from apps.academics.scoping import resolve_branch
 from apps.accounts.permissions import IsFaculty
 from apps.accounts.services.avatar import avatar_url_for_user
 
+_PHONE_CHANGE_DISABLED = "Phone number cannot be changed here. Contact your institution office."
+
 
 def _form(user, profile) -> dict:
     return {
@@ -18,13 +20,13 @@ def _form(user, profile) -> dict:
         "customLoginId": user.custom_login_id,
         "designation": (profile.designation if profile else "") or "",
         "department": (profile.department if profile else "") or "",
-        "editableFields": ["name", "ownPhone"],
+        "editableFields": ["name"],
         "avatarUrl": avatar_url_for_user(user),
     }
 
 
 class FacultyProfileFormView(APIView):
-    """GET → FacultyProfileFormData; PATCH → update name/ownPhone; POST → change password."""
+    """GET → FacultyProfileFormData; PATCH → update name; POST → change password."""
 
     permission_classes = [IsAuthenticated, IsFaculty]
 
@@ -49,8 +51,10 @@ class FacultyProfileFormView(APIView):
                 user.last_name = last
                 changed += ["first_name", "last_name"]
         if "ownPhone" in request.data:
-            user.phone = (request.data.get("ownPhone") or "").strip() or None
-            changed.append("phone")
+            return Response(
+                {"error": _PHONE_CHANGE_DISABLED},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
         if changed:
             user.save(update_fields=changed)
         return Response({"profile": _form(user, profile), "name": user.full_name})

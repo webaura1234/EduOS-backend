@@ -10,6 +10,8 @@ from apps.accounts.permissions import IsStudent
 from apps.admissions.queries.enrollment import get_active_enrollment_for_profile
 from apps.accounts.services.avatar import avatar_url_for_user
 
+_PHONE_CHANGE_DISABLED = "Phone number cannot be changed here. Contact your institution office."
+
 
 def _class_label(enrollment) -> str:
     batch = enrollment.batch if enrollment else None
@@ -23,19 +25,19 @@ def _form(user, profile, enrollment) -> dict:
     return {
         "userId": str(user.id),
         "name": user.full_name,
-        # Read-only guardian/contact number; editable personal number is ownPhone.
+        # Guardian contact is read-only; ownPhone is display-only.
         "phone": (profile.guardian_phone if profile else None) or None,
         "ownPhone": user.phone or None,
         "customLoginId": user.custom_login_id,
         "classLabel": _class_label(enrollment),
         "rollNumber": user.custom_login_id,
-        "editableFields": ["name", "ownPhone"],
+        "editableFields": ["name"],
         "avatarUrl": avatar_url_for_user(user),
     }
 
 
 class StudentProfileFormView(APIView):
-    """GET → StudentProfileFormData; PATCH → update name/ownPhone; POST → change password."""
+    """GET → StudentProfileFormData; PATCH → update name; POST → change password."""
     permission_classes = [IsAuthenticated, IsStudent]
 
     def _context(self, request):
@@ -60,8 +62,10 @@ class StudentProfileFormView(APIView):
                 user.last_name = last
                 changed += ["first_name", "last_name"]
         if "ownPhone" in request.data:
-            user.phone = (request.data.get("ownPhone") or "").strip() or None
-            changed.append("phone")
+            return Response(
+                {"error": _PHONE_CHANGE_DISABLED},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
         if changed:
             user.save(update_fields=changed)
         return Response({"profile": _form(user, profile, enrollment), "name": user.full_name})

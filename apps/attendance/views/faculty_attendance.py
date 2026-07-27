@@ -49,15 +49,27 @@ def _ensure_day_roster(branch, batch, user):
 
 
 def _class_teacher_batches(branch_id, faculty_id):
-    """Batches where this faculty is the class teacher (day-wise rosters they own)."""
-    return (
+    """Batches where this faculty is the class teacher (day-wise rosters they own).
+
+    Only non-frozen academic years are returned — frozen years cannot be marked, and
+    including them would crash the whole GET when open_session runs its frozen guard.
+    Prefer the current year when one exists.
+    """
+    qs = (
         Batch.objects.filter(
             course__department__branch_id=branch_id,
-            class_teacher_id=faculty_id, is_active=True,
+            class_teacher_id=faculty_id,
+            is_active=True,
+            academic_year__is_frozen=False,
+            academic_year__is_active=True,
         )
-        .select_related("course")
+        .select_related("course", "academic_year")
         .order_by("course__name", "name")
     )
+    current = qs.filter(academic_year__is_current=True)
+    if current.exists():
+        return current
+    return qs
 
 
 class FacultyAttendanceView(APIView):
@@ -99,6 +111,10 @@ class FacultyAttendanceView(APIView):
             for e in tt_q.list_active_entries_for_branch(branch.pk):
                 if (e.faculty_id != request.user.pk or e.day_of_week != weekday
                         or not e.batch_subject_id):
+                    continue
+                batch = e.timetable.batch
+                year = getattr(batch, "academic_year", None)
+                if year is not None and getattr(year, "is_frozen", False):
                     continue
                 subject = e.batch_subject.subject
                 sess = _ensure_roster_records(branch, e, request.user)

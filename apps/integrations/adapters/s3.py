@@ -6,7 +6,11 @@
 Tests assert against `SandboxS3.SINK`.
 """
 
+import logging
+
 from django.conf import settings
+
+logger = logging.getLogger("apps.integrations.s3")
 
 
 class S3NotFoundError(Exception):
@@ -17,6 +21,7 @@ class SandboxS3:
     """In-memory object storage for tests and local dev."""
 
     SINK: dict = {}  # key -> bytes (test-inspectable)
+    CONTENT_TYPES: dict = {}  # key -> content_type
 
     @property
     def bucket(self) -> str:
@@ -26,6 +31,7 @@ class SandboxS3:
 
     def upload(self, *, key: str, content: bytes, content_type: str = "application/octet-stream") -> str:
         SandboxS3.SINK[key] = content
+        SandboxS3.CONTENT_TYPES[key] = content_type
         return key
 
     def download(self, *, key: str) -> bytes:
@@ -35,7 +41,7 @@ class SandboxS3:
 
     def signed_url(self, *, key: str, ttl_seconds: int = 86400) -> str:
         # Sandbox bytes are not on CDN — callers should prefer GalleryStorageService
-        # which builds a local media proxy URL. Keep a deterministic stub for tests.
+        # which builds a local media proxy URL. Never use R2_PUBLIC_BASE_URL here.
         return f"https://sandbox-s3.local/{key}?signature=stub&ttl={ttl_seconds}"
 
     def presigned_upload_url(
@@ -49,6 +55,7 @@ class SandboxS3:
 
     def delete(self, *, key: str) -> None:
         SandboxS3.SINK.pop(key, None)
+        SandboxS3.CONTENT_TYPES.pop(key, None)
 
     def list_prefix(self, *, prefix: str) -> list[str]:
         return [k for k in SandboxS3.SINK if k.startswith(prefix)]
@@ -57,6 +64,9 @@ class SandboxS3:
         if source_key not in SandboxS3.SINK:
             raise S3NotFoundError(source_key)
         SandboxS3.SINK[dest_key] = SandboxS3.SINK[source_key]
+        SandboxS3.CONTENT_TYPES[dest_key] = SandboxS3.CONTENT_TYPES.get(
+            source_key, "application/octet-stream",
+        )
 
     def move(self, *, source_key: str, dest_key: str) -> None:
         self.copy(source_key=source_key, dest_key=dest_key)
@@ -180,6 +190,25 @@ class LiveS3:
         return len(keys)
 
 
+def _live_config_usable() -> bool:
+    """True only when R2/S3 credentials look real (not .env.example placeholders)."""
+    endpoint = getattr(settings, "R2_ENDPOINT_URL", "") or ""
+    if not endpoint or "<" in endpoint or "account_id" in endpoint:
+        return False
+    access = getattr(settings, "R2_ACCESS_KEY_ID", "") or getattr(settings, "AWS_ACCESS_KEY_ID", "")
+    secret = getattr(settings, "R2_SECRET_ACCESS_KEY", "") or getattr(settings, "AWS_SECRET_ACCESS_KEY", "")
+    return bool(access and secret and "<" not in access and "<" not in secret)
+
+
 def get_s3_adapter():
     mode = getattr(settings, "S3_MODE", "sandbox")
-    return LiveS3() if mode == "live" else SandboxS3()
+    if mode == "live" and _live_config_usable():
+        try:
+            return LiveS3()
+        except Exception:
+            logger.exception("Live S3 init failed; falling back to sandbox adapter")
+    elif mode == "live":
+        logger.warning(
+            "S3_MODE=live but R2/S3 endpoint or credentials are missing/placeholder — using sandbox",
+        )
+    return SandboxS3()

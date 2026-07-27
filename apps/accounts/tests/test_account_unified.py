@@ -123,13 +123,24 @@ def test_super_admin_profile_patch(school_env):
     url = reverse("accounts:super-admin-profile-form")
     resp = _client(school_env["super_admin"]).patch(
         url,
-        {"name": "Updated Admin", "ownPhone": "+919900000001"},
+        {"name": "Updated Admin"},
         format="json",
     )
     assert resp.status_code == 200
     school_env["super_admin"].refresh_from_db()
     assert school_env["super_admin"].full_name == "Updated Admin"
-    assert school_env["super_admin"].phone == "+919900000001"
+
+
+def test_super_admin_own_phone_rejected(school_env):
+    url = reverse("accounts:super-admin-profile-form")
+    resp = _client(school_env["super_admin"]).patch(
+        url,
+        {"name": "Updated Admin", "ownPhone": "+919900000001"},
+        format="json",
+    )
+    assert resp.status_code == 400
+    school_env["super_admin"].refresh_from_db()
+    assert school_env["super_admin"].phone != "+919900000001"
 
 
 def test_avatar_presign_confirm_delete(school_env):

@@ -154,14 +154,14 @@ class FacultyMarksView(APIView):
         return Response({
             "facultyUserId": str(faculty_id),
             "myClass": {
-                "homerooms": ft_q.homerooms_payload(homerooms),
+                "homerooms": ft_q.homerooms_payload(homerooms, branch.tenant_id),
                 "examSlots": my_exam_slots,
                 "examEntries": my_exam_entries,
                 "internal": my_internal,
                 "canEdit": False,
             },
             "classesITeach": {
-                "teachingClasses": ft_q.teaching_classes_grouped(branch.pk, faculty_id),
+                "teachingClasses": ft_q.teaching_classes_grouped(branch.pk, faculty_id, branch.tenant_id),
                 "examSlots": teach_exam_slots,
                 "examEntries": teach_exam_entries,
                 "internal": teach_internal,

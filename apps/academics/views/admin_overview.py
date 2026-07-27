@@ -284,7 +284,8 @@ class AdminAcademicsOverviewView(APIView):
                 for s in subjects
             ],
             "rooms": [
-                {"id": str(r.id), "name": r.name} for r in tt_q.list_rooms(branch.pk)
+                {"id": str(r.id), "name": r.name, "capacity": r.capacity}
+                for r in tt_q.list_rooms(branch.pk)
             ],
             "timetableSlots": [
                 _timetable_slot(e) for e in tt_q.list_active_entries_for_branch(branch.pk)

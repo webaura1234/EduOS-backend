@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from apps.academics.helpers import batch_homework_label
 from apps.academics.models import Batch, BatchFaculty
+from apps.academics.queries import calendar as cal_q
+from apps.coursework.batch_scope import resolve_homework_target_batch
 
 
 def _batch_label(batch: Batch) -> str:
@@ -12,15 +15,18 @@ def _batch_label(batch: Batch) -> str:
 
 
 def homeroom_batches(branch_id, faculty_id):
-    """Active batches where faculty is the class teacher."""
-    return list(
-        Batch.objects.filter(
-            course__department__branch_id=branch_id,
-            class_teacher_id=faculty_id,
-            is_active=True,
-        ).select_related("course")
-        .order_by("course__name", "name")
+    """Active batches where faculty is the class teacher (current academic year when set)."""
+    qs = Batch.objects.filter(
+        course__department__branch_id=branch_id,
+        class_teacher_id=faculty_id,
+        is_active=True,
     )
+    current = cal_q.get_current_year(branch_id)
+    if current:
+        in_year = list(qs.filter(academic_year_id=current.pk).select_related("course"))
+        if in_year:
+            return in_year
+    return list(qs.select_related("course").order_by("course__name", "name"))
 
 
 def is_homeroom_teacher(branch_id, faculty_id, batch_id) -> bool:
@@ -55,7 +61,7 @@ def subject_teaching_assignments(branch_id, faculty_id):
     seen: set[tuple] = set()
     out = []
     for r in rows:
-        batch = r.batch_subject.batch
+        batch = resolve_homework_target_batch(r.batch_subject.batch, branch_id) or r.batch_subject.batch
         subject = r.batch_subject.subject
         key = (batch.id, subject.id)
         if key in seen:
@@ -84,7 +90,7 @@ def faculty_teaches_batch_subject(branch_id, faculty_id, batch_id, subject_id) -
     ).exists()
 
 
-def teaching_classes_grouped(branch_id, faculty_id) -> list[dict]:
+def teaching_classes_grouped(branch_id, faculty_id, tenant_id) -> list[dict]:
     """Grouped by batch with subject list — matches FacultyTeachingClass shape."""
     by_batch: dict = {}
     for row in subject_teaching_assignments(branch_id, faculty_id):
@@ -93,7 +99,7 @@ def teaching_classes_grouped(branch_id, faculty_id) -> list[dict]:
         if bid not in by_batch:
             by_batch[bid] = {
                 "classSectionId": str(bid),
-                "classLabel": row["batch_label"],
+                "classLabel": batch_homework_label(batch, tenant_id),
                 "subjects": [],
             }
         subj = row["subject"]
@@ -104,8 +110,8 @@ def teaching_classes_grouped(branch_id, faculty_id) -> list[dict]:
     return list(by_batch.values())
 
 
-def homerooms_payload(batches) -> list[dict]:
+def homerooms_payload(batches, tenant_id) -> list[dict]:
     return [
-        {"classSectionId": str(b.id), "classLabel": _batch_label(b)}
+        {"classSectionId": str(b.id), "classLabel": batch_homework_label(b, tenant_id)}
         for b in batches
     ]

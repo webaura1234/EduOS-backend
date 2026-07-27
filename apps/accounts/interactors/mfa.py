@@ -135,6 +135,7 @@ def request_otp_login(
         mfa_session_token=challenge.mfa_session_token,
         email_hint=challenge.email_hint,
         has_parent_account=has_parent,
+        dev_otp=challenge.dev_otp,
     )
 
 
@@ -195,7 +196,14 @@ def issue_mfa_challenge(user) -> "MFARequiredDTO | None":
     log_auth_event(event="mfa_otp_sent", user=user,
                    metadata={"email_hint": email_hint, "role": user.role})
 
-    return MFARequiredDTO(mfa_session_token=mfa_session_token, email_hint=email_hint)
+    from django.conf import settings
+
+    return MFARequiredDTO(
+        mfa_session_token=mfa_session_token,
+        email_hint=email_hint,
+        # Local/dev only — lets the BFF surface the code when email is not delivered.
+        dev_otp=otp if settings.DEBUG else None,
+    )
 
 
 def verify_mfa_otp(

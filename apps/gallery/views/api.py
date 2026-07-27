@@ -382,3 +382,74 @@ class ReaderAlbumDetailView(APIView):
             "page": page,
             "pageSize": page_size,
         })
+
+
+def _can_view_album(user, album) -> bool:
+    role = getattr(user, "role", "")
+    if role in (Role.ADMIN, Role.SUPER_ADMIN):
+        return True
+    return visibility_allows(role, album.visibility)
+
+
+class GalleryAlbumCoverFileView(APIView):
+    """Stream album cover bytes (needed when S3 is sandbox / browser cannot fetch stub URLs)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, album_id):
+        from django.http import HttpResponse
+        from apps.integrations.adapters.s3 import S3NotFoundError
+        from apps.gallery.services.storage import get_gallery_storage
+
+        branch = resolve_branch(request)
+        try:
+            album = album_q.get_for_branch(branch.pk, album_id)
+        except ObjectDoesNotExist:
+            return Response({"error": "Album not found."}, status=http.HTTP_404_NOT_FOUND)
+        if not _can_view_album(request.user, album):
+            return Response({"error": "Album not found."}, status=http.HTTP_404_NOT_FOUND)
+        if not album.cover_image_key:
+            return Response({"error": "No cover image."}, status=http.HTTP_404_NOT_FOUND)
+        try:
+            content = get_gallery_storage().download_file(key=album.cover_image_key)
+        except S3NotFoundError:
+            return Response({"error": "Cover file not found."}, status=http.HTTP_404_NOT_FOUND)
+        return HttpResponse(content, content_type="image/webp")
+
+
+class GalleryImageFileView(APIView):
+    """Stream gallery image / thumbnail bytes for authenticated viewers."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, image_id):
+        from django.http import HttpResponse
+        from apps.gallery.models import GalleryImage
+        from apps.integrations.adapters.s3 import S3NotFoundError
+        from apps.gallery.services.storage import get_gallery_storage
+
+        branch = resolve_branch(request)
+        image = (
+            GalleryImage.objects.select_related("album")
+            .filter(pk=image_id, is_active=True, album__branch_id=branch.pk)
+            .first()
+        )
+        if image is None:
+            return Response({"error": "Image not found."}, status=http.HTTP_404_NOT_FOUND)
+        if not _can_view_album(request.user, image.album):
+            return Response({"error": "Image not found."}, status=http.HTTP_404_NOT_FOUND)
+
+        variant = (request.query_params.get("variant") or "full").lower()
+        if variant == "thumb":
+            key = image.thumbnail_key or image.image_key
+        else:
+            key = image.image_key or image.thumbnail_key
+        if not key:
+            if image.external_url:
+                return Response({"redirect": image.external_url})
+            return Response({"error": "Image file not found."}, status=http.HTTP_404_NOT_FOUND)
+        try:
+            content = get_gallery_storage().download_file(key=key)
+        except S3NotFoundError:
+            return Response({"error": "Image file not found."}, status=http.HTTP_404_NOT_FOUND)
+        return HttpResponse(content, content_type="image/webp")
