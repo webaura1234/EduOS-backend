@@ -8,6 +8,7 @@ from apps.accounts.models.user import Role
 from apps.accounts.tests.factories import UserFactory
 from apps.accounts.tokens import generate_access_token
 from apps.organizations.billing import license_allocator as alloc
+from apps.organizations.billing.platform_pricing import unit_price_for_tenant
 from apps.organizations.tests.factories import BranchFactory, TenantFactory
 
 pytestmark = pytest.mark.django_db
@@ -21,6 +22,10 @@ def _client(user):
 
 def _data(resp):
     return resp.json().get("data", resp.json())
+
+
+def _price(tenant):
+    return unit_price_for_tenant(tenant.pk)
 
 
 @pytest.fixture
@@ -56,7 +61,7 @@ def test_overview_kpis(platform_owner, tenant, branch):
     assert resp.status_code == 200
     body = _data(resp)
     assert body["kpis"]["totalUnlicensedStudents"] == 3
-    assert body["kpis"]["pendingCollectionsInr"] == 3 * 499
+    assert body["kpis"]["pendingCollectionsInr"] == 3 * _price(tenant)
     school = next(s for s in body["schools"] if s["tenantId"] == str(tenant.id))
     assert school["unlicensedStudents"] == 3
 
@@ -68,7 +73,7 @@ def test_record_payment_converts_fifo(platform_owner, tenant, branch):
         {
             "tenantId": str(tenant.id),
             "licensesGranted": 2,
-            "amountInr": 998,
+            "amountInr": 2 * _price(tenant),
             "paymentMode": "upi",
             "referenceNumber": "UPI-123",
         },
@@ -99,7 +104,12 @@ def test_renewal_invoice_uses_consumed(platform_owner, tenant, branch):
     client = _client(platform_owner)
     client.post(
         reverse("organizations:platform-licensing-payments"),
-        {"tenantId": str(tenant.id), "licensesGranted": 2, "amountInr": 998, "paymentMode": "cash"},
+        {
+            "tenantId": str(tenant.id),
+            "licensesGranted": 2,
+            "amountInr": 2 * _price(tenant),
+            "paymentMode": "cash",
+        },
         format="json",
     )
     _enroll_students(tenant, branch, 2)  # consume both
@@ -112,7 +122,7 @@ def test_renewal_invoice_uses_consumed(platform_owner, tenant, branch):
     assert resp.status_code == 201
     invoice = _data(resp)["invoice"]
     assert invoice["licensesCount"] == 2
-    assert invoice["amountInr"] == 2 * 499
+    assert invoice["amountInr"] == 2 * _price(tenant)
 
 
 def test_extend_period_to_june(platform_owner, tenant):
@@ -171,7 +181,7 @@ def test_me_access_blocks_unlicensed_student(tenant, branch):
     assert "fees" not in body["blockedModules"]
 
     # Payment licenses the student; access opens up.
-    alloc.record_payment(tenant, licenses_granted=1, amount_inr=499, payment_mode="cash")
+    alloc.record_payment(tenant, licenses_granted=1, amount_inr=_price(tenant), payment_mode="cash")
     resp = _client(student).get(reverse("accounts:me-access"))
     body = _data(resp)
     assert body["licenseStatus"] == "licensed"

@@ -7,14 +7,23 @@ Resolution order:
   2. Per-tenant discount_percent from TenantLicensePricing (0 when unset).
   3. Net price = round(list_price * (1 - discount_percent / 100)).
 
-All runtime billing (tenant summaries, student subscriptions, licensing
-invoices) should call this module rather than reading plan_catalog constants
-directly.
+All runtime billing (tenant summaries, licensing invoices) should call this
+module rather than reading plan_catalog constants directly.
 """
 
 from __future__ import annotations
 
+import datetime
+
+from django.utils import timezone
+
+from apps.fees.helpers.paise import financial_year_for
 from apps.organizations.plan_catalog import PLAN_LIMITS, normalize_plan
+
+
+def current_academic_year(*, on_date: datetime.date | None = None) -> str:
+    """Indian financial / academic year label (e.g. FY2025-26)."""
+    return financial_year_for(on_date or timezone.localdate())
 
 
 def list_price_for_plan(plan: str) -> int:

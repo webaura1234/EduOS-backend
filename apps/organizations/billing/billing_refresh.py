@@ -1,24 +1,29 @@
-"""Materialize tenant billing — net unit price, per-student fees, and summary totals."""
+"""Materialize tenant billing from Licensing + PlanSubscription pricing.
+
+Collected = sum(LicensePayment.amount_inr)
+Annual = licenses_consumed × net_unit_price
+Pending = unlicensed_active_count × net_unit_price
+"""
 
 from __future__ import annotations
+
+import datetime
 
 from django.db.models import Sum
 from django.utils import timezone
 
 from apps.organizations.billing import pricing
-from apps.organizations.billing.student_subscription import current_academic_year
-from apps.organizations.enums import StudentPlatformSubscriptionStatus
+from apps.organizations.billing import seat_billing
 from apps.organizations.models import (
-    StudentPlatformSubscription,
+    LicensePayment,
     Tenant,
     TenantLicensePricing,
     TenantLicenseSummary,
 )
-from apps.organizations.plan_catalog import normalize_plan
 
 
 def refresh_tenant_billing(tenant_id, *, user=None) -> TenantLicenseSummary:
-    """Recompute and persist net unit price, student fees, and summary subscription totals."""
+    """Recompute net unit price and summary subscription totals from licenses/payments."""
     from apps.organizations.billing import license_allocator as alloc
 
     tenant = Tenant.objects.filter(pk=tenant_id, is_active=True).first()
@@ -36,32 +41,17 @@ def refresh_tenant_billing(tenant_id, *, user=None) -> TenantLicenseSummary:
         pricing_row.updated_by = user
     pricing_row.save(update_fields=["net_unit_price_inr", "updated_by", "updated_at"])
 
-    year = current_academic_year()
-    StudentPlatformSubscription.objects.filter(
-        tenant_id=tenant_id,
-        academic_year=year,
-        is_active=True,
-    ).update(annual_fee_inr=net_unit, plan=plan, updated_at=timezone.now())
-
-    sub_qs = StudentPlatformSubscription.objects.filter(
-        tenant_id=tenant_id,
-        academic_year=year,
-        is_active=True,
-    )
-    active_count = sub_qs.count()
-    collected = int(
-        sub_qs.filter(status=StudentPlatformSubscriptionStatus.PAID).aggregate(
-            total=Sum("annual_fee_inr"),
-        )["total"]
-        or 0
-    )
-    annual_total = active_count * net_unit
-
     summary = alloc.refresh_summary(tenant)
-    summary.active_student_count = active_count
-    summary.annual_subscription_inr = annual_total
-    summary.collected_subscription_inr = collected
-    summary.pending_amount_inr = summary.unlicensed_active_count * net_unit
+    summary.active_student_count = summary.licenses_consumed
+    summary.annual_subscription_inr = seat_billing.annual_for_consumed(
+        licenses_consumed=summary.licenses_consumed,
+        net_unit=net_unit,
+    )
+    summary.collected_subscription_inr = seat_billing.collected_from_payments(tenant_id=tenant_id)
+    summary.pending_amount_inr = seat_billing.pending_for_unlicensed(
+        unlicensed_count=summary.unlicensed_active_count,
+        net_unit=net_unit,
+    )
     summary.save(
         update_fields=[
             "active_student_count",
@@ -75,16 +65,8 @@ def refresh_tenant_billing(tenant_id, *, user=None) -> TenantLicenseSummary:
 
 
 def subscription_collected_trend(*, months: int = 6, tenant_id=None) -> list[dict]:
-    """Sum of paid student subscription fees grouped by calendar month (real data)."""
-    import datetime
-
-    from django.db.models import Sum
-
-    qs = StudentPlatformSubscription.objects.filter(
-        status=StudentPlatformSubscriptionStatus.PAID,
-        paid_at__isnull=False,
-        is_active=True,
-    )
+    """Sum of LicensePayment amounts grouped by calendar month."""
+    qs = LicensePayment.objects.filter(is_active=True)
     if tenant_id:
         qs = qs.filter(tenant_id=tenant_id)
 
@@ -101,8 +83,8 @@ def subscription_collected_trend(*, months: int = 6, tenant_id=None) -> list[dic
             end = timezone.make_aware(datetime.datetime(year, month + 1, 1))
 
         total = int(
-            qs.filter(paid_at__gte=start, paid_at__lt=end).aggregate(
-                total=Sum("annual_fee_inr"),
+            qs.filter(paid_at__gte=start.date(), paid_at__lt=end.date()).aggregate(
+                total=Sum("amount_inr"),
             )["total"]
             or 0
         )
@@ -112,34 +94,35 @@ def subscription_collected_trend(*, months: int = 6, tenant_id=None) -> list[dic
 
 
 def aggregate_platform_billing_stats() -> dict:
-    """Platform-wide totals from materialized TenantLicenseSummary rows."""
-    from apps.organizations.models import StudentPlatformSubscription
-
+    """Platform-wide totals from TenantLicenseSummary + license seat counts."""
     agg = TenantLicenseSummary.objects.filter(tenant__is_active=True).aggregate(
         students=Sum("active_student_count"),
         annual=Sum("annual_subscription_inr"),
         collected=Sum("collected_subscription_inr"),
+        purchased=Sum("licenses_purchased"),
+        consumed=Sum("licenses_consumed"),
+        unlicensed=Sum("unlicensed_active_count"),
     )
-    year = current_academic_year()
-    sub_qs = StudentPlatformSubscription.objects.filter(academic_year=year, is_active=True)
-    paid = sub_qs.filter(status=StudentPlatformSubscriptionStatus.PAID).count()
-    unpaid = sub_qs.filter(status=StudentPlatformSubscriptionStatus.UNPAID).count()
-    overdue = sub_qs.filter(status=StudentPlatformSubscriptionStatus.OVERDUE).count()
+    licensed = int(agg["consumed"] or 0)
+    unlicensed = int(agg["unlicensed"] or 0)
 
     return {
         "totalStudents": int(agg["students"] or 0),
         "annualSubscriptionInr": int(agg["annual"] or 0),
         "collectedSubscriptionInr": int(agg["collected"] or 0),
-        "paid": paid,
-        "unpaid": unpaid,
-        "overdue": overdue,
+        # License-shaped stats (aliases keep older FE keys working).
+        "licensed": licensed,
+        "unlicensed": unlicensed,
+        "licensesPurchased": int(agg["purchased"] or 0),
+        "licensesConsumed": licensed,
+        "paid": licensed,
+        "unpaid": unlicensed,
+        "overdue": 0,
     }
 
 
 def billing_dict_for_tenant(tenant_id) -> dict:
-    """Unified billing breakdown for APIs — reads materialized DB fields."""
-    from apps.organizations.queries import branch as branch_q
-
+    """Unified billing breakdown for APIs — licenses + payments."""
     tenant = Tenant.objects.filter(pk=tenant_id, is_active=True).first()
     if tenant is None:
         raise ValueError("Tenant not found.")
@@ -147,27 +130,7 @@ def billing_dict_for_tenant(tenant_id) -> dict:
     summary, _ = TenantLicenseSummary.objects.get_or_create(tenant=tenant)
     tenant_pricing = pricing.pricing_for_tenant(tenant_id)
     net_unit = tenant_pricing["unitPricePerStudentInr"]
-    year = current_academic_year()
-
-    branches = []
-    for branch in branch_q.list_branches(tenant_id):
-        subs = StudentPlatformSubscription.objects.filter(
-            tenant_id=tenant_id,
-            branch_id=branch.pk,
-            academic_year=year,
-            is_active=True,
-        )
-        count = subs.count()
-        paid_count = subs.filter(status=StudentPlatformSubscriptionStatus.PAID).count()
-        branches.append({
-            "branchId": str(branch.pk),
-            "branchName": branch.name,
-            "studentCount": count,
-            "unitPricePerStudentInr": net_unit,
-            "annualSubscriptionInr": count * net_unit,
-            "paidCount": paid_count,
-            "unpaidCount": count - paid_count,
-        })
+    branches = seat_billing.branch_license_counts(tenant_id)
 
     annual = summary.annual_subscription_inr
     collected = summary.collected_subscription_inr
@@ -185,4 +148,5 @@ def billing_dict_for_tenant(tenant_id) -> dict:
         "licensesPurchased": summary.licenses_purchased,
         "licensesConsumed": summary.licenses_consumed,
         "unlicensedStudents": summary.unlicensed_active_count,
+        "remainingSeats": max(0, summary.licenses_purchased - summary.licenses_consumed),
     }

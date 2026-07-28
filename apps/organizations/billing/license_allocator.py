@@ -122,6 +122,8 @@ def _get_summary(tenant) -> TenantLicenseSummary:
 
 def refresh_summary(tenant) -> TenantLicenseSummary:
     """Recompute counters from source tables (used by backfills and repair)."""
+    from django.db.models import Q
+
     from apps.accounts.models.profile import AcademicStatus
 
     purchased = (
@@ -131,11 +133,16 @@ def refresh_summary(tenant) -> TenantLicenseSummary:
     consumed = StudentLicense.objects.filter(
         tenant=tenant, licensed_at__isnull=False,
     ).count()
+    # Match payment FIFO queue: active users who are unlicensed. Include students
+    # without a profile (common in tests / early onboarding); exclude known
+    # non-active academic statuses when a profile exists.
     unlicensed_active = StudentLicense.objects.filter(
         tenant=tenant,
         license_status=StudentLicenseStatus.UNLICENSED,
         student_user__is_active=True,
-        student_user__student_profile__academic_status=AcademicStatus.ACTIVE,
+    ).filter(
+        Q(student_user__student_profile__isnull=True)
+        | Q(student_user__student_profile__academic_status=AcademicStatus.ACTIVE),
     ).count()
     price = unit_price_for_tenant(tenant.pk)
 
@@ -374,6 +381,73 @@ def generate_invoice(
         created_by=user,
     )
     return invoice
+
+
+def run_renewal_invoice_pipeline(
+    *,
+    within_days: int = 60,
+    dry_run: bool = False,
+    user=None,
+) -> dict:
+    """Issue RENEWAL invoices for periods ending soon (licenses_consumed × net unit).
+
+    Idempotent: skips tenants that already have an ISSUED renewal invoice on the
+    current period. Ensures a following subscription period exists once the
+    current window has ended (does not recreate StudentLicense rows).
+    """
+    today = timezone.localdate()
+    cutoff = today + datetime.timedelta(days=within_days)
+    generated = 0
+    skipped = 0
+    ensured_periods = 0
+
+    periods = list(
+        TenantSubscriptionPeriod.objects.filter(
+            status__in=[SubscriptionPeriodStatus.ACTIVE, SubscriptionPeriodStatus.GRACE],
+            end_date__gte=today,
+            end_date__lte=cutoff,
+            is_active=True,
+        ).select_related("tenant")
+    )
+
+    for period in periods:
+        summary = _get_summary(period.tenant)
+        if summary.licenses_consumed <= 0:
+            skipped += 1
+            continue
+
+        already = LicenseInvoice.objects.filter(
+            tenant=period.tenant,
+            subscription_period=period,
+            invoice_type=LicenseInvoiceType.RENEWAL,
+            status=LicenseInvoiceStatus.ISSUED,
+            is_active=True,
+        ).exists()
+        if already:
+            skipped += 1
+            continue
+
+        if dry_run:
+            generated += 1
+            continue
+
+        generate_invoice(
+            period.tenant,
+            invoice_type=LicenseInvoiceType.RENEWAL,
+            notes="Auto-generated renewal invoice (period ending soon).",
+            user=user,
+        )
+        generated += 1
+
+        if period.end_date < today and get_current_period(period.tenant_id) is None:
+            ensure_period(period.tenant, user=user)
+            ensured_periods += 1
+
+    return {
+        "generated": generated,
+        "skipped": skipped,
+        "ensuredPeriods": ensured_periods,
+    }
 
 
 # ── Lifecycle events that do NOT release licenses ─────────────────────────────

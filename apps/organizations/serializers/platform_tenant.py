@@ -82,9 +82,9 @@ def platform_stats_from_summaries(summaries: list[dict]) -> dict:
             "annualSubscriptionInr": billing_stats["annualSubscriptionInr"],
             "collectedSubscriptionInr": billing_stats["collectedSubscriptionInr"],
             "billingStats": {
-                "paid": billing_stats["paid"],
-                "overdue": billing_stats["overdue"],
-                "trial": billing_stats["unpaid"],
+                "paid": billing_stats.get("licensed", billing_stats["paid"]),
+                "overdue": billing_stats.get("overdue", 0),
+                "trial": billing_stats.get("unlicensed", billing_stats["unpaid"]),
             },
         }
 

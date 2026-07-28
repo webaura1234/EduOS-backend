@@ -8,6 +8,7 @@ import pytest
 from apps.accounts.models.user import Role
 from apps.accounts.tests.factories import UserFactory
 from apps.organizations.billing import license_allocator as alloc
+from apps.organizations.billing.platform_pricing import unit_price_for_tenant
 from apps.organizations.enums import (
     LicenseInvoiceType,
     StudentLicenseStatus,
@@ -32,11 +33,15 @@ def branch(tenant):
     return BranchFactory(tenant=tenant)
 
 
+def _price(tenant):
+    return unit_price_for_tenant(tenant.pk)
+
+
 def _pay(tenant, n, **kw):
     return alloc.record_payment(
         tenant,
         licenses_granted=n,
-        amount_inr=n * 499,
+        amount_inr=n * _price(tenant),
         payment_mode="cash",
         **kw,
     )
@@ -78,7 +83,7 @@ def test_case2_over_limit_students_become_unlicensed(tenant, branch):
     s = _summary(tenant)
     assert s.licenses_consumed == 5
     assert s.unlicensed_active_count == 2
-    assert s.pending_amount_inr == 2 * 499
+    assert s.pending_amount_inr == 2 * _price(tenant)
 
 
 def test_case3_payment_converts_unlicensed_fifo(tenant, branch):
@@ -135,7 +140,7 @@ def test_case6_partial_payment_converts_exactly_n_oldest(tenant, branch):
         [r.pk for r in licensed],
         key=lambda pk: next(x.enrolled_at for x in rows if x.pk == pk),
     )
-    assert _summary(tenant).pending_amount_inr == 3 * 499
+    assert _summary(tenant).pending_amount_inr == 3 * _price(tenant)
 
 
 def test_case7_withdrawn_student_license_stays_consumed(tenant, branch):
@@ -151,7 +156,7 @@ def test_case7_withdrawn_student_license_stays_consumed(tenant, branch):
 
 def test_case7b_withdrawn_unlicensed_student_reduces_pending(tenant, branch):
     row = _enroll(tenant, branch, 1)[0]
-    assert _summary(tenant).pending_amount_inr == 499
+    assert _summary(tenant).pending_amount_inr == _price(tenant)
     alloc.on_student_lifecycle_event(
         row.student_user, "student_withdrawn", detail="left before payment",
     )
@@ -195,7 +200,7 @@ def test_case10_renewal_invoice_uses_total_consumed(tenant, branch):
 
     invoice = alloc.generate_invoice(tenant, invoice_type=LicenseInvoiceType.RENEWAL)
     assert invoice.licenses_count == 3
-    assert invoice.amount_inr == 3 * 499
+    assert invoice.amount_inr == 3 * _price(tenant)
 
 
 def test_idempotency_key_prevents_double_payment(tenant, branch):
@@ -302,7 +307,7 @@ def test_branch_scoped_payment_only_converts_that_branch(tenant):
     ).count() == 4
 
     alloc.record_payment(
-        tenant, licenses_granted=1, amount_inr=499, payment_mode="cash",
+        tenant, licenses_granted=1, amount_inr=_price(tenant), payment_mode="cash",
         branch_id=branch_a.pk,
     )
 
@@ -326,7 +331,7 @@ def test_tenant_wide_payment_ignores_branch(tenant, branch):
         )
         alloc.on_student_enrolled(student)
 
-    alloc.record_payment(tenant, licenses_granted=1, amount_inr=499, payment_mode="cash")
+    alloc.record_payment(tenant, licenses_granted=1, amount_inr=_price(tenant), payment_mode="cash")
 
     licensed = StudentLicense.objects.filter(
         tenant=tenant, license_status=StudentLicenseStatus.LICENSED,
@@ -340,6 +345,6 @@ def test_tenant_wide_payment_ignores_branch(tenant, branch):
 def test_invalid_branch_id_raises(tenant):
     with pytest.raises(ValueError, match="Branch not found"):
         alloc.record_payment(
-            tenant, licenses_granted=1, amount_inr=499, payment_mode="cash",
+            tenant, licenses_granted=1, amount_inr=_price(tenant), payment_mode="cash",
             branch_id="00000000-0000-0000-0000-000000000099",
         )

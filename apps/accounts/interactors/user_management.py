@@ -296,10 +296,13 @@ def create_user(
 
     if role == Role.STUDENT and batch is not None:
         _enroll_new_student(user=user, batch=batch, admin=admin)
-        from apps.organizations.billing.student_subscription import upsert_student_platform_subscription
+        # Licensing is the sole seat/access path (same as admissions enrollment).
+        from apps.organizations.billing.license_allocator import on_student_enrolled
 
-        # Delegates to the license allocator internally (FIFO auto-license).
-        upsert_student_platform_subscription(student_user=user)
+        on_student_enrolled(user, user=admin)
+        from apps.organizations.billing.billing_refresh import refresh_tenant_billing
+
+        refresh_tenant_billing(user.tenant_id, user=admin)
 
     invite = None
     if send_invite:

@@ -24,7 +24,6 @@ from apps.organizations.enums import (
     QuotaPeriod,
     QuotaResource,
     StudentLicenseStatus,
-    StudentPlatformSubscriptionStatus,
     SubscriptionPeriodStatus,
 )
 
@@ -53,7 +52,6 @@ from .platform_ops import (
     PlatformSupportTicketComment,
 )
 from .settings import TenantSettings
-from .student_platform_subscription import StudentPlatformSubscription
 
 __all__ = [
     # Models
@@ -65,7 +63,6 @@ __all__ = [
     "StudentAiCreditBalance",
     "StudentAiCreditTxn",
     "FeatureFlag",
-    "StudentPlatformSubscription",
     "PlatformAuditLog",
     "PlatformSupportSession",
     "PlatformSupportModeLog",
@@ -86,7 +83,6 @@ __all__ = [
     "InstitutionStatus",
     "PlanType",
     "BillingStatus",
-    "StudentPlatformSubscriptionStatus",
     "QuotaResource",
     "QuotaPeriod",
     "SubscriptionPeriodStatus",

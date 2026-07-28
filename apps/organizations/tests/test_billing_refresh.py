@@ -1,6 +1,9 @@
-"""Tests for materialized tenant billing refresh."""
+"""Tests for materialized tenant billing refresh (licenses + payments)."""
+
+import datetime
 
 import pytest
+from django.utils import timezone
 
 from apps.accounts.models.user import Role
 from apps.accounts.tests.factories import UserFactory
@@ -9,11 +12,9 @@ from apps.organizations.billing.billing_refresh import (
     refresh_tenant_billing,
     subscription_collected_trend,
 )
-from apps.organizations.billing.student_subscription import upsert_student_platform_subscription
-from apps.organizations.enums import StudentPlatformSubscriptionStatus
+from apps.organizations.billing.license_allocator import on_student_enrolled, record_payment
 from apps.organizations.models import (
     PlatformPlanDefinition,
-    StudentPlatformSubscription,
     TenantLicensePricing,
     TenantLicenseSummary,
 )
@@ -33,16 +34,23 @@ def _seed_catalog():
     )
 
 
-def test_refresh_tenant_billing_persists_net_and_annual_total():
+def test_refresh_tenant_billing_persists_net_and_annual_from_licenses():
     _seed_catalog()
     tenant = TenantFactory()
     branch = BranchFactory(tenant=tenant)
     PlanSubscriptionFactory(tenant=tenant, plan="standard")
     TenantLicensePricing.objects.create(tenant=tenant, discount_percent=10)
 
+    record_payment(
+        tenant,
+        licenses_granted=3,
+        amount_inr=807,
+        payment_mode="cash",
+        paid_at=timezone.localdate(),
+    )
     for _ in range(3):
         student = UserFactory(tenant=tenant, branch=branch, role=Role.STUDENT)
-        upsert_student_platform_subscription(student_user=student)
+        on_student_enrolled(student)
 
     refresh_tenant_billing(tenant.pk)
 
@@ -50,12 +58,13 @@ def test_refresh_tenant_billing_persists_net_and_annual_total():
     assert pricing.net_unit_price_inr == 269
 
     summary = TenantLicenseSummary.objects.get(tenant=tenant)
+    assert summary.licenses_consumed == 3
     assert summary.active_student_count == 3
     assert summary.annual_subscription_inr == 807
-    assert StudentPlatformSubscription.objects.filter(tenant=tenant, annual_fee_inr=269).count() == 3
+    assert summary.collected_subscription_inr == 807
 
 
-def test_discount_patch_updates_materialized_totals(client):
+def test_discount_patch_updates_materialized_totals():
     from django.urls import reverse
     from rest_framework.test import APIClient
 
@@ -73,8 +82,15 @@ def test_discount_patch_updates_materialized_totals(client):
         custom_login_id=None,
         must_change_password=False,
     )
+    record_payment(
+        tenant,
+        licenses_granted=1,
+        amount_inr=299,
+        payment_mode="cash",
+        paid_at=timezone.localdate(),
+    )
     student = UserFactory(tenant=tenant, branch=branch, role=Role.STUDENT)
-    upsert_student_platform_subscription(student_user=student)
+    on_student_enrolled(student)
 
     api = APIClient()
     api.credentials(HTTP_AUTHORIZATION=f"Bearer {generate_access_token(owner)}")
@@ -93,7 +109,7 @@ def test_discount_patch_updates_materialized_totals(client):
     assert summary.active_student_count == 1
 
 
-def test_billing_dict_branch_parity():
+def test_billing_dict_branch_licensed_counts():
     _seed_catalog()
     tenant = TenantFactory()
     b1 = BranchFactory(tenant=tenant, name="Main")
@@ -101,35 +117,41 @@ def test_billing_dict_branch_parity():
     PlanSubscriptionFactory(tenant=tenant, plan="standard")
     TenantLicensePricing.objects.create(tenant=tenant, discount_percent=0)
 
-    upsert_student_platform_subscription(student_user=UserFactory(tenant=tenant, branch=b1, role=Role.STUDENT))
-    upsert_student_platform_subscription(student_user=UserFactory(tenant=tenant, branch=b2, role=Role.STUDENT))
+    record_payment(
+        tenant,
+        licenses_granted=2,
+        amount_inr=598,
+        payment_mode="cash",
+        paid_at=timezone.localdate(),
+    )
+    on_student_enrolled(UserFactory(tenant=tenant, branch=b1, role=Role.STUDENT))
+    on_student_enrolled(UserFactory(tenant=tenant, branch=b2, role=Role.STUDENT))
     refresh_tenant_billing(tenant.pk)
 
     billing = billing_dict_for_tenant(tenant.pk)
     assert len(billing["branches"]) == 2
     unit_prices = {row["unitPricePerStudentInr"] for row in billing["branches"]}
     assert unit_prices == {299}
+    assert sum(row["licensedCount"] for row in billing["branches"]) == 2
+    assert billing["licensesConsumed"] == 2
+    assert billing["collectedSubscriptionInr"] == 598
 
 
-def test_subscription_collected_trend_groups_by_paid_at_month():
-    import datetime
-
-    from django.utils import timezone
-
+def test_subscription_collected_trend_groups_license_payments():
     _seed_catalog()
     tenant = TenantFactory()
-    branch = BranchFactory(tenant=tenant)
     PlanSubscriptionFactory(tenant=tenant, plan="standard")
 
-    student = UserFactory(tenant=tenant, branch=branch, role=Role.STUDENT)
-    upsert_student_platform_subscription(student_user=student)
-    row = StudentPlatformSubscription.objects.get(student_user=student)
-    row.status = StudentPlatformSubscriptionStatus.PAID
-    row.paid_at = timezone.make_aware(datetime.datetime(2026, 6, 15, 12, 0, 0))
-    row.save(update_fields=["status", "paid_at"])
+    record_payment(
+        tenant,
+        licenses_granted=2,
+        amount_inr=500,
+        payment_mode="cash",
+        paid_at=datetime.date(2026, 6, 15),
+    )
 
     trend = subscription_collected_trend(months=6)
     june = next((p for p in trend if p["month"] == "Jun 2026"), None)
     assert june is not None
-    assert june["collectedInr"] == row.annual_fee_inr
-    assert sum(p["collectedInr"] for p in trend) == row.annual_fee_inr
+    assert june["collectedInr"] == 500
+    assert sum(p["collectedInr"] for p in trend) == 500
