@@ -1,11 +1,10 @@
 """Log instant (sync) CSV exports to ReportExport for export history."""
 
-from django.utils.timezone import now, timedelta
-
 from apps.analytics.enums import ReportStatus
 from apps.analytics.queries import report as report_q
 from apps.core.exports.csv import rows_to_csv_bytes
 from apps.core.exports.registry import get_definition
+from apps.core.exports.retention import export_expires_at
 from apps.integrations.adapters.s3 import get_s3_adapter
 
 
@@ -66,7 +65,7 @@ def log_instant_csv_export(
         "snapshot": {"rows": rows},
         "file_key": key,
         "download_url": url,
-        "expires_at": now() + timedelta(hours=24),
+        "expires_at": export_expires_at(),
     }, user=requested_by)
     export.refresh_from_db()
     return export

@@ -276,10 +276,19 @@ def detention_report(
     )
 
 
-def monthly_report(branch, *, year, month, batch_id=None) -> dict:
+def monthly_report(
+    branch, *, year, month, batch_id=None, academic_year_id=None, include_inactive=False,
+) -> dict:
     """Per-student attendance % for one month (F-110)."""
     date_from, date_to = month_bounds(year, month)
-    report = ranking_report(branch, date_from=date_from, date_to=date_to, batch_id=batch_id)
+    report = ranking_report(
+        branch,
+        date_from=date_from,
+        date_to=date_to,
+        batch_id=batch_id,
+        academic_year_id=academic_year_id,
+        include_inactive=include_inactive,
+    )
     report["year"] = year
     report["month"] = month
     return report

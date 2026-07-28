@@ -8,9 +8,10 @@ from apps.accounts.models.user import Role
 from apps.admissions.queries.enquiry import funnel_counts
 from apps.analytics.enums import ReportType
 from apps.attendance.interactors import report as att_report
-from apps.core.exports.base import AggregationExportDefinition, Column, FilterSpec
+from apps.core.exports.base import ACADEMIC_YEAR_FILTER, BATCH_FILTER, AggregationExportDefinition, Column, FilterSpec
+from apps.core.exports.filters import enquiry_status_filter, leave_status_filter
 from apps.core.exports.registry import register
-from apps.hr.queries.leave import leave_summary
+from apps.core.exports.year import resolve_report_year, year_include_inactive
 
 
 def _parse_date(value, default):
@@ -19,6 +20,11 @@ def _parse_date(value, default):
     if isinstance(value, datetime.date):
         return value
     return datetime.date.fromisoformat(str(value))
+
+
+def _year_scope(params, branch):
+    year = resolve_report_year(params, branch)
+    return year, year_include_inactive(year)
 
 
 class AdmissionFunnelExport(AggregationExportDefinition):
@@ -31,6 +37,7 @@ class AdmissionFunnelExport(AggregationExportDefinition):
     supports_search = True
     estimated_runtime = "instant"
     sync_threshold = 500
+    filters = [ACADEMIC_YEAR_FILTER, enquiry_status_filter()]
 
     def get_columns(self, params: dict) -> list[Column]:
         return [
@@ -42,45 +49,44 @@ class AdmissionFunnelExport(AggregationExportDefinition):
 
     def resolve_rows(self, *, tenant, branch, params: dict) -> list[dict]:
         from apps.admissions.enums import EnquiryStatus
-        f = funnel_counts(branch.pk)
+
+        year = resolve_report_year(params, branch)
+        f = funnel_counts(
+            branch.pk,
+            from_date=year.start_date,
+            to_date=year.end_date,
+            status=params.get("status") or None,
+        )
         by_status = f.get("byStatus", {})
-        
-        # Define typical funnel stages in order
+
         stages = [
             (EnquiryStatus.NEW, "New Enquiries"),
             (EnquiryStatus.CONTACTED, "Contacted"),
-            (EnquiryStatus.TOUR_SCHEDULED, "Tour Scheduled"),
-            (EnquiryStatus.APPLICATION_STARTED, "Application Started"),
-            (EnquiryStatus.APPLICATION_SUBMITTED, "Application Submitted"),
-            (EnquiryStatus.ADMITTED, "Admitted"),
-            (EnquiryStatus.ENROLLED, "Enrolled"),
+            (EnquiryStatus.CONVERTED, "Converted"),
+            (EnquiryStatus.LOST, "Lost"),
         ]
-        
+
         rows = []
         prev_count = 0
-        
+
         for enum_val, label in stages:
             count = by_status.get(enum_val, 0)
-            
-            # Since some stages might be skipped, we calculate conversion 
-            # against the maximum of all previous stages, or just keep it simple:
-            # Drop-offs is difference from previous stage (if prev > count).
+
             if not rows:
                 conversion = 100.0 if count > 0 else 0.0
                 dropoffs = 0
             else:
                 conversion = round((count / prev_count * 100), 2) if prev_count > 0 else 0.0
                 dropoffs = prev_count - count if prev_count > count else 0
-                
+
             rows.append({
                 "stage": label,
                 "students": count,
                 "conversion": conversion,
                 "dropoffs": dropoffs,
             })
-            # Update prev_count to max seen so far to prevent negative dropoffs if a stage is skipped
             prev_count = max(prev_count, count)
-            
+
         return rows
 
 
@@ -93,6 +99,7 @@ class HrLeaveSummaryExport(AggregationExportDefinition):
     supports_preview = True
     estimated_runtime = "instant"
     sync_threshold = 500
+    filters = [ACADEMIC_YEAR_FILTER, leave_status_filter()]
 
     def get_columns(self, params: dict) -> list[Column]:
         return [
@@ -107,20 +114,27 @@ class HrLeaveSummaryExport(AggregationExportDefinition):
     def resolve_rows(self, *, tenant, branch, params: dict) -> list[dict]:
         from apps.hr.models.employee import Employee
         from apps.hr.enums import LeaveStatus
-        
+
+        year = resolve_report_year(params, branch)
+        year_start, year_end = year.start_date, year.end_date
+        status_filter = params.get("status") or LeaveStatus.APPROVED
+
         employees = (
             Employee.objects.filter(branch=branch, is_active=True)
             .select_related("user")
             .prefetch_related("leave_balances", "leave_applications")
         )
-        
+
         rows = []
         for emp in employees:
             used_by_type = {}
             for app in emp.leave_applications.all():
-                if app.status == LeaveStatus.APPROVED and app.is_active:
-                    used_by_type[app.leave_type] = used_by_type.get(app.leave_type, 0) + float(app.days)
-                    
+                if not app.is_active or app.status != status_filter:
+                    continue
+                if app.to_date < year_start or app.from_date > year_end:
+                    continue
+                used_by_type[app.leave_type] = used_by_type.get(app.leave_type, 0) + float(app.days)
+
             for bal in emp.leave_balances.all():
                 leave_type = bal.leave_type
                 used = used_by_type.get(leave_type, 0)
@@ -132,7 +146,7 @@ class HrLeaveSummaryExport(AggregationExportDefinition):
                     "balance": float(bal.balance_days),
                     "used": used,
                 })
-                
+
         return rows
 
 
@@ -146,9 +160,10 @@ class AttendanceMonthlyExport(AggregationExportDefinition):
     estimated_runtime = "instant"
     sync_threshold = 500
     filters = [
-        FilterSpec("year", "Year", type="number", required=True),
-        FilterSpec("month", "Month", type="number", required=True),
-        FilterSpec("batchId", "Batch", type="batch_id"),
+        ACADEMIC_YEAR_FILTER,
+        FilterSpec("year", "Calendar year", type="number", required=True, group="criteria"),
+        FilterSpec("month", "Month", type="number", required=True, group="criteria"),
+        BATCH_FILTER,
     ]
 
     def get_columns(self, params: dict) -> list[Column]:
@@ -169,10 +184,16 @@ class AttendanceMonthlyExport(AggregationExportDefinition):
         ]
 
     def resolve_rows(self, *, tenant, branch, params: dict) -> list[dict]:
+        year_obj, include_inactive = _year_scope(params, branch)
         year = int(params.get("year", timezone.now().year))
         month = int(params.get("month", timezone.now().month))
         rows = att_report.monthly_report(
-            branch, year=year, month=month, batch_id=params.get("batchId"),
+            branch,
+            year=year,
+            month=month,
+            batch_id=params.get("batchId"),
+            academic_year_id=year_obj.pk,
+            include_inactive=include_inactive,
         )["rows"]
         gen_date = timezone.now().date().isoformat()
         for r in rows:
@@ -191,10 +212,11 @@ class AttendanceShortageExport(AggregationExportDefinition):
     estimated_runtime = "instant"
     sync_threshold = 500
     filters = [
-        FilterSpec("threshold", "Threshold %", type="number"),
-        FilterSpec("batchId", "Batch", type="batch_id"),
-        FilterSpec("fromDate", "From Date", type="date"),
-        FilterSpec("toDate", "To Date", type="date"),
+        ACADEMIC_YEAR_FILTER,
+        FilterSpec("threshold", "Threshold %", type="number", group="criteria"),
+        BATCH_FILTER,
+        FilterSpec("fromDate", "From Date", type="date", group="criteria"),
+        FilterSpec("toDate", "To Date", type="date", group="criteria"),
     ]
 
     def get_columns(self, params: dict) -> list[Column]:
@@ -215,6 +237,7 @@ class AttendanceShortageExport(AggregationExportDefinition):
         ]
 
     def resolve_rows(self, *, tenant, branch, params: dict) -> list[dict]:
+        year_obj, include_inactive = _year_scope(params, branch)
         threshold = params.get("threshold")
         rows = att_report.shortage_report(
             branch,
@@ -222,6 +245,8 @@ class AttendanceShortageExport(AggregationExportDefinition):
             batch_id=params.get("batchId"),
             date_from=_parse_date(params.get("fromDate"), None),
             date_to=_parse_date(params.get("toDate"), None),
+            academic_year_id=year_obj.pk,
+            include_inactive=include_inactive,
         )["rows"]
         gen_date = timezone.now().date().isoformat()
         for r in rows:
@@ -240,9 +265,10 @@ class AttendanceRankingExport(AggregationExportDefinition):
     estimated_runtime = "instant"
     sync_threshold = 500
     filters = [
-        FilterSpec("batchId", "Batch", type="batch_id"),
-        FilterSpec("fromDate", "From Date", type="date"),
-        FilterSpec("toDate", "To Date", type="date"),
+        ACADEMIC_YEAR_FILTER,
+        BATCH_FILTER,
+        FilterSpec("fromDate", "From Date", type="date", group="criteria"),
+        FilterSpec("toDate", "To Date", type="date", group="criteria"),
     ]
 
     def get_columns(self, params: dict) -> list[Column]:
@@ -259,14 +285,18 @@ class AttendanceRankingExport(AggregationExportDefinition):
         ]
 
     def resolve_rows(self, *, tenant, branch, params: dict) -> list[dict]:
+        year_obj, include_inactive = _year_scope(params, branch)
         today = timezone.localdate()
         date_from = _parse_date(params.get("fromDate"), today.replace(day=1))
         date_to = _parse_date(params.get("toDate"), today)
         rows = att_report.ranking_report(
-            branch, date_from=date_from, date_to=date_to, batch_id=params.get("batchId"),
+            branch,
+            date_from=date_from,
+            date_to=date_to,
+            batch_id=params.get("batchId"),
+            academic_year_id=year_obj.pk,
+            include_inactive=include_inactive,
         )["rows"]
-        # Ranking rows are already sorted by percent ascending by default, wait we want descending?
-        # Actually ranking is highest attendance first usually, let's sort descending
         rows.sort(key=lambda r: r["percent"], reverse=True)
         for i, r in enumerate(rows):
             r["rank"] = i + 1
@@ -283,9 +313,10 @@ class AttendanceDetentionExport(AggregationExportDefinition):
     estimated_runtime = "instant"
     sync_threshold = 500
     filters = [
-        FilterSpec("batchId", "Batch", type="batch_id"),
-        FilterSpec("fromDate", "From Date", type="date"),
-        FilterSpec("toDate", "To Date", type="date"),
+        ACADEMIC_YEAR_FILTER,
+        BATCH_FILTER,
+        FilterSpec("fromDate", "From Date", type="date", group="criteria"),
+        FilterSpec("toDate", "To Date", type="date", group="criteria"),
     ]
 
     def get_columns(self, params: dict) -> list[Column]:
@@ -306,11 +337,14 @@ class AttendanceDetentionExport(AggregationExportDefinition):
         ]
 
     def resolve_rows(self, *, tenant, branch, params: dict) -> list[dict]:
+        year_obj, include_inactive = _year_scope(params, branch)
         rows = att_report.detention_report(
             branch,
             batch_id=params.get("batchId"),
             date_from=_parse_date(params.get("fromDate"), None),
             date_to=_parse_date(params.get("toDate"), None),
+            academic_year_id=year_obj.pk,
+            include_inactive=include_inactive,
         )["rows"]
         gen_date = timezone.now().date().isoformat()
         for r in rows:

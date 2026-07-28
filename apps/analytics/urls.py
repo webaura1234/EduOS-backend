@@ -17,6 +17,7 @@ from apps.analytics.views.report import (
     ReportDownloadView,
     ReportExportsView,
     ReportPreviewView,
+    ReportRetryView,
     SavedReportFilterDetailView,
     SavedReportFiltersView,
 )
@@ -52,4 +53,5 @@ urlpatterns = [
     path("reports/naac/", NaacExportView.as_view(), name="report-naac"),
     path("reports/<uuid:export_id>/", ReportDetailView.as_view(), name="report-detail"),
     path("reports/<uuid:export_id>/download/", ReportDownloadView.as_view(), name="report-download"),
+    path("reports/<uuid:export_id>/retry/", ReportRetryView.as_view(), name="report-retry"),
 ]

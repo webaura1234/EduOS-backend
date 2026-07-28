@@ -14,10 +14,18 @@ from apps.organizations.queries.branch import get_branch
 def resolve_branch(request, branch_id=None):
     """Return a Branch the caller is allowed to act on, or raise.
 
-    Resolution order: explicit branch_id → the user's own branch.
+    Resolution order: explicit branch_id → body branchId → query ?branch= → user's own branch.
     The branch must belong to the caller's tenant.
     """
-    bid = branch_id or request.query_params.get("branch") or getattr(request.user, "branch_id", None)
+    body_branch = None
+    if hasattr(request, "data") and isinstance(getattr(request, "data", None), dict):
+        body_branch = request.data.get("branchId") or request.data.get("branch")
+    bid = (
+        branch_id
+        or body_branch
+        or request.query_params.get("branch")
+        or getattr(request.user, "branch_id", None)
+    )
     if bid in ("", "all"):
         bid = getattr(request.user, "branch_id", None)
     if not bid:

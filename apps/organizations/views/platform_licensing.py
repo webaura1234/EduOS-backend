@@ -144,6 +144,22 @@ class PlatformLicensingPaymentsView(APIView):
         if payment_mode not in LicensePaymentMode.values:
             return Response({"error": "Invalid paymentMode."}, status=http.HTTP_400_BAD_REQUEST)
 
+        reference_number = str(data.get("referenceNumber") or "")
+        if len(reference_number) > 100:
+            return Response(
+                {"error": "referenceNumber must be at most 100 characters."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+
+        idempotency_key = data.get("idempotencyKey") or None
+        if idempotency_key is not None:
+            idempotency_key = str(idempotency_key).strip() or None
+        if idempotency_key and len(idempotency_key) > 255:
+            return Response(
+                {"error": "idempotencyKey must be at most 255 characters."},
+                status=http.HTTP_400_BAD_REQUEST,
+            )
+
         invoice = None
         if data.get("invoiceId"):
             invoice = LicenseInvoice.objects.filter(pk=data["invoiceId"], tenant=tenant).first()
@@ -154,10 +170,10 @@ class PlatformLicensingPaymentsView(APIView):
                 licenses_granted=licenses_granted,
                 amount_inr=amount_inr,
                 payment_mode=payment_mode,
-                reference_number=str(data.get("referenceNumber") or ""),
+                reference_number=reference_number,
                 paid_at=_parse_date(data.get("paidAt")),
                 notes=str(data.get("notes") or ""),
-                idempotency_key=data.get("idempotencyKey") or None,
+                idempotency_key=idempotency_key,
                 invoice=invoice,
                 branch_id=data.get("branchId") or None,
                 user=request.user,

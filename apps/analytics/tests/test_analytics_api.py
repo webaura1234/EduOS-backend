@@ -78,8 +78,68 @@ def test_admin_dashboard_shape(env):
     assert resp.status_code == 200
     body = _data(resp)
     assert "fees" in body and "alerts" in body and "admissionsFunnel" in body
+    assert "collectedTodayPaise" in body["fees"]
     assert resp["X-Cache-Age"] == "0"
     assert "lastUpdated" in body
+
+
+def test_admin_dashboard_fee_collected_today_excludes_older_payments(env):
+    """KPI today total comes from CAPTURED payments on today's UTC day, not all-time invoice paid."""
+    import datetime
+
+    from django.utils import timezone
+
+    from apps.academics.tests.factories import AcademicYearFactory, BatchFactory
+    from apps.accounts.models.profile import StudentProfile
+    from apps.admissions.tests.factories import StudentEnrollmentFactory
+    from apps.fees.enums import PaymentStatus
+    from apps.fees.tests.factories import FeeInvoiceFactory, PaymentFactory
+
+    branch = env["branch"]
+    year = AcademicYearFactory(branch=branch, is_current=True)
+    batch = BatchFactory(course__department__branch=branch, academic_year=year)
+    student = UserFactory(
+        role=Role.STUDENT,
+        tenant=env["tenant"],
+        branch=branch,
+        custom_login_id="STU-FEE-TODAY",
+        must_change_password=False,
+    )
+    profile = StudentProfile.objects.create(user=student, current_batch=batch)
+    enrollment = StudentEnrollmentFactory(student_profile=profile, branch=branch, batch=batch)
+
+    invoice = FeeInvoiceFactory(
+        branch=branch,
+        student=enrollment,
+        total_paise=2_000_000,
+        paid_paise=2_000_000,
+    )
+    now = timezone.now()
+    PaymentFactory(
+        invoice=invoice,
+        amount_paise=500_000,
+        status=PaymentStatus.CAPTURED,
+        captured_at=now,
+        idempotency_key="dash-today-pay",
+    )
+    PaymentFactory(
+        invoice=invoice,
+        amount_paise=1_500_000,
+        status=PaymentStatus.CAPTURED,
+        captured_at=now - datetime.timedelta(days=5),
+        idempotency_key="dash-old-pay",
+    )
+
+    # Bust short-lived dashboard cache if a prior request warmed it.
+    from django.core.cache import cache
+
+    cache.delete(f"dashboard:admin:{branch.pk}")
+
+    resp = _client(env["admin"]).get(reverse("analytics:dashboard-admin"))
+    assert resp.status_code == 200
+    fees = _data(resp)["fees"]
+    assert fees["collectedTodayPaise"] == 500_000
+    assert fees["totalCollectedPaise"] == 2_000_000
 
 
 def test_super_admin_dashboard_rolls_up(env):

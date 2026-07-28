@@ -51,16 +51,25 @@ def update_enquiry(enquiry: Enquiry, fields: dict, user=None) -> Enquiry:
     return enquiry
 
 
-def funnel_counts(branch_id) -> dict:
-    """Conversion funnel counts by enquiry source + status (F-078)."""
+def funnel_counts(branch_id, *, from_date=None, to_date=None, status=None) -> dict:
+    """Conversion funnel counts by enquiry source + status (F-078).
+
+    Optional ``from_date`` / ``to_date`` scope by ``Enquiry.created_at`` (date).
+    Optional ``status`` restricts to a single enquiry status before aggregating.
+    """
+    qs = Enquiry.objects.filter(branch_id=branch_id, is_active=True)
+    if from_date is not None:
+        qs = qs.filter(created_at__date__gte=from_date)
+    if to_date is not None:
+        qs = qs.filter(created_at__date__lte=to_date)
+    if status:
+        qs = qs.filter(status=status)
     by_source = {
         r["source"]: r["n"]
-        for r in Enquiry.objects.filter(branch_id=branch_id, is_active=True)
-        .values("source").annotate(n=Count("id"))
+        for r in qs.values("source").annotate(n=Count("id"))
     }
     by_status = {
         r["status"]: r["n"]
-        for r in Enquiry.objects.filter(branch_id=branch_id, is_active=True)
-        .values("status").annotate(n=Count("id"))
+        for r in qs.values("status").annotate(n=Count("id"))
     }
     return {"bySource": by_source, "byStatus": by_status}

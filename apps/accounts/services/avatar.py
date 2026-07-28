@@ -7,7 +7,10 @@ MAX_AVATAR_BYTES = 5 * 1024 * 1024
 
 
 def avatar_object_key(*, tenant_id, user_id) -> str:
-    return f"tenants/{tenant_id}/users/{user_id}/avatar.webp"
+    """Object key for a user's avatar. Tenant users and platform owners use different prefixes."""
+    if tenant_id:
+        return f"tenants/{tenant_id}/users/{user_id}/avatar.webp"
+    return f"platform/users/{user_id}/avatar.webp"
 
 
 def avatar_url_for_key(key: str | None) -> str | None:

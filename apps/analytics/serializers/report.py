@@ -25,11 +25,13 @@ class ReportExportSerializer(serializers.Serializer):
 class CreateReportSerializer(serializers.Serializer):
     reportType = serializers.ChoiceField(choices=ReportType.values)
     params = serializers.JSONField(required=False, default=dict)
+    branchId = serializers.UUIDField(required=False, allow_null=True)
 
 
 class PreviewReportSerializer(serializers.Serializer):
     reportType = serializers.ChoiceField(choices=ReportType.values)
     params = serializers.JSONField(required=False, default=dict)
+    branchId = serializers.UUIDField(required=False, allow_null=True)
     page = serializers.IntegerField(required=False, default=1, min_value=1)
     pageSize = serializers.IntegerField(required=False, default=50, min_value=1, max_value=200)
     search = serializers.CharField(required=False, default="", allow_blank=True)

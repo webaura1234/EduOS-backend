@@ -9,7 +9,8 @@ class RefundSerializer(serializers.ModelSerializer):
     payment = serializers.UUIDField(source="payment_id")
     amountPaise = serializers.IntegerField(source="amount_paise")
     razorpayRefundId = serializers.CharField(source="razorpay_refund_id", read_only=True)
-    idempotencyKey = serializers.CharField(source="idempotency_key")
+    # Generated server-side by RequestRefundInteractor — clients must not send this.
+    idempotencyKey = serializers.CharField(source="idempotency_key", read_only=True)
     createdAt = serializers.DateTimeField(source="created_at", read_only=True)
 
     class Meta:
@@ -24,4 +25,4 @@ class RefundSerializer(serializers.ModelSerializer):
             "idempotencyKey",
             "createdAt",
         ]
-        read_only_fields = ["id", "status", "razorpayRefundId", "createdAt"]
+        read_only_fields = ["id", "status", "razorpayRefundId", "idempotencyKey", "createdAt"]

@@ -224,6 +224,11 @@ CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:3000").split(",")
 
 # ──────────────────────────────────────────────
+# Report exports
+# ──────────────────────────────────────────────
+REPORT_EXPORT_RETENTION_DAYS = int(os.environ.get("REPORT_EXPORT_RETENTION_DAYS", "90"))
+
+# ──────────────────────────────────────────────
 # Celery
 # ──────────────────────────────────────────────
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")

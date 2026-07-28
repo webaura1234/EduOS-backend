@@ -11,9 +11,10 @@ from rest_framework.test import APIClient
 from apps.accounts.models.user import Role
 from apps.accounts.tests.factories import UserFactory
 from apps.accounts.tokens import generate_access_token
-from apps.fees.enums import PaymentMethod, PaymentStatus
+from apps.fees.enums import PaymentMethod, PaymentStatus, RefundStatus
 from apps.fees.models import FeeInvoice, FeeStructure, Payment, ConcessionRule, ConcessionRequest, Refund, CreditNote
 from apps.fees.interactors import generate_invoices_for_batch
+from apps.fees.interactors.payment import RecordOfflinePaymentInteractor
 from apps.organizations.tests.factories import BranchFactory, TenantFactory
 
 pytestmark = pytest.mark.django_db
@@ -187,3 +188,43 @@ def test_razorpay_webhook_api(student_profile, branch, academic_year, batch):
     assert resp.status_code == 200
     payment.refresh_from_db()
     assert payment.status == "captured"
+
+
+def test_request_refund_api_without_client_idempotency_key(
+    admin_client, branch, academic_year, batch, student_profile, admin,
+):
+    """FE posts payment + amountPaise + reason; server generates idempotency key."""
+    fs = FeeStructure.objects.create(
+        branch=branch,
+        academic_year=academic_year,
+        components=[{
+            "kind": "tuition", "label": "Tuition", "amount_paise": 5000,
+            "installment_no": 1, "due_date": "2024-07-10",
+        }],
+    )
+    invoice = generate_invoices_for_batch(
+        branch=branch, batch_id=batch.id, academic_year=academic_year, fee_structure=fs,
+    )[0]
+    payment = RecordOfflinePaymentInteractor(
+        invoice_id=invoice.id,
+        amount_paise=5000,
+        method=PaymentMethod.CASH,
+        payer_user=student_profile.user,
+        user=admin,
+    ).execute()
+
+    resp = admin_client.post(
+        reverse("fees:refunds-list"),
+        {
+            "payment": str(payment.id),
+            "amountPaise": 2000,
+            "reason": "Overcharge",
+        },
+        format="json",
+    )
+    assert resp.status_code == status.HTTP_201_CREATED, resp.content
+    body = _data(resp)
+    assert body["status"] == RefundStatus.REQUESTED
+    assert body["amountPaise"] == 2000
+    assert body["idempotencyKey"]
+    assert Refund.objects.filter(payment=payment).count() == 1

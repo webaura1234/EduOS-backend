@@ -679,13 +679,14 @@ class RefundViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         try:
-            interactor = RequestRefundInteractor(
+            refund = RequestRefundInteractor(
                 payment_id=serializer.validated_data["payment_id"],
                 amount_paise=serializer.validated_data["amount_paise"],
-                reason=serializer.initial_data.get("reason", ""),
+                reason=serializer.validated_data.get("reason")
+                or serializer.initial_data.get("reason", ""),
                 user=self.request.user,
-            )
-            interactor.execute()
+            ).execute()
+            serializer.instance = refund
         except DjangoValidationError as exc:
             raise ValidationError(exc.messages)
 

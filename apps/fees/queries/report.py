@@ -26,27 +26,34 @@ def total_concessions(branch_id) -> int:
     ).aggregate(t=Sum("amount_paise")).get("t") or 0
 
 
-def collection_by_batch(branch_id) -> list[dict]:
+def collection_by_batch(branch_id, *, academic_year_id=None, batch_id=None) -> list[dict]:
     """Per-batch fee collection summary for export."""
     from django.db.models import Count
     from apps.admissions.models import StudentEnrollment
 
     rows = []
+    enrollments = StudentEnrollment.objects.filter(branch_id=branch_id, is_active=True)
+    if academic_year_id:
+        enrollments = enrollments.filter(academic_year_id=academic_year_id)
+    if batch_id:
+        enrollments = enrollments.filter(batch_id=batch_id)
     batches = (
-        StudentEnrollment.objects.filter(branch_id=branch_id, is_active=True)
+        enrollments
         .values("batch_id", "batch__name")
         .annotate(student_count=Count("id"))
         .order_by("batch__name")
     )
     for b in batches:
-        batch_id = b["batch_id"]
-        if not batch_id:
+        bid = b["batch_id"]
+        if not bid:
             continue
         inv_qs = FeeInvoice.objects.filter(
             branch_id=branch_id,
-            student__batch_id=batch_id,
+            student__batch_id=bid,
             is_active=True,
         )
+        if academic_year_id:
+            inv_qs = inv_qs.filter(student__academic_year_id=academic_year_id)
         agg = inv_qs.aggregate(
             total_invoiced=Sum("total_paise"),
             total_collected=Sum("paid_paise"),
@@ -55,7 +62,7 @@ def collection_by_batch(branch_id) -> list[dict]:
         invoiced = agg.get("total_invoiced") or 0
         collected = agg.get("total_collected") or 0
         rows.append({
-            "batchId": str(batch_id),
+            "batchId": str(bid),
             "batchName": b["batch__name"] or "",
             "studentCount": b["student_count"],
             "invoiceCount": agg.get("invoice_count") or 0,

@@ -2,8 +2,11 @@
 
 import csv
 import io
+import logging
 
 from apps.core.exports.base import Column
+
+logger = logging.getLogger(__name__)
 
 
 def rows_to_csv_bytes(rows: list[dict], columns: list[Column] | None = None) -> bytes:
@@ -14,6 +17,11 @@ def rows_to_csv_bytes(rows: list[dict], columns: list[Column] | None = None) -> 
             csv.writer(buf).writerow([c.label for c in columns])
             return buf.getvalue().encode("utf-8-sig")
         return b""
+
+    if columns is None:
+        logger.warning(
+            "rows_to_csv_bytes called without columns; falling back to raw dict keys"
+        )
 
     if columns:
         fieldnames = [c.key for c in columns]

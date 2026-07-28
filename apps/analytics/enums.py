@@ -9,6 +9,7 @@ class ReportStatus(models.TextChoices):
     READY = "ready", "Ready"
     FAILED = "failed", "Failed"
     TIMED_OUT = "timed_out", "Timed Out"
+    EXPIRED = "expired", "Expired"
 
 
 class ReportType(models.TextChoices):

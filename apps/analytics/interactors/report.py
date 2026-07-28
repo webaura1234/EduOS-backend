@@ -4,14 +4,13 @@ Small reports resolve inline (frozen snapshot, F-064); large ones dispatch a Cel
 that serializes to CSV and uploads to S3 (OD-2).
 """
 
-from django.utils import timezone
-
-from apps.accounts.models.user import Role
 from apps.analytics.enums import ReportStatus, ReportType
 from apps.analytics.queries import report as report_q
 from apps.core.exports.registry import get_definition
+from apps.core.exports.retention import export_expires_at
 
 DEFAULT_THRESHOLD = 500
+_RETRYABLE = {ReportStatus.FAILED, ReportStatus.TIMED_OUT, ReportStatus.EXPIRED}
 
 
 def _branch_summary_rows(tenant) -> list[dict]:
@@ -52,7 +51,7 @@ def generate_report(*, tenant, branch, report_type, params=None, requester=None,
             "snapshot": {"rows": rows},
             "row_count": len(rows),
             "status": ReportStatus.READY,
-            "expires_at": timezone.now() + timezone.timedelta(hours=24),
+            "expires_at": export_expires_at(),
             "module": "organizations",
             "title": "Branch Summary",
         }, user=requester)
@@ -69,6 +68,31 @@ def generate_report(*, tenant, branch, report_type, params=None, requester=None,
         )
 
     raise ValueError(f"No export definition registered for report_type={report_type!r}")
+
+
+def retry_export(*, export, requester):
+    """Re-dispatch a FAILED / TIMED_OUT / EXPIRED export with the same params."""
+    if export.status not in _RETRYABLE:
+        raise ValueError("Only failed, timed-out, or expired exports can be retried.")
+
+    snapshot = dict(export.snapshot or {})
+    snapshot.pop("rows", None)
+
+    report_q.update_export(export, {
+        "status": ReportStatus.QUEUED,
+        "error": "",
+        "file_key": "",
+        "download_url": "",
+        "expires_at": None,
+        "snapshot": snapshot,
+        "celery_task_id": "",
+        "row_count": 0,
+    }, user=requester)
+
+    from apps.analytics.tasks import generate_export_task
+    generate_export_task.delay(str(export.pk))
+    export.refresh_from_db()
+    return export
 
 
 def naac_export(*, tenant, branch) -> dict:

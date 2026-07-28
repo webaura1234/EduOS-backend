@@ -177,6 +177,36 @@ def test_avatar_presign_confirm_delete(school_env):
     assert user.avatar_s3_key == ""
 
 
+def test_platform_owner_avatar_upload_and_delete():
+    owner = UserFactory(
+        role=Role.PLATFORM_OWNER,
+        tenant=None,
+        branch=None,
+        custom_login_id=None,
+        must_change_password=False,
+    )
+    client = _client(owner)
+
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    upload = SimpleUploadedFile("avatar.png", b"\x89PNG\r\n\x1a\n" + b"x" * 64, content_type="image/png")
+    resp = client.post(reverse("accounts:avatar-upload"), {"file": upload}, format="multipart")
+    assert resp.status_code == 200
+    body = _data(resp)
+    assert body["key"] == f"platform/users/{owner.pk}/avatar.webp"
+    assert body["avatarUrl"]
+
+    owner.refresh_from_db()
+    assert owner.avatar_s3_key == body["key"]
+
+    me = _data(client.get(reverse("accounts:me")))
+    assert me["avatarUrl"]
+
+    client.delete(reverse("accounts:avatar-delete"))
+    owner.refresh_from_db()
+    assert owner.avatar_s3_key == ""
+
+
 def test_attendance_absent_notifies_student_and_parent(school_env):
     student = school_env["student"]
     parent = school_env["parent"]

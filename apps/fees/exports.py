@@ -2,8 +2,17 @@
 
 from apps.accounts.models.user import Role
 from apps.analytics.enums import ReportType
-from apps.core.exports.base import AggregationExportDefinition, Column, ExportDefinition, FilterSpec
+from apps.core.exports.base import (
+    ACADEMIC_YEAR_FILTER,
+    BATCH_FILTER,
+    AggregationExportDefinition,
+    Column,
+    ExportDefinition,
+    FilterSpec,
+)
+from apps.core.exports.filters import invoice_status_filter
 from apps.core.exports.registry import register
+from apps.core.exports.year import resolve_report_year
 
 
 class FeeLedgerExport(ExportDefinition):
@@ -20,16 +29,26 @@ class FeeLedgerExport(ExportDefinition):
     supports_search = True
     estimated_runtime = "background"
     filters = [
+        ACADEMIC_YEAR_FILTER,
+        BATCH_FILTER,
         FilterSpec("fromDate", "From Date", type="date"),
         FilterSpec("toDate", "To Date", type="date"),
-        FilterSpec("status", "Status", type="text"),
+        invoice_status_filter(),
     ]
 
     def get_queryset(self, *, tenant_id, branch_id, params: dict):
         from apps.fees.models import FeeInvoice
-        qs = FeeInvoice.objects.filter(branch__tenant_id=tenant_id, is_active=True)
+        from apps.organizations.models import Branch
+
+        qs = FeeInvoice.objects.filter(branch__tenant_id=tenant_id)
         if branch_id:
             qs = qs.filter(branch_id=branch_id)
+            branch = Branch.objects.filter(pk=branch_id).first()
+            if branch is not None:
+                year = resolve_report_year(params, branch)
+                qs = qs.filter(student__academic_year_id=year.pk)
+        if params.get("batchId"):
+            qs = qs.filter(student__batch_id=params["batchId"])
         if params.get("fromDate"):
             qs = qs.filter(created_at__date__gte=params["fromDate"])
         if params.get("toDate"):
@@ -98,10 +117,9 @@ class FeeLedgerExport(ExportDefinition):
         balance_paise = invoice.balance_paise
         if invoice.carry_forward_state == "carried_forward":
             balance_paise = 0
-        
-        # Use existing 'invoice_number' if it exists on the model, otherwise truncate ID
-        invoice_num = getattr(invoice, 'invoice_number', getattr(invoice, 'number', str(invoice.pk)[:8].upper()))
-        
+
+        invoice_num = getattr(invoice, "invoice_number", getattr(invoice, "number", str(invoice.pk)[:8].upper()))
+
         return {
             "invoice_number": invoice_num,
             "admission_no": admission_no,
@@ -121,8 +139,8 @@ class FeeLedgerExport(ExportDefinition):
         }
 
     def get_filename(self, params: dict) -> str:
-        suffix = params.get("fromDate", "all")
-        return f"fee-ledger-{suffix}"
+        suffix = params.get("fromDate") or "all"
+        return f"fee-ledger_{suffix}"
 
 
 class FeeDefaultersExport(ExportDefinition):
@@ -137,11 +155,13 @@ class FeeDefaultersExport(ExportDefinition):
     sync_threshold = 500
     supports_preview = True
     estimated_runtime = "instant"
+    filters = [ACADEMIC_YEAR_FILTER, BATCH_FILTER]
 
     def get_queryset(self, *, tenant_id, branch_id, params: dict):
         from django.utils import timezone
         from apps.fees.enums import CarryForwardState, InvoiceStatus
         from apps.fees.models import FeeInvoice
+        from apps.organizations.models import Branch
 
         today = timezone.localdate()
         qs = FeeInvoice.objects.filter(
@@ -153,6 +173,12 @@ class FeeDefaultersExport(ExportDefinition):
         )
         if branch_id:
             qs = qs.filter(branch_id=branch_id)
+            branch = Branch.objects.filter(pk=branch_id).first()
+            if branch is not None:
+                year = resolve_report_year(params, branch)
+                qs = qs.filter(student__academic_year_id=year.pk)
+        if params.get("batchId"):
+            qs = qs.filter(student__batch_id=params["batchId"])
         return qs.select_related(
             "student__student_profile__user", "student__batch", "student__batch__course", "branch", "assignment__fee_structure"
         ).prefetch_related(
@@ -182,7 +208,7 @@ class FeeDefaultersExport(ExportDefinition):
         section_name = ""
         parent_name = ""
         phone_number = ""
-        
+
         try:
             student_user = invoice.student.student_profile.user
             student_name = student_user.full_name
@@ -190,8 +216,7 @@ class FeeDefaultersExport(ExportDefinition):
             if invoice.student.batch_id:
                 section_name = invoice.student.batch.name
                 class_name = invoice.student.batch.course.name if invoice.student.batch.course_id else ""
-            
-            # Guardian info
+
             phone_number = invoice.student.student_profile.guardian_phone or ""
             guardian_links = list(student_user.guardian_links.all())
             if guardian_links:
@@ -199,17 +224,17 @@ class FeeDefaultersExport(ExportDefinition):
                 parent_name = primary.guardian.full_name
         except Exception:  # noqa: BLE001
             pass
-            
+
         from django.utils import timezone
         today = timezone.localdate()
         days_overdue = (today - invoice.due_date).days if invoice.due_date else 0
-        
+
         priority = "Low"
         if days_overdue > 30:
             priority = "High"
         elif days_overdue > 14:
             priority = "Medium"
-            
+
         return {
             "admission_no": admission_no,
             "student_name": student_name,
@@ -218,7 +243,7 @@ class FeeDefaultersExport(ExportDefinition):
             "class_name": class_name,
             "section_name": section_name,
             "balance": round(invoice.balance_paise / 100, 2),
-            "last_payment": "-",  # Simplified; would require payment logs prefetch
+            "last_payment": "-",
             "due_date": invoice.due_date.isoformat() if invoice.due_date else "",
             "days_overdue": max(0, days_overdue),
             "priority": priority,
@@ -310,6 +335,7 @@ class FeeCollectionExport(AggregationExportDefinition):
     sync_threshold = 500
     supports_preview = True
     estimated_runtime = "instant"
+    filters = [ACADEMIC_YEAR_FILTER, BATCH_FILTER]
 
     def get_columns(self, params: dict) -> list[Column]:
         return [
@@ -324,10 +350,16 @@ class FeeCollectionExport(AggregationExportDefinition):
 
     def resolve_rows(self, *, tenant, branch, params: dict) -> list[dict]:
         from apps.fees.queries import report as report_q
-        rows = report_q.collection_by_batch(branch.pk)
+
+        year = resolve_report_year(params, branch)
+        rows = report_q.collection_by_batch(
+            branch.pk,
+            academic_year_id=year.pk,
+            batch_id=params.get("batchId"),
+        )
         for r in rows:
             r["branch"] = branch.name
-            r["concessions"] = "-"  # Requires complex aggregation across discount lines
+            r["concessions"] = "-"
             invoiced = r.get("totalInvoiced", 0)
             collected = r.get("totalCollected", 0)
             r["collectionPercent"] = round((collected / invoiced * 100), 2) if invoiced > 0 else 0

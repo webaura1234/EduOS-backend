@@ -13,10 +13,8 @@ from apps.accounts.services.avatar import (
 from apps.integrations.adapters.s3 import get_s3_adapter
 
 
-def _tenant_required(user):
-    if not user.tenant_id:
-        return Response({"error": "Tenant context required."}, status=http.HTTP_400_BAD_REQUEST)
-    return None
+def _avatar_key_for_user(user) -> str:
+    return avatar_object_key(tenant_id=user.tenant_id, user_id=user.pk)
 
 
 class AvatarPresignView(APIView):
@@ -29,11 +27,8 @@ class AvatarPresignView(APIView):
         err = validate_avatar_upload(content_type=content_type, file_size=file_size)
         if err:
             return Response({"error": err}, status=http.HTTP_400_BAD_REQUEST)
-        denied = _tenant_required(user)
-        if denied:
-            return denied
 
-        key = avatar_object_key(tenant_id=user.tenant_id, user_id=user.pk)
+        key = _avatar_key_for_user(user)
         try:
             upload_url = get_s3_adapter().presigned_upload_url(key=key, content_type=content_type)
         except Exception:
@@ -60,9 +55,6 @@ class AvatarUploadView(APIView):
 
     def post(self, request) -> Response:
         user = request.user
-        denied = _tenant_required(user)
-        if denied:
-            return denied
 
         upload = request.FILES.get("file")
         if upload is None:
@@ -74,7 +66,7 @@ class AvatarUploadView(APIView):
         if err:
             return Response({"error": err}, status=http.HTTP_400_BAD_REQUEST)
 
-        key = avatar_object_key(tenant_id=user.tenant_id, user_id=user.pk)
+        key = _avatar_key_for_user(user)
         get_s3_adapter().upload(key=key, content=content, content_type=content_type)
         user.avatar_s3_key = key
         user.save(update_fields=["avatar_s3_key"])
@@ -96,7 +88,7 @@ class AvatarConfirmView(APIView):
     def post(self, request) -> Response:
         user = request.user
         key = (request.data.get("key") or "").strip()
-        expected = avatar_object_key(tenant_id=user.tenant_id, user_id=user.pk) if user.tenant_id else ""
+        expected = _avatar_key_for_user(user)
         if not key or key != expected:
             return Response({"error": "Invalid avatar key."}, status=http.HTTP_400_BAD_REQUEST)
 

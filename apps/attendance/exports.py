@@ -24,8 +24,8 @@ class FacultySubjectAttendanceExport(ExportDefinition):
     sync_threshold = 500
     estimated_runtime = "instant"
     filters = [
-        FilterSpec("fromDate", "From Date", type="date"),
-        FilterSpec("toDate", "To Date", type="date"),
+        FilterSpec("fromDate", "From Date", type="date", group="criteria"),
+        FilterSpec("toDate", "To Date", type="date", group="criteria"),
     ]
 
     def get_queryset(self, *, tenant_id, branch_id, params: dict):
@@ -93,8 +93,8 @@ class StudentAttendanceExport(ExportDefinition):
     sync_threshold = 2000
     estimated_runtime = "instant"
     filters = [
-        FilterSpec("fromDate", "From Date", type="date"),
-        FilterSpec("toDate", "To Date", type="date"),
+        FilterSpec("fromDate", "From Date", type="date", group="criteria"),
+        FilterSpec("toDate", "To Date", type="date", group="criteria"),
     ]
 
     def get_queryset(self, *, tenant_id, branch_id, params: dict):

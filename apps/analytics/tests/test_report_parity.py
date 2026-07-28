@@ -1,5 +1,7 @@
 """Golden parity tests — verify report output shape before/after framework migration."""
 
+import datetime
+
 import pytest
 from django.urls import reverse
 from rest_framework.test import APIClient
@@ -7,6 +9,7 @@ from rest_framework.test import APIClient
 from apps.accounts.models.user import Role
 from apps.accounts.tests.factories import UserFactory
 from apps.accounts.tokens import generate_access_token
+from apps.academics.tests.factories import AcademicYearFactory, BatchFactory
 from apps.admissions.queries.enquiry import create_enquiry
 from apps.analytics.enums import ReportStatus, ReportType
 from apps.analytics.interactors import report as report_i
@@ -20,11 +23,12 @@ pytestmark = pytest.mark.django_db
 def env():
     tenant = TenantFactory(institution_type="school")
     branch = BranchFactory(tenant=tenant)
+    year = AcademicYearFactory(branch=branch, is_current=True)
     admin = UserFactory(
         role=Role.ADMIN, tenant=tenant, branch=branch, phone="+919830000001",
         custom_login_id=None, must_change_password=False,
     )
-    return dict(tenant=tenant, branch=branch, admin=admin)
+    return dict(tenant=tenant, branch=branch, admin=admin, year=year)
 
 
 def _column_keys(report_type: str) -> list[str]:
@@ -40,20 +44,20 @@ def test_admission_funnel_columns_and_rows(env):
     assert export.status == ReportStatus.READY
     rows = export.snapshot["rows"]
     assert rows
-    assert _column_keys(ReportType.ADMISSION_FUNNEL) == ["dimension", "k", "n"]
-    assert "dimension" in rows[0] and "n" in rows[0]
+    assert _column_keys(ReportType.ADMISSION_FUNNEL) == [
+        "stage", "students", "conversion", "dropoffs",
+    ]
+    assert "stage" in rows[0] and "students" in rows[0]
 
 
 def test_fee_defaulters_registered_definition(env):
-    import datetime
     from apps.accounts.models.profile import AcademicStatus, StudentProfile
     from apps.admissions.models import StudentEnrollment
-    from apps.academics.tests.factories import AcademicYearFactory, BatchFactory
     from apps.fees.enums import InvoiceStatus
     from apps.fees.models import FeeInvoice
 
     branch = env["branch"]
-    year = AcademicYearFactory(branch=branch, is_current=True)
+    year = env["year"]
     batch = BatchFactory(course__department__branch=branch, academic_year=year)
     student = UserFactory(
         role=Role.STUDENT, tenant=env["tenant"], branch=branch,
@@ -78,8 +82,9 @@ def test_fee_defaulters_registered_definition(env):
     assert export.row_count == 1
     keys = _column_keys(ReportType.FEE_DEFAULTERS)
     assert keys == [
-        "invoice_id", "student_name", "branch", "structure_name",
-        "structure_version", "due_date", "balance",
+        "admission_no", "student_name", "parent_name", "phone_number",
+        "class_name", "section_name", "balance", "last_payment",
+        "due_date", "days_overdue", "priority", "status",
     ]
 
 
@@ -90,7 +95,7 @@ def test_hr_leave_summary_columns(env):
     )
     assert export.status == ReportStatus.READY
     assert _column_keys(ReportType.HR_LEAVE_SUMMARY) == [
-        "leave_type", "status", "n", "days",
+        "employeeCode", "name", "designation", "leave_type", "balance", "used",
     ]
 
 
@@ -123,3 +128,4 @@ def test_catalog_lists_registered_reports(env):
     assert ReportType.ADMISSION_FUNNEL in ids
     assert ReportType.ATTENDANCE_DETENTION in ids
     assert ReportType.FEE_COLLECTION in ids
+    assert "academicYears" in body

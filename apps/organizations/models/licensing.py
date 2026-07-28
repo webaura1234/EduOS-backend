@@ -179,7 +179,7 @@ class LicensePayment(BaseModel):
         related_name="+",
     )
     notes = models.TextField(blank=True, default="")
-    idempotency_key = models.CharField(max_length=100, unique=True, null=True, blank=True)
+    idempotency_key = models.CharField(max_length=255, unique=True, null=True, blank=True)
 
     class Meta:
         db_table = "organizations_license_payment"

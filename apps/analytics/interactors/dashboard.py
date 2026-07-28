@@ -23,6 +23,7 @@ from apps.attendance.interactors import report as att_report
 from apps.attendance.queries import roster as roster_q
 from apps.fees.interactors.report import GetCollectionDashboardInteractor
 from apps.fees.queries.defaulter import list_defaulters
+from apps.fees.queries.payment import collection_snapshot_for_branch
 from apps.grievances.queries import count_open as count_open_grievances
 from apps.hr.queries import employee as emp_q
 from apps.hr.queries import staff_attendance as sa_q
@@ -77,6 +78,13 @@ def admin_dashboard(branch, tenant):
 
 def _compute_admin_dashboard(branch, tenant) -> dict:
     fees = GetCollectionDashboardInteractor(branch.pk).execute()
+    today = timezone.localdate()
+    month_start = today.replace(day=1)
+    collected_today_paise, _collected_month = collection_snapshot_for_branch(
+        branch.pk, today=today, month_start=month_start,
+    )
+    fees = {**fees, "collectedTodayPaise": collected_today_paise}
+
     shortage = att_report.shortage_report(branch)
     defaulters = list(list_defaulters(branch.pk))
     pending_leave = count_pending_applications(branch.pk)

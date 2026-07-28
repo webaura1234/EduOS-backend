@@ -4,6 +4,7 @@ from apps.accounts.models.user import Role
 from apps.core.exports.base import ExportDefinition
 from apps.core.exports.params import filter_specs_to_dict
 from apps.core.exports.registry import all_definitions
+from apps.core.exports.year import academic_years_for_catalog
 
 
 def _roles_for_user(user) -> set:
@@ -37,11 +38,28 @@ def definition_to_catalog_entry(definition: ExportDefinition) -> dict:
     }
 
 
-def catalog_for_user(user) -> list[dict]:
-    """Return catalog entries visible to the requesting user."""
+def catalog_for_user(user, *, branch=None) -> dict:
+    """Return catalog payload visible to the requesting user.
+
+    Includes ``academicYears`` for the branch so the FE can default
+    ``academicYearId`` without an extra round-trip. Super-admins also get
+    ``branches`` for per-export branch selection.
+    """
     entries = []
     for definition in all_definitions().values():
         if _visible_to_user(definition, user):
             entries.append(definition_to_catalog_entry(definition))
     entries.sort(key=lambda e: (e["module"], e["name"]))
-    return entries
+    payload = {
+        "reports": entries,
+        "academicYears": academic_years_for_catalog(branch),
+        "branches": [],
+    }
+    if getattr(user, "role", None) == Role.SUPER_ADMIN and getattr(user, "tenant_id", None):
+        from apps.organizations.queries.branch import list_branches
+        payload["branches"] = [
+            {"id": str(b.pk), "name": b.name, "isPrimary": bool(b.is_primary)}
+            for b in list_branches(user.tenant_id)
+            if getattr(b, "is_active", True)
+        ]
+    return payload

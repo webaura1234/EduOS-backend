@@ -2,9 +2,10 @@
 
 from apps.accounts.models.user import Role
 from apps.analytics.enums import ReportType
-from apps.core.exports.base import AggregationExportDefinition, Column
+from apps.core.exports.base import ACADEMIC_YEAR_FILTER, AggregationExportDefinition, Column
 from apps.core.exports.registry import register
-from apps.hr.queries import employee as emp_q
+from apps.core.exports.year import resolve_report_year
+from apps.hr.models import Employee
 
 
 class HrHeadcountExport(AggregationExportDefinition):
@@ -16,6 +17,7 @@ class HrHeadcountExport(AggregationExportDefinition):
     supports_preview = True
     estimated_runtime = "instant"
     sync_threshold = 500
+    filters = [ACADEMIC_YEAR_FILTER]
 
     def get_columns(self, params: dict) -> list[Column]:
         return [
@@ -28,8 +30,19 @@ class HrHeadcountExport(AggregationExportDefinition):
         ]
 
     def resolve_rows(self, *, tenant, branch, params: dict) -> list[dict]:
+        year = resolve_report_year(params, branch)
+        # Snapshot as of year end: joined by then and still marked active.
+        employees = (
+            Employee.objects.filter(
+                branch=branch,
+                is_active=True,
+                joined_at__lte=year.end_date,
+            )
+            .select_related("user")
+            .order_by("employee_code")
+        )
         rows = []
-        for emp in emp_q.list_employees(branch.pk, active_only=True):  # Only show active for headcount unless they want inactive
+        for emp in employees:
             user = emp.user
             rows.append({
                 "employeeCode": emp.employee_code,

@@ -2,16 +2,17 @@
 
 Entry point: call request_export(). It counts rows, decides sync vs async,
 creates a ReportExport record, and either fills it inline or dispatches a Celery task.
-"""
 
-from django.utils.timezone import now, timedelta
-from rest_framework.exceptions import PermissionDenied
+Aggregation exports always queue to Celery (resolve_rows never runs on the request thread).
+"""
 
 from apps.analytics.enums import ReportStatus
 from apps.analytics.queries import report as report_q
 from apps.core.exports.base import AggregationExportDefinition, ExportDefinition
 from apps.core.exports.csv import queryset_to_csv_bytes, rows_to_csv_bytes
 from apps.core.exports.params import validate_params
+from apps.core.exports.retention import export_expires_at
+from apps.core.exports.year import apply_default_academic_year
 
 
 def request_export(
@@ -25,8 +26,10 @@ def request_export(
 ) -> object:
     """Create a ReportExport record and either resolve it inline or enqueue a Celery task."""
     if definition.allowed_roles and getattr(requested_by, "role", None) not in definition.allowed_roles:
+        from rest_framework.exceptions import PermissionDenied
         raise PermissionDenied(f"Role '{getattr(requested_by, 'role', None)}' cannot request this report.")
 
+    params = apply_default_academic_year(definition, params, branch)
     params = validate_params(definition, params)
     threshold = (
         sync_threshold_override
@@ -35,21 +38,13 @@ def request_export(
     )
 
     if isinstance(definition, AggregationExportDefinition):
-        rows = definition.resolve_rows(tenant=tenant, branch=branch, params=params)
-        count = len(rows)
+        # Always async — aggregation work belongs on the worker, not the request thread.
         export = _create_export_record(
-            definition, tenant, branch, params, requested_by, count,
+            definition, tenant, branch, params, requested_by, 0,
         )
-        if count <= threshold:
-            _generate_inline_rows(export, definition, rows, requested_by)
-        else:
-            report_q.update_export(
-                export,
-                {"snapshot": {"rows": rows}, "status": ReportStatus.QUEUED},
-                user=requested_by,
-            )
-            from apps.analytics.tasks import generate_export_task
-            generate_export_task.delay(str(export.pk))
+        report_q.update_export(export, {"status": ReportStatus.QUEUED}, user=requested_by)
+        from apps.analytics.tasks import generate_export_task
+        generate_export_task.delay(str(export.pk))
     else:
         qs = definition.get_queryset_for_export(
             tenant_id=tenant.pk,
@@ -99,7 +94,8 @@ def _upload_csv_and_finalize(export, csv_bytes, rows_dicts, user=None) -> None:
         "snapshot": {"rows": rows_dicts},
         "file_key": key,
         "download_url": url,
-        "expires_at": now() + timedelta(hours=24),
+        "expires_at": export_expires_at(),
+        "row_count": len(rows_dicts),
     }, user=user)
 
 

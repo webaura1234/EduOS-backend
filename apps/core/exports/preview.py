@@ -1,6 +1,8 @@
 """Optional paginated preview for reports with supports_preview=True."""
 
 from apps.core.exports.base import AggregationExportDefinition, ExportDefinition
+from apps.core.exports.params import validate_params
+from apps.core.exports.year import apply_default_academic_year
 
 
 def preview_export(
@@ -17,6 +19,9 @@ def preview_export(
 ) -> dict:
     if not definition.supports_preview:
         raise ValueError(f"Report {definition.report_type!r} does not support preview.")
+
+    params = apply_default_academic_year(definition, params, branch)
+    params = validate_params(definition, params)
 
     page = max(1, page)
     page_size = min(max(1, page_size), 200)

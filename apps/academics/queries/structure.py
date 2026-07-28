@@ -147,7 +147,7 @@ def list_batches(branch_id, *, course_id=None, academic_year_id=None):
         qs = qs.filter(course_id=course_id)
     if academic_year_id:
         qs = qs.filter(academic_year_id=academic_year_id)
-    return qs.order_by("name")
+    return qs.order_by("course__name", "name")
 
 
 def get_batch(branch_id, batch_id) -> Batch | None:

@@ -23,7 +23,13 @@ class FacultyClassResultsExport(ExportDefinition):
     sync_threshold = 500
     estimated_runtime = "instant"
     filters = [
-        FilterSpec("examId", "Exam", type="exam_id"),
+        FilterSpec(
+            "examId",
+            "Exam",
+            type="exam_id",
+            options_source="/api/admin/examinations",
+            group="scope",
+        ),
     ]
 
     def get_queryset(self, *, tenant_id, branch_id, params: dict):
@@ -168,8 +174,22 @@ class ExamClassResultsExport(AggregationExportDefinition):
     estimated_runtime = "instant"
     sync_threshold = 10000
     filters = [
-        FilterSpec("examId", "Exam", type="exam_id", required=True),
-        FilterSpec("classSectionId", "Class", type="batch_id", required=True),
+        FilterSpec(
+            "examId",
+            "Exam",
+            type="exam_id",
+            required=True,
+            options_source="/api/admin/examinations",
+            group="scope",
+        ),
+        FilterSpec(
+            "classSectionId",
+            "Class",
+            type="batch_id",
+            required=True,
+            options_source="/api/admin/fees/structure",
+            group="scope",
+        ),
     ]
 
     def get_columns(self, params: dict) -> list[Column]:

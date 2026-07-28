@@ -26,9 +26,31 @@ class Column:
 class FilterSpec:
     key: str
     label: str
-    type: str = "text"  # date | date_range | select | number | text | batch_id | exam_id
+    type: str = "text"  # date | date_range | select | number | text | batch_id | exam_id | academic_year_id
     required: bool = False
     options_source: str | None = None
+    # Static select options: [{"value": "...", "label": "..."}]
+    options: list | None = None
+    # "scope" (year/branch/class) | "criteria" (dates/status) | None
+    group: str | None = None
+
+
+ACADEMIC_YEAR_FILTER = FilterSpec(
+    key="academicYearId",
+    label="Academic year",
+    type="academic_year_id",
+    required=True,
+    options_source="/api/admin/academic-management/academic-years",
+    group="scope",
+)
+
+BATCH_FILTER = FilterSpec(
+    key="batchId",
+    label="Class / section",
+    type="batch_id",
+    options_source="/api/admin/fees/structure",
+    group="scope",
+)
 
 
 class ExportDefinition(ABC):
@@ -54,6 +76,8 @@ class ExportDefinition(ABC):
     default_sort: tuple = ("", "asc")
     estimated_runtime: str = "instant"  # "instant" | "background"
     catalog_visible: bool = True
+    # When False, get_queryset_for_export skips the automatic is_active=True filter.
+    allow_inactive: bool = False
 
     @abstractmethod
     def get_queryset(self, *, tenant_id, branch_id, params: dict):
@@ -74,10 +98,22 @@ class ExportDefinition(ABC):
         return f"{self.report_type}-export"
 
     def get_queryset_for_export(self, *, tenant_id, branch_id, params):
-        """Return the queryset, directing reads to the replica when available."""
-        return self.get_queryset(
+        """Return the queryset, directing reads to the replica when available.
+
+        Soft-deleted rows (``is_active=False``) are excluded unless the definition
+        sets ``allow_inactive=True`` or params include ``includeInactive=True``.
+        """
+        params = params or {}
+        qs = self.get_queryset(
             tenant_id=tenant_id, branch_id=branch_id, params=params
         ).using(_read_db())
+        if (
+            not self.allow_inactive
+            and not params.get("includeInactive")
+            and hasattr(qs.model, "is_active")
+        ):
+            qs = qs.filter(is_active=True)
+        return qs
 
     @property
     def is_aggregation(self) -> bool:
