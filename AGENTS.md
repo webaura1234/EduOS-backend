@@ -7,7 +7,8 @@ EduOS Backend is a single Django 5 + DRF product (a multi-tenant School ERP JSON
 ### Environment
 - Python deps are installed into a virtualenv at `.venv/` (gitignored). Run tools via `.venv/bin/<tool>` or `source .venv/bin/activate` first. `make`/`manage.py` commands assume the venv is active.
 - Dev defaults require **no external services**: `config.settings.dev` uses SQLite (`db.sqlite3`), local-memory cache, eager (synchronous) Celery, and sandbox/stub integrations (S3/R2, Razorpay, MSG91, Anthropic). Postgres/Redis are only needed if you opt in via `USE_POSTGRES=true` / `USE_REDIS=true` or `make docker-up`.
-- `.env` is optional in dev — all settings have working defaults (`DJANGO_SECRET_KEY` falls back to a placeholder). Copy `.env.example` to `.env` only if you need to override something.
+- `.env` is gitignored. Local/cloud secrets (Neon `DB_*`, R2 keys, `DJANGO_SECRET_KEY`, `JWT_SIGNING_KEY`) belong in `.env` and/or Cursor secrets — never commit them. `config/env.py` loads `.env` at startup and **overwrites** matching process env vars.
+- `DATABASE_URL` in `.env` is **not** read by Django settings. Postgres is selected only when `USE_POSTGRES=true` (or `USE_SQLITE=false`); otherwise the `DB_*` Neon credentials are ignored and SQLite is used. With `S3_MODE=live` + R2 keys, gallery uploads hit the real Cloudflare R2 bucket (not the in-memory sandbox).
 - WeasyPrint (PDF generation) needs system libs (`libpango-1.0-0`, `libpangocairo-1.0-0`, `libgdk-pixbuf-2.0-0`, `libffi`, `shared-mime-info`) and `libpq-dev`; these are baked into the VM image, not the update script.
 
 ### Running the app
