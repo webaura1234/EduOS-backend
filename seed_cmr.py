@@ -38,7 +38,17 @@ from apps.academics.models.timetable import (  # noqa: E402
 from apps.accounts.models.guardian import StudentGuardianLink  # noqa: E402
 from apps.accounts.models.profile import FacultyProfile, GuardianProfile, StudentProfile  # noqa: E402
 from apps.accounts.models.user import Role, User  # noqa: E402
+from apps.admissions.enums import (  # noqa: E402
+    ApplicationStatus,
+    DocVerificationStatus,
+    EnquirySource,
+    EnquiryStatus,
+)
+from apps.admissions.models.application import Application, ApplicationDocument, Enquiry, Waitlist  # noqa: E402
 from apps.admissions.models.enrollment import StudentEnrollment  # noqa: E402
+from apps.admissions.queries import application as app_q  # noqa: E402
+from apps.attendance.enums import LeaveApplicantRole, LeaveStatus  # noqa: E402
+from apps.attendance.models.leave import LeaveRequest  # noqa: E402
 from apps.attendance.models.record import AttendanceRecord  # noqa: E402
 from apps.attendance.models.session import AttendanceSession  # noqa: E402
 from apps.communications.models.announcement import Announcement, AnnouncementTargetType  # noqa: E402
@@ -58,6 +68,12 @@ from apps.hr.models import Employee, LeaveBalance, Payslip, PayrollRun, StaffAtt
 from apps.organizations.models import (  # noqa: E402
     Branch, PlanSubscription, Tenant, TenantQuota, TenantSettings,
 )
+from apps.organizations.billing.license_allocator import (  # noqa: E402
+    on_student_enrolled,
+    record_payment,
+)
+from apps.organizations.billing.platform_pricing import unit_price_for_tenant  # noqa: E402
+from apps.organizations.models.licensing import LicensePayment, StudentLicense  # noqa: E402
 
 PASSWORD = "Password123!"
 SUBDOMAIN = "greenfield"
@@ -145,7 +161,7 @@ def _user(
             branch=branch,
             phone=phone,
             custom_login_id=login_id,
-            email=email or "",
+            email=email or None,
             must_change_password=False,
             is_active=True,
         ),
@@ -183,7 +199,54 @@ def _enroll_student(*, user, branch, batch, year, dob, gender="male") -> Student
     if profile.current_enrollment_id != enrollment.pk:
         profile.current_enrollment = enrollment
         profile.save(update_fields=["current_enrollment"])
+    # Billing roster is driven by StudentLicense rows created at enrollment.
+    on_student_enrolled(user)
     return enrollment
+
+
+def _seed_licensing(*, tenant, branch_contexts, admin) -> None:
+    """Ensure every seeded student has a license row, then buy seats with a few unpaid left."""
+    print("\nLicensing:")
+    for _branch, _spec, ctx in branch_contexts:
+        for enr in ctx["enrollments"]:
+            on_student_enrolled(enr.student_profile.user, user=admin)
+
+    # Per branch: license 20 of 25 so Billing shows both Licensed and Unpaid.
+    price = unit_price_for_tenant(tenant.pk)
+    licensed_per_branch = 20
+    for branch, spec, _ctx in branch_contexts:
+        key = f"seed-cmr-licenses-{spec['code']}-v1"
+        if LicensePayment.objects.filter(idempotency_key=key).exists():
+            print(f"  - {spec['name']}: license payment already recorded")
+            continue
+        unlicensed = StudentLicense.objects.filter(
+            tenant=tenant,
+            branch=branch,
+            license_status="unlicensed",
+            student_user__is_active=True,
+        ).count()
+        grant = min(licensed_per_branch, unlicensed)
+        if grant <= 0:
+            print(f"  - {spec['name']}: no unlicensed seats to convert")
+            continue
+        record_payment(
+            tenant,
+            licenses_granted=grant,
+            amount_inr=grant * price,
+            payment_mode="offline",
+            reference_number=f"SEED-{spec['code']}-LIC",
+            notes="[seed-cmr] Demo license purchase",
+            idempotency_key=key,
+            branch_id=branch.pk,
+            user=admin,
+        )
+        print(f"  - {spec['name']}: purchased {grant} licenses (₹{grant * price})")
+
+    total = StudentLicense.objects.filter(tenant=tenant, student_user__is_active=True).count()
+    unpaid = StudentLicense.objects.filter(
+        tenant=tenant, license_status="unlicensed", student_user__is_active=True
+    ).count()
+    print(f"  - Roster: {total} students, {unpaid} unpaid")
 
 
 def _link_parent(*, student, guardian, relationship="father") -> None:
@@ -608,16 +671,448 @@ def _seed_branch_exam_results(
             print(f"  - Skipped publish for {exam.name}: {exc}")
 
 
+_MC_SYLLABUS_UNITS = {
+    "Mathematics": [
+        "Numbers & Place Value",
+        "Addition & Subtraction",
+        "Multiplication",
+        "Fractions",
+    ],
+    "English": [
+        "Reading Comprehension",
+        "Grammar Basics",
+        "Creative Writing",
+        "Vocabulary Builder",
+    ],
+    "Science": [
+        "Living & Non-living",
+        "Plants Around Us",
+        "Human Body",
+        "Matter & Materials",
+    ],
+    "Social Studies": [
+        "My Family & Neighbourhood",
+        "Maps & Directions",
+        "Our Community Helpers",
+        "Festivals of India",
+    ],
+    "Hindi": [
+        "वर्णमाला एवं मात्राएँ",
+        "सरल वाक्य",
+        "कहानी पाठ",
+        "कविता एवं श्रुतलेख",
+    ],
+}
+
+
+def _seed_mc_admissions_funnel(*, branch, ctx, admin) -> None:
+    """Enquiry + application mix so Admissions Funnel / Pipeline / Waitlist look live."""
+    print("\nAdmissions funnel:")
+    courses = {g: ctx["batches"][g].course for g in range(1, 6)}
+    class5_enrollments = [
+        e for e in ctx["enrollments"] if e.batch_id == ctx["batches"][5].pk
+    ]
+
+    # Open enquiries (show on Funnel "enquiry" stage = new + contacted only).
+    open_specs = [
+        ("Aarav Mehta", EnquirySource.WALK_IN, EnquiryStatus.NEW, 1),
+        ("Diya Kapoor", EnquirySource.SOCIAL, EnquiryStatus.NEW, 2),
+        ("Kabir Nair", EnquirySource.ONLINE, EnquiryStatus.NEW, 3),
+        ("Ananya Iyer", EnquirySource.REFERRAL, EnquiryStatus.NEW, 1),
+        ("Rohan Desai", EnquirySource.WALK_IN, EnquiryStatus.CONTACTED, 4),
+        ("Sara Khan", EnquirySource.SOCIAL, EnquiryStatus.CONTACTED, 5),
+        ("Vihaan Joshi", EnquirySource.ONLINE, EnquiryStatus.CONTACTED, 2),
+        ("Myra Reddy", EnquirySource.REFERRAL, EnquiryStatus.CONTACTED, 3),
+        ("Ishaan Bose", EnquirySource.WALK_IN, EnquiryStatus.CONTACTED, 1),
+    ]
+    lost_specs = [
+        ("Neha Pillai", EnquirySource.SOCIAL, EnquiryStatus.LOST, 2),
+        ("Arjun Sethi", EnquirySource.ONLINE, EnquiryStatus.LOST, 4),
+        ("Tara Menon", EnquirySource.WALK_IN, EnquiryStatus.LOST, 3),
+    ]
+    # Converted enquiries → one application each across pipeline stages.
+    app_specs = [
+        ("Priya Sharma", EnquirySource.WALK_IN, ApplicationStatus.DRAFT, 1, False, None),
+        ("Advait Rao", EnquirySource.ONLINE, ApplicationStatus.DRAFT, 2, False, None),
+        ("Kiara Malhotra", EnquirySource.SOCIAL, ApplicationStatus.SUBMITTED, 3, True, None),
+        ("Dev Patel", EnquirySource.REFERRAL, ApplicationStatus.SUBMITTED, 1, False, None),
+        ("Saanvi Gupta", EnquirySource.WALK_IN, ApplicationStatus.UNDER_REVIEW, 4, True, None),
+        ("Reyansh Kulkarni", EnquirySource.ONLINE, ApplicationStatus.UNDER_REVIEW, 5, False, None),
+        ("Aanya Verma", EnquirySource.SOCIAL, ApplicationStatus.ACCEPTED, 2, True, None),
+        ("Kabir Singh", EnquirySource.REFERRAL, ApplicationStatus.ACCEPTED, 5, False, None),
+        ("Zara Ahmed", EnquirySource.WALK_IN, ApplicationStatus.WAITLISTED, 3, False, 1),
+        ("Omkar Das", EnquirySource.ONLINE, ApplicationStatus.WAITLISTED, 4, False, 2),
+        ("Lavanya Rao", EnquirySource.SOCIAL, ApplicationStatus.REJECTED, 1, False, None),
+        ("Yash Chopra", EnquirySource.REFERRAL, ApplicationStatus.ENROLLED, 5, False, None),
+        ("Meera Banerjee", EnquirySource.WALK_IN, ApplicationStatus.ENROLLED, 5, False, None),
+    ]
+
+    phone_i = 1
+
+    def _phone() -> str:
+        nonlocal phone_i
+        p = f"+9198700{phone_i:04d}"
+        phone_i += 1
+        return p
+
+    def _upsert_enquiry(*, name, source, status, grade, phone) -> Enquiry:
+        enquiry, created = Enquiry.objects.get_or_create(
+            branch=branch,
+            phone=phone,
+            defaults=dict(
+                source=source,
+                applicant_name=name,
+                course=courses[grade],
+                email=f"{name.split()[0].lower()}.seed@example.com",
+                status=status,
+                captured_by=admin,
+                notes="[seed-cmr] Main Campus demo enquiry",
+                created_by=admin,
+                updated_by=admin,
+            ),
+        )
+        if not created and (
+            enquiry.status != status
+            or enquiry.source != source
+            or enquiry.applicant_name != name
+        ):
+            enquiry.status = status
+            enquiry.source = source
+            enquiry.applicant_name = name
+            enquiry.course = courses[grade]
+            enquiry.updated_by = admin
+            enquiry.save(
+                update_fields=[
+                    "status",
+                    "source",
+                    "applicant_name",
+                    "course",
+                    "updated_by",
+                    "updated_at",
+                ]
+            )
+        return enquiry
+
+    for name, source, status, grade in open_specs + lost_specs:
+        _upsert_enquiry(name=name, source=source, status=status, grade=grade, phone=_phone())
+
+    enrolled_apps: list[Application] = []
+    for name, source, app_status, grade, with_docs, waitlist_rank in app_specs:
+        phone = _phone()
+        enquiry = _upsert_enquiry(
+            name=name,
+            source=source,
+            status=EnquiryStatus.CONVERTED,
+            grade=grade,
+            phone=phone,
+        )
+        application, created = Application.objects.get_or_create(
+            enquiry=enquiry,
+            defaults=dict(
+                branch=branch,
+                course=courses[grade],
+                status=app_status,
+                step={"seed": True},
+                created_by=admin,
+                updated_by=admin,
+                rejection_reason=(
+                    "Seats full for preferred section"
+                    if app_status == ApplicationStatus.REJECTED
+                    else ""
+                ),
+            ),
+        )
+        if not created and application.status != app_status:
+            application.status = app_status
+            application.course = courses[grade]
+            application.updated_by = admin
+            if app_status == ApplicationStatus.REJECTED and not application.rejection_reason:
+                application.rejection_reason = "Seats full for preferred section"
+            application.save(
+                update_fields=[
+                    "status",
+                    "course",
+                    "updated_by",
+                    "updated_at",
+                    "rejection_reason",
+                ]
+            )
+        if with_docs:
+            for doc_type, ver in (
+                ("birth_certificate", DocVerificationStatus.VERIFIED),
+                ("address_proof", DocVerificationStatus.PENDING),
+            ):
+                doc, _ = ApplicationDocument.objects.get_or_create(
+                    application=application,
+                    doc_type=doc_type,
+                    defaults=dict(
+                        s3_key=f"admissions/demo/{application.pk}/{doc_type}.pdf",
+                        verification_status=ver,
+                        verified_by=admin if ver == DocVerificationStatus.VERIFIED else None,
+                        created_by=admin,
+                        updated_by=admin,
+                    ),
+                )
+                if doc.verification_status != ver:
+                    doc.verification_status = ver
+                    doc.verified_by = admin if ver == DocVerificationStatus.VERIFIED else None
+                    doc.save(update_fields=["verification_status", "verified_by", "updated_at"])
+        if waitlist_rank is not None:
+            app_q.upsert_waitlist(
+                branch=branch,
+                application=application,
+                course=courses[grade],
+                rank=waitlist_rank,
+                user=admin,
+            )
+        if app_status == ApplicationStatus.ENROLLED:
+            enrolled_apps.append(application)
+
+    for app, enr in zip(enrolled_apps, class5_enrollments[: len(enrolled_apps)]):
+        if enr.application_id != app.pk:
+            enr.application = app
+            enr.save(update_fields=["application", "updated_at"])
+
+    n_enq = Enquiry.objects.filter(branch=branch, notes__contains="[seed-cmr]").count()
+    n_app = Application.objects.filter(branch=branch, step__seed=True).count()
+    n_wl = Waitlist.objects.filter(branch=branch, is_active=True).count()
+    print(f"  - {n_enq} seeded enquiries, {n_app} applications, {n_wl} waitlist entries")
+
+
+def _seed_mc_syllabus(*, branch, ctx) -> None:
+    """Syllabus units for Class 1-A and 5-A (all subjects) with partial completion."""
+    print("\nSyllabus:")
+    faculty_by_subject = {name: fac for fac, name, _code in ctx["faculty_entries"]}
+    completed = 0
+    total_units = 0
+    for grade in (1, 5):
+        batch = ctx["batches"][grade]
+        subjects = ctx["subjects_by_grade"][grade]
+        class_teacher = batch.class_teacher or ctx["faculty_entries"][grade - 1][0]
+        for subj_name, titles in _MC_SYLLABUS_UNITS.items():
+            subject = subjects[subj_name]
+            completed_by = faculty_by_subject.get(subj_name) or class_teacher
+            # Leave ~40–60% complete: finish first 2 of 4 for most; 1 of 4 for Hindi on C1.
+            n_complete = 1 if (grade == 1 and subj_name == "Hindi") else 2
+            for i, title in enumerate(titles, start=1):
+                unit, _ = SyllabusUnit.objects.get_or_create(
+                    branch=branch,
+                    subject=subject,
+                    title=title,
+                    defaults=dict(order=i),
+                )
+                total_units += 1
+                if i <= n_complete:
+                    SyllabusUnitProgress.objects.get_or_create(
+                        branch=branch,
+                        batch=batch,
+                        unit=unit,
+                        defaults=dict(
+                            completed_at=timezone.now(),
+                            completed_by=completed_by,
+                        ),
+                    )
+                    completed += 1
+    print(
+        f"  - Units for Class 1-A & 5-A (all subjects); "
+        f"{completed}/{total_units} marked complete (partial)"
+    )
+
+
+def _seed_mc_day_attendance(*, branch, batch, enrollments, faculty, sessions: int = 12) -> int:
+    """Seed weekday day-mode attendance sessions with a few absences."""
+    d = datetime.date.today()
+    total_sessions = 0
+    while total_sessions < sessions:
+        if d.isoweekday() <= 5:
+            sess, _ = AttendanceSession.objects.get_or_create(
+                branch=branch,
+                batch=batch,
+                mode="day",
+                date=d,
+                defaults=dict(faculty=faculty, status="completed"),
+            )
+            for enr in enrollments:
+                login = enr.student_profile.user.custom_login_id or ""
+                status = (
+                    "absent"
+                    if login.endswith("-05") and total_sessions % 6 == 5
+                    else "absent"
+                    if login.endswith("-03") and total_sessions % 7 == 3
+                    else "present"
+                )
+                AttendanceRecord.objects.get_or_create(
+                    session=sess,
+                    student=enr,
+                    defaults=dict(
+                        status=status,
+                        marked_at=timezone.now(),
+                        marked_by=faculty,
+                        idempotency_key=f"{sess.pk}:{enr.pk}",
+                    ),
+                )
+            total_sessions += 1
+        d -= datetime.timedelta(days=1)
+    return total_sessions
+
+
+def _seed_mc_attendance_leaves(*, branch, ctx, admin) -> None:
+    """Day attendance for Class 1-A / 3-A / 5-A plus student & staff leave requests."""
+    print("\nAttendance + leaves:")
+    enrollments = ctx["enrollments"]
+    faculty_entries = ctx["faculty_entries"]
+    for grade in (1, 3, 5):
+        batch = ctx["batches"][grade]
+        fac = batch.class_teacher or faculty_entries[grade - 1][0]
+        batch_enrs = [e for e in enrollments if e.batch_id == batch.pk]
+        n = _seed_mc_day_attendance(
+            branch=branch,
+            batch=batch,
+            enrollments=batch_enrs,
+            faculty=fac,
+            sessions=12 if grade != 5 else 14,
+        )
+        print(f"  - {n} attendance sessions (Class {grade}-A, {len(batch_enrs)} students)")
+
+    class5_enrs = [e for e in enrollments if e.batch_id == ctx["batches"][5].pk]
+    student_leave_specs = [
+        (0, _days_ago(10), _days_ago(9), LeaveStatus.APPROVED, "Family function"),
+        (1, _days_ago(3), _days_ago(2), LeaveStatus.PENDING, "Medical checkup"),
+        (2, _days_ago(1), datetime.date.today(), LeaveStatus.APPROVED, "Fever"),
+    ]
+    for idx, from_d, to_d, status, reason in student_leave_specs:
+        if idx >= len(class5_enrs):
+            break
+        enr = class5_enrs[idx]
+        student_user = enr.student_profile.user
+        leave, created = LeaveRequest.objects.get_or_create(
+            branch=branch,
+            student=enr,
+            from_date=from_d,
+            to_date=to_d,
+            defaults=dict(
+                applicant_role=LeaveApplicantRole.STUDENT,
+                reason=reason,
+                status=status,
+                applied_by=student_user,
+                created_by=student_user,
+                updated_by=admin,
+                approver=admin if status == LeaveStatus.APPROVED else None,
+                approved_at=timezone.now() if status == LeaveStatus.APPROVED else None,
+            ),
+        )
+        if not created and leave.status != status:
+            leave.status = status
+            leave.approver = admin if status == LeaveStatus.APPROVED else None
+            leave.approved_at = timezone.now() if status == LeaveStatus.APPROVED else None
+            leave.save(update_fields=["status", "approver", "approved_at", "updated_at"])
+
+    staff_leave_specs = [
+        (0, _days_ago(7), _days_ago(6), LeaveStatus.APPROVED, "Personal work"),
+        (1, _days_ago(2), _days_ago(1), LeaveStatus.PENDING, "Medical leave"),
+        (
+            2,
+            datetime.date.today(),
+            datetime.date.today() + datetime.timedelta(days=1),
+            LeaveStatus.APPROVED,
+            "Half-day family event",
+        ),
+    ]
+    for fac_idx, from_d, to_d, status, reason in staff_leave_specs:
+        fac = faculty_entries[fac_idx][0]
+        leave, created = LeaveRequest.objects.get_or_create(
+            branch=branch,
+            employee=fac,
+            from_date=from_d,
+            to_date=to_d,
+            defaults=dict(
+                applicant_role=LeaveApplicantRole.STAFF,
+                reason=reason,
+                status=status,
+                applied_by=fac,
+                created_by=fac,
+                updated_by=admin,
+                approver=admin if status == LeaveStatus.APPROVED else None,
+                approved_at=timezone.now() if status == LeaveStatus.APPROVED else None,
+            ),
+        )
+        if not created and leave.status != status:
+            leave.status = status
+            leave.approver = admin if status == LeaveStatus.APPROVED else None
+            leave.approved_at = timezone.now() if status == LeaveStatus.APPROVED else None
+            leave.save(update_fields=["status", "approver", "approved_at", "updated_at"])
+
+    n_student = LeaveRequest.objects.filter(
+        branch=branch, applicant_role=LeaveApplicantRole.STUDENT, is_active=True
+    ).count()
+    n_staff = LeaveRequest.objects.filter(
+        branch=branch, applicant_role=LeaveApplicantRole.STAFF, is_active=True
+    ).count()
+    print(f"  - Leave requests: {n_student} student, {n_staff} staff")
+
+
+def _seed_mc_homework_and_teachers(*, branch, ctx) -> None:
+    """Re-assert class teachers and seed homework across Class 1 / 3 / 5."""
+    print("\nClass teachers + homework:")
+    for grade in range(1, 6):
+        batch = ctx["batches"][grade]
+        expected = ctx["faculty_entries"][grade - 1][0]
+        if batch.class_teacher_id != expected.pk:
+            batch.class_teacher = expected
+            batch.save(update_fields=["class_teacher"])
+        print(
+            f"  - Class {grade}-A class teacher: {expected.custom_login_id} "
+            f"({ctx['faculty_entries'][grade - 1][1]})"
+        )
+
+    hw_by_grade = {
+        1: [
+            ("Alphabet tracing sheet", "Trace letters A–M; submit tomorrow."),
+            ("Number bonds to 10", "Complete the worksheet in the notebook."),
+            ("Hindi swar practice", "Write each vowel five times neatly."),
+        ],
+        3: [
+            ("Multiplication tables 2–5", "Revise and write once each."),
+            ("Science: Parts of a plant", "Draw and label root, stem, leaf."),
+            ("English paragraph", "Write 8 sentences about your best friend."),
+        ],
+        5: [
+            ("Fractions worksheet", "Complete exercises 1-10 on page 45."),
+            ("English essay: My favourite season", "Write 150 words; submit tomorrow."),
+            ("Science reading", "Read chapter 6 and note 5 key points."),
+            ("Map skills: India states", "Label 10 states on the outline map."),
+        ],
+    }
+    total = 0
+    for grade, items in hw_by_grade.items():
+        batch = ctx["batches"][grade]
+        fac = batch.class_teacher or ctx["faculty_entries"][grade - 1][0]
+        for i, (title, details) in enumerate(items):
+            Homework.objects.get_or_create(
+                branch=branch,
+                batch=batch,
+                title=title,
+                defaults=dict(
+                    date=_days_ago((i * 2 + grade) % 10),
+                    details=details,
+                    status="published",
+                    published_at=timezone.now(),
+                    created_by=fac,
+                    updated_by=fac,
+                ),
+            )
+            total += 1
+    print(f"  - {total} homework items (Classes 1-A, 3-A, 5-A)")
+
+
 def _seed_main_campus_rich(*, tenant, branch, ctx) -> None:
     """Rich demo content — homework, exams, grievances, payroll, etc."""
     admin = ctx["admins"][0]
     faculty = ctx["faculty_entries"][0][0]
     faculty2 = ctx["faculty_entries"][1][0]
-    year = ctx["year"]
     period = ctx["period"]
     class5_batch = ctx["batches"][5]
     batch_subjects = ctx["batch_subjects"]
-    subjects = ctx["subjects_by_grade"][5]
     enrollments = ctx["enrollments"]
     class5_enrollments = [e for e in enrollments if e.batch_id == class5_batch.pk]
 
@@ -684,54 +1179,9 @@ def _seed_main_campus_rich(*, tenant, branch, ctx) -> None:
         payroll_run.save()
     print("  - 1 processed payroll run with payslip")
 
-    print("\nSyllabus:")
-    for i, title in enumerate(
-        ["Numbers & Place Value", "Addition & Subtraction", "Multiplication", "Fractions"],
-        start=1,
-    ):
-        SyllabusUnit.objects.get_or_create(
-            branch=branch,
-            subject=subjects["Mathematics"],
-            title=title,
-            defaults=dict(order=i),
-        )
-    math_units = list(
-        SyllabusUnit.objects.filter(
-            branch=branch,
-            subject=subjects["Mathematics"],
-            is_active=True,
-        ).order_by("order")[:2]
-    )
-    for unit in math_units:
-        SyllabusUnitProgress.objects.get_or_create(
-            branch=branch,
-            batch=class5_batch,
-            unit=unit,
-            defaults=dict(completed_at=timezone.now(), completed_by=faculty),
-        )
-    print(f"  - Syllabus units + {len(math_units)} completed (Class 5-A Maths)")
-
-    print("\nHomework:")
-    hw_plan = [
-        ("Fractions worksheet", "Complete exercises 1-10 on page 45."),
-        ("English essay: My favourite season", "Write 150 words; submit tomorrow."),
-        ("Science reading", "Read chapter 6 and note 5 key points."),
-    ]
-    for i, (title, details) in enumerate(hw_plan):
-        Homework.objects.get_or_create(
-            branch=branch,
-            batch=class5_batch,
-            title=title,
-            defaults=dict(
-                date=_days_ago(i % 5),
-                details=details,
-                status="published",
-                published_at=timezone.now(),
-                created_by=faculty,
-                updated_by=faculty,
-            ),
-        )
-    print(f"  - {len(hw_plan)} homework items (Class 5-A)")
+    _seed_mc_admissions_funnel(branch=branch, ctx=ctx, admin=admin)
+    _seed_mc_syllabus(branch=branch, ctx=ctx)
+    _seed_mc_homework_and_teachers(branch=branch, ctx=ctx)
 
     print("\nStudy materials:")
     folder, _ = StudyMaterialFolder.objects.get_or_create(
@@ -760,6 +1210,8 @@ def _seed_main_campus_rich(*, tenant, branch, ctx) -> None:
         ("PTM scheduled next month", "Parent-teacher meetings for primary classes are on the calendar."),
         ("Sports day practice", "Students registered for sports events should attend evening practice."),
         ("Fee reminder", "Term 1 fee payment deadline is approaching. Clear dues to avoid penalties."),
+        ("Library book return drive", "Please return overdue library books by Friday."),
+        ("Health checkup camp", "Annual health screening for Classes 1–5 next Wednesday."),
     ):
         Announcement.objects.get_or_create(
             branch=branch,
@@ -772,13 +1224,13 @@ def _seed_main_campus_rich(*, tenant, branch, ctx) -> None:
                 created_by=faculty,
             ),
         )
-    print("  - 4 announcements")
+    print("  - 6 announcements")
 
     print("\nFees:")
     _seed_branch_fees(branch=branch, ctx=ctx, multi_installment=True)
     _seed_exam_fees_demo(tenant=tenant, branch=branch, ctx=ctx)
 
-    print("\nTimetable + attendance:")
+    print("\nTimetable:")
     slot1, _ = PeriodSlot.objects.get_or_create(
         branch=branch,
         sequence=1,
@@ -811,33 +1263,7 @@ def _seed_main_campus_rich(*, tenant, branch, ctx) -> None:
         )
     print("  - Maths + English timetabled Mon-Fri (Class 5-A)")
 
-    d = datetime.date.today()
-    total_sessions = 0
-    while total_sessions < 14:
-        if d.isoweekday() <= 5:
-            sess, _ = AttendanceSession.objects.get_or_create(
-                branch=branch,
-                batch=class5_batch,
-                mode="day",
-                date=d,
-                defaults=dict(faculty=faculty, status="completed"),
-            )
-            for enr in class5_enrollments:
-                login = enr.student_profile.user.custom_login_id or ""
-                status = "absent" if login.endswith("-05") and total_sessions % 6 == 5 else "present"
-                AttendanceRecord.objects.get_or_create(
-                    session=sess,
-                    student=enr,
-                    defaults=dict(
-                        status=status,
-                        marked_at=timezone.now(),
-                        marked_by=faculty,
-                        idempotency_key=f"{sess.pk}:{enr.pk}",
-                    ),
-                )
-            total_sessions += 1
-        d -= datetime.timedelta(days=1)
-    print(f"  - {total_sessions} attendance sessions (Class 5-A)")
+    _seed_mc_attendance_leaves(branch=branch, ctx=ctx, admin=admin)
 
     _seed_branch_exam_results(
         tenant=tenant,
@@ -985,6 +1411,15 @@ def seed():
             _seed_main_campus_rich(tenant=tenant, branch=branch, ctx=ctx)
         else:
             _seed_branch_light(tenant=tenant, branch=branch, ctx=ctx)
+
+    super_admin = User.objects.filter(
+        tenant=tenant, role=Role.SUPER_ADMIN, phone=SUPER_ADMIN_PHONE
+    ).first()
+    _seed_licensing(
+        tenant=tenant,
+        branch_contexts=branch_contexts,
+        admin=super_admin or branch_contexts[0][2]["admins"][0],
+    )
 
     print("\nPlatform owner (platform app — not institution portal):")
     _seed_platform_owner()

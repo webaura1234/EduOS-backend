@@ -37,6 +37,18 @@ from apps.admissions.views.enquiry_form import (
     PublicEnquiryFormView,
     PublicEnquirySubmitView,
 )
+from apps.admissions.views.student_import import (
+    StudentImportColumnsView,
+    StudentImportJobDetailView,
+    StudentImportJobErrorsView,
+    StudentImportJobListCreateView,
+    StudentImportMappingDetailView,
+    StudentImportMappingListCreateView,
+    StudentImportTemplateCsvView,
+    StudentImportTemplateXlsxView,
+    StudentImportUploadView,
+    StudentImportValidateView,
+)
 
 app_name = "admissions"
 
@@ -84,4 +96,16 @@ urlpatterns = [
 
     # Analytics
     path("funnel/", FunnelAnalyticsView.as_view(), name="funnel-analytics"),
+
+    # Student bulk import
+    path("student-imports/templates/csv/", StudentImportTemplateCsvView.as_view(), name="student-import-template-csv"),
+    path("student-imports/templates/xlsx/", StudentImportTemplateXlsxView.as_view(), name="student-import-template-xlsx"),
+    path("student-imports/columns/", StudentImportColumnsView.as_view(), name="student-import-columns"),
+    path("student-imports/upload/", StudentImportUploadView.as_view(), name="student-import-upload"),
+    path("student-imports/validate/", StudentImportValidateView.as_view(), name="student-import-validate"),
+    path("student-imports/jobs/", StudentImportJobListCreateView.as_view(), name="student-import-jobs"),
+    path("student-imports/jobs/<uuid:job_id>/", StudentImportJobDetailView.as_view(), name="student-import-job-detail"),
+    path("student-imports/jobs/<uuid:job_id>/errors/", StudentImportJobErrorsView.as_view(), name="student-import-job-errors"),
+    path("student-imports/mappings/", StudentImportMappingListCreateView.as_view(), name="student-import-mappings"),
+    path("student-imports/mappings/<uuid:mapping_id>/", StudentImportMappingDetailView.as_view(), name="student-import-mapping-detail"),
 ]

@@ -91,11 +91,17 @@ CELERY_TASK_EAGER_PROPAGATES = True
 pass
 
 # ──────────────────────────────────────────────
-# Rate limits — SPA dev loads many parallel BFF routes; base 100/min is too low.
+# Rate limits — SPA/BFF hits /auth/me + many parallel admin routes per navigation.
+# Base 100/min (and even 1000/min) fills quickly in local demos, then every
+# UpstreamAuthUnavailableError retry storms /me into a 429 death spiral.
+# Keep scoped auth/public caps for abuse testing; drop the tenant blanket limit.
 # ──────────────────────────────────────────────
+REST_FRAMEWORK["DEFAULT_THROTTLE_CLASSES"] = [  # noqa: F405
+    "rest_framework.throttling.ScopedRateThrottle",
+]
 REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {  # noqa: F405
-    "tenant": "1000/minute",
-    "auth": "60/minute",
+    "tenant": "10000/minute",
+    "auth": "120/minute",
     "token_refresh": "600/minute",
     "public_enquiry": "60/hour",
 }
