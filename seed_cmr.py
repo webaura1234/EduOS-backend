@@ -211,7 +211,7 @@ def _seed_licensing(*, tenant, branch_contexts, admin) -> None:
         for enr in ctx["enrollments"]:
             on_student_enrolled(enr.student_profile.user, user=admin)
 
-    # Per branch: license 20 of 25 so Billing shows both Licensed and Unpaid.
+    # Per branch: license all students on Main Campus; other branches keep a few unpaid for Billing demo.
     price = unit_price_for_tenant(tenant.pk)
     licensed_per_branch = 20
     for branch, spec, _ctx in branch_contexts:
@@ -225,7 +225,7 @@ def _seed_licensing(*, tenant, branch_contexts, admin) -> None:
             license_status="unlicensed",
             student_user__is_active=True,
         ).count()
-        grant = min(licensed_per_branch, unlicensed)
+        grant = unlicensed if spec["code"] == "MC" else min(licensed_per_branch, unlicensed)
         if grant <= 0:
             print(f"  - {spec['name']}: no unlicensed seats to convert")
             continue
@@ -669,6 +669,45 @@ def _seed_branch_exam_results(
             print(f"  - Published results: {exam.name}")
         except Exception as exc:
             print(f"  - Skipped publish for {exam.name}: {exc}")
+
+
+def _seed_mc_upcoming_exam(*, branch, ctx) -> None:
+    """One future exam for Class 5-A so the student Schedule tab has an upcoming row."""
+    period = ctx["period"]
+    class5_batch = ctx["batches"][5]
+    subjects = ctx["subjects_by_grade"][5]
+    exam_date = datetime.date.today() + datetime.timedelta(days=14)
+    start = timezone.make_aware(datetime.datetime.combine(exam_date, datetime.time(9, 30)))
+    end = timezone.make_aware(datetime.datetime.combine(exam_date, datetime.time(11, 30)))
+    room, _ = Room.objects.get_or_create(
+        branch=branch,
+        name="Room 101",
+        defaults=dict(capacity=40),
+    )
+    exam, _ = Exam.objects.get_or_create(
+        branch=branch,
+        academic_period=period,
+        name="Term 2 Unit Test",
+        defaults=dict(
+            exam_type="internal",
+            exam_fee_paise=0,
+            is_published=False,
+            marks_deadline=timezone.make_aware(
+                datetime.datetime.combine(exam_date, datetime.time(17, 0))
+            ),
+        ),
+    )
+    slot, created = ExamScheduleSlot.objects.get_or_create(
+        exam=exam,
+        subject=subjects["Mathematics"],
+        batch=class5_batch,
+        defaults=dict(room=room, max_marks=100, start_at=start, end_at=end),
+    )
+    if not created and slot.start_at < timezone.now():
+        slot.start_at = start
+        slot.end_at = end
+        slot.save(update_fields=["start_at", "end_at", "updated_at"])
+    print(f"  - Upcoming exam: {exam.name} — Mathematics on {exam_date} (Class 5-A)")
 
 
 _MC_SYLLABUS_UNITS = {
@@ -1274,6 +1313,7 @@ def _seed_main_campus_rich(*, tenant, branch, ctx) -> None:
             ("Mid-Term", datetime.date(2025, 11, 5), 6),
         ],
     )
+    _seed_mc_upcoming_exam(branch=branch, ctx=ctx)
 
     print("\nGrievances:")
     sample_student = class5_enrollments[2].student_profile.user if len(class5_enrollments) > 2 else None

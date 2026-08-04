@@ -159,7 +159,7 @@ def _build_exam_fees(student_user_id) -> dict:
 
 
 def build_portal_fees_payload(*, student_user_id, tenant) -> dict:
-    inst = "college" if getattr(tenant, "institution_type", "") == "college" else "school"
+    institution_type = "college" if getattr(tenant, "institution_type", "") == "college" else "school"
     tuition_invoices = list(list_open_invoices_for_student_user(student_user_id))
     exam_invoice_ids = set(
         FeeInvoice.objects.filter(
@@ -181,10 +181,10 @@ def build_portal_fees_payload(*, student_user_id, tenant) -> dict:
     open_due_dates = []
     installment_overdue = False
     for inv in invoices:
-        for inst in inv.installments.all():
-            if inst.paid_paise < inst.amount_paise and inst.due_date:
-                open_due_dates.append(inst.due_date)
-                if inst.due_date < today:
+        for installment in inv.installments.all():
+            if installment.paid_paise < installment.amount_paise and installment.due_date:
+                open_due_dates.append(installment.due_date)
+                if installment.due_date < today:
                     installment_overdue = True
         if inv.balance_paise > 0 and inv.due_date:
             open_due_dates.append(inv.due_date)
@@ -215,7 +215,7 @@ def build_portal_fees_payload(*, student_user_id, tenant) -> dict:
     history = _concession_history(student_user_id)
 
     return {
-        "institutionType": inst,
+        "institutionType": institution_type,
         "ledger": {
             "totalDue": round(total_due / 100, 2),
             "paid": round(paid / 100, 2),
