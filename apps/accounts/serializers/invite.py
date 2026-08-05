@@ -4,14 +4,12 @@ Invite serializers — create invite (admin) and accept invite (new user).
 
 from rest_framework import serializers
 
-from apps.accounts.models.user import Role
+from apps.accounts.models.user import ASSIGNABLE_ROLES
 from apps.accounts.validators import validate_password_strength
-
-INVITABLE_ROLES = [Role.FACULTY, Role.STUDENT, Role.PARENT, Role.ADMIN]
 
 
 class CreateInviteSerializer(serializers.Serializer):
-    role = serializers.ChoiceField(choices=[(r, r) for r in INVITABLE_ROLES])
+    role = serializers.ChoiceField(choices=[(r, r) for r in sorted(ASSIGNABLE_ROLES)])
     first_name = serializers.CharField(max_length=100)
     last_name = serializers.CharField(max_length=100, required=False, default="")
     phone = serializers.CharField(required=False, allow_blank=True, default=None)

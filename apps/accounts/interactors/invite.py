@@ -22,7 +22,7 @@ from apps.accounts.dtos import InviteAcceptedDTO, InviteCreatedDTO
 from apps.core.exceptions import GoneError
 
 from apps.accounts.linked_accounts import filter_linkable_users
-from apps.accounts.models.user import Role, User
+from apps.accounts.models.user import ASSIGNABLE_ROLES, Role, User
 from apps.accounts.queries.user import (
     assign_linked_group,
     create_invite_token,
@@ -39,8 +39,8 @@ from apps.accounts.validators import validate_password_strength
 
 logger = logging.getLogger("apps.accounts.interactors.invite")
 
-# Roles that can be invited (never invite super_admin via this flow)
-INVITABLE_ROLES = {Role.FACULTY, Role.STUDENT, Role.PARENT, Role.ADMIN}
+# Alias kept for invite call sites / docs; single source is ASSIGNABLE_ROLES.
+INVITABLE_ROLES = ASSIGNABLE_ROLES
 
 
 def _get_current_academic_year(branch_id) -> str | None:

@@ -8,7 +8,7 @@ from django.db.models import F, Q
 from apps.examinations.models import ExamRegistration
 from apps.fees.enums import CarryForwardState, FeeComponentKind, InvoiceStatus, PaymentStatus
 from apps.fees.models import FeeInvoice
-from apps.fees.queries.invoice import is_collectible_outstanding, list_dues_for_student_user
+from apps.fees.queries.invoice import is_collectible_outstanding
 from apps.fees.queries.portal import list_receipts_for_student
 
 
@@ -65,25 +65,50 @@ def _build_installment_schedule(invoices) -> list[dict]:
 
 
 def _concession_breakdown(invoices) -> dict:
+    """Gross/concession from fee assignments once each — never re-sum the same structure."""
     gross_paise = 0
     concession_paise = 0
     lines: list[dict] = []
+    seen_assignment_ids: set = set()
+
     for inv in invoices:
         assignment = getattr(inv, "assignment", None)
         if not assignment:
+            gross_paise += int(inv.total_paise or 0)
             continue
+
+        assignment_id = assignment.pk
+        if assignment_id in seen_assignment_ids:
+            # Extra invoice on the same assignment (e.g. opening-balance) — add face value only.
+            gross_paise += int(inv.total_paise or 0)
+            continue
+        seen_assignment_ids.add(assignment_id)
+
         components = assignment.structure_snapshot or []
-        gross_paise += sum(int(c.get("amount_paise", 0)) for c in components)
-        for d in assignment.discount_lines or []:
-            amt = int(d.get("amount_paise", 0))
-            if amt <= 0:
-                continue
-            concession_paise += amt
-            lines.append({
-                "label": d.get("label") or "Concession",
-                "amount": round(amt / 100, 2),
-                "amountPaise": amt,
-            })
+        snap_gross = sum(int(c.get("amount_paise", 0)) for c in components)
+        discount_lines = assignment.discount_lines or []
+        snap_concession = sum(
+            int(d.get("amount_paise", 0)) for d in discount_lines if int(d.get("amount_paise", 0)) > 0
+        )
+        expected_net = max(snap_gross - snap_concession, 0)
+
+        # Full tuition invoice matching the structure: show original + concessions.
+        # Opening-balance / mismatched totals must not inflate Original fee from the full snapshot.
+        if snap_gross > 0 and int(inv.total_paise or 0) == expected_net:
+            gross_paise += snap_gross
+            concession_paise += snap_concession
+            for d in discount_lines:
+                amt = int(d.get("amount_paise", 0))
+                if amt <= 0:
+                    continue
+                lines.append({
+                    "label": d.get("label") or "Concession",
+                    "amount": round(amt / 100, 2),
+                    "amountPaise": amt,
+                })
+        else:
+            gross_paise += int(inv.total_paise or 0)
+
     return {
         "grossDue": round(gross_paise / 100, 2),
         "concessionTotal": round(concession_paise / 100, 2),
@@ -160,7 +185,6 @@ def _build_exam_fees(student_user_id) -> dict:
 
 def build_portal_fees_payload(*, student_user_id, tenant) -> dict:
     institution_type = "college" if getattr(tenant, "institution_type", "") == "college" else "school"
-    tuition_invoices = list(list_open_invoices_for_student_user(student_user_id))
     exam_invoice_ids = set(
         FeeInvoice.objects.filter(
             student__student_profile__user_id=student_user_id,
@@ -169,10 +193,12 @@ def build_portal_fees_payload(*, student_user_id, tenant) -> dict:
             lines__kind=FeeComponentKind.EXAM,
         ).values_list("pk", flat=True)
     )
-    invoices = [
-        i for i in list(list_dues_for_student_user(student_user_id))
-        if i.pk not in exam_invoice_ids and is_collectible_outstanding(i)
+    # One tuition invoice set for both ledger and schedule (avoids mismatched / duplicated fee views).
+    tuition_invoices = [
+        i for i in list(list_open_invoices_for_student_user(student_user_id))
+        if i.pk not in exam_invoice_ids
     ]
+    invoices = [i for i in tuition_invoices if is_collectible_outstanding(i)]
 
     total_due = sum(i.total_paise for i in invoices)
     paid = sum(i.paid_paise for i in invoices)
@@ -181,12 +207,16 @@ def build_portal_fees_payload(*, student_user_id, tenant) -> dict:
     open_due_dates = []
     installment_overdue = False
     for inv in invoices:
+        open_installment_dues = []
         for installment in inv.installments.all():
             if installment.paid_paise < installment.amount_paise and installment.due_date:
-                open_due_dates.append(installment.due_date)
+                open_installment_dues.append(installment.due_date)
                 if installment.due_date < today:
                     installment_overdue = True
-        if inv.balance_paise > 0 and inv.due_date:
+        if open_installment_dues:
+            open_due_dates.extend(open_installment_dues)
+        elif inv.balance_paise > 0 and inv.due_date:
+            # Prefer installment dues; fall back to invoice due when there are none.
             open_due_dates.append(inv.due_date)
     next_due = min(open_due_dates).isoformat() if open_due_dates else None
     is_overdue = installment_overdue or any(d < today for d in open_due_dates)

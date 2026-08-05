@@ -108,6 +108,24 @@ def test_create_user_with_invite(env):
     assert body["invite"] is not None
 
 
+@pytest.mark.parametrize("role", ["super_admin", "platform_owner", "not_a_role", ""])
+def test_create_user_rejects_non_assignable_roles(env, role):
+    """Admin/Super Admin people management must never mint privileged roles."""
+    resp = _client(env["admin"]).post(
+        reverse("accounts:users-management"),
+        {
+            "name": "Escalation Attempt",
+            "email": "evil@example.com",
+            "phone": "+919812345679",
+            "role": role,
+            "send_invite": False,
+        },
+        format="json",
+    )
+    assert resp.status_code == 400, resp.content
+    assert not User.objects.filter(email="evil@example.com").exists()
+
+
 def test_check_multi_role_ignores_student_guardian_phone(env):
     # Same phone as the student (guardian contact), creating a parent → student is
     # NOT a linkable pair; no warning (linking is guardian-link only, EC-AUTH-14).

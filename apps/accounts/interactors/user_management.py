@@ -13,7 +13,7 @@ from rest_framework.exceptions import NotFound, ValidationError
 
 from apps.accounts.interactors.password import admin_reset_password
 from apps.accounts.linked_accounts import filter_linkable_users, has_linked_accounts
-from apps.accounts.models.user import Role
+from apps.accounts.models.user import ASSIGNABLE_ROLES, Role
 from apps.accounts.queries import user as uq
 
 MULTI_ROLE_POLICY = (
@@ -236,6 +236,11 @@ def create_user(
 ) -> dict:
     tenant_id = admin.tenant_id
     target_branch_id = branch_id if branch_id is not None else admin.branch_id
+
+    if role not in ASSIGNABLE_ROLES:
+        raise ValidationError(
+            f"Role '{role}' cannot be created via user management."
+        )
 
     if role in {Role.PARENT, Role.ADMIN} and not phone:
         raise ValidationError("Phone number is required for this role.")

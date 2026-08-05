@@ -34,6 +34,10 @@ PHONE_LOGIN_ROLES = {Role.PLATFORM_OWNER, Role.SUPER_ADMIN, Role.ADMIN, Role.PAR
 # Roles that log in with custom_login_id
 CUSTOM_ID_LOGIN_ROLES = {Role.FACULTY, Role.STUDENT}
 
+# Roles Admin / Super Admin may create via invite or people management.
+# Never includes super_admin or platform_owner (those are provisioned by platform ops).
+ASSIGNABLE_ROLES = {Role.FACULTY, Role.STUDENT, Role.PARENT, Role.ADMIN}
+
 
 class CustomUserManager(BaseUserManager):
     """Manager for email-less, role-based User model."""
