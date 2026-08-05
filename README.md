@@ -8,6 +8,8 @@ Multi-tenant, role-based Education Management Platform API built with **Django 5
 # 1. Clone and enter
 cd eduOS-backend
 
+
+
 # 2. Create virtual environment
 python -m venv .venv && source .venv/bin/activate
 
