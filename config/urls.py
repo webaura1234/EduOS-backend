@@ -5,9 +5,26 @@ All API routes are namespaced under /api/v1/<app>/.
 """
 
 from django.contrib import admin
+from django.http import JsonResponse
 from django.urls import include, path
 
+
+def root_view(request):
+    return JsonResponse({
+        "name": "EduOS Backend API",
+        "status": "running",
+        "version": "v1",
+        "admin": "/admin/",
+        "portals": {
+            "institution": "http://localhost:3000",
+            "platform": "http://localhost:3001",
+        },
+    })
+
+
 urlpatterns = [
+    path("", root_view, name="api-root"),
+    path("health/", root_view, name="health-check"),
     # Admin
     path("admin/", admin.site.urls),
     # ── API v1 ──────────────────────────────────
