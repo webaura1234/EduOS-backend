@@ -23,17 +23,27 @@ _VALID_TARGET_TYPES = {c.value for c in AnnouncementTargetType}
 
 def _announcement(a) -> dict:
     channels = a.channels or []
+    creator_name = ""
+    if a.created_by:
+        creator_name = (
+            f"{a.created_by.first_name} {a.created_by.last_name}".strip()
+            or a.created_by.email
+            or str(a.created_by)
+        )
     return {
         "id": str(a.id),
         "title": a.title,
         "body": a.body,
         "targetType": a.target_type,
+        "targetValue": a.target_value,
         "targetLabel": a.target_label or _TARGET_LABELS.get(a.target_type, ""),
         "scope": a.scope,
-        "branchId": str(a.branch_id),
-        "branchName": a.branch.name if a.branch_id else None,
+        "branchId": str(a.branch_id) if a.branch_id else None,
+        "branchName": a.branch.name if a.branch_id and a.branch else None,
         "channels": channels,
         "sentAt": a.created_at.isoformat(),
+        "createdAt": a.created_at.isoformat(),
+        "createdBy": creator_name or "Admin",
         "recipientCount": a.recipient_count,
         "deliveryStatus": {
             ch: ("sent" if ch in channels else "skipped") for ch in _CHANNELS
@@ -74,6 +84,18 @@ class AdminAnnouncementsView(APIView):
     permission_classes = [IsAuthenticated, IsAdminOrSuperAdmin]
 
     def get(self, request) -> Response:
+        if request.user.role == Role.SUPER_ADMIN and not (
+            request.query_params.get("branch") or request.query_params.get("branchId")
+        ):
+            from apps.communications.models import Announcement
+            rows = Announcement.objects.filter(
+                branch__tenant_id=request.user.tenant_id, is_active=True
+            ).select_related("branch", "created_by").order_by("-created_at")
+            return Response({
+                "announcements": [_announcement(a) for a in rows],
+                "options": {},
+            })
+
         branch = resolve_branch(request)
         rows = ann_q.list_for_branch(branch.pk)
         return Response({
@@ -93,10 +115,14 @@ class AdminAnnouncementsView(APIView):
             raise ValidationError({"targetType": f"Invalid target type '{target_type}'."})
         target_value = str(request.data.get("targetValue", "") or "")
         channels = [c for c in (request.data.get("channels") or []) if c in _CHANNELS]
+        scope = request.data.get("scope") or "branch"
+        if scope not in ("branch", "institution"):
+            scope = "branch"
 
         announcement = ann_q.create_announcement(
             branch=branch, title=title, body=body, target_type=target_type,
             target_value=target_value, target_label=request.data.get("targetLabel", ""),
+            scope=scope,
             channels=channels,
             recipient_count=_recipient_count(branch, target_type, target_value),
             user=request.user,
